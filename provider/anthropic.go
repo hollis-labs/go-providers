@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/otel"
+	"github.com/hollis-labs/go-providers/internal/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -273,7 +273,7 @@ func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string
 
 // streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
 func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	ctx, span := feotel.StartSpan(ctx, "nanite.provider.anthropic.stream")
+	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.stream")
 	span.SetAttributes(
 		attribute.String("nanite.provider", "anthropic"),
 		attribute.String("nanite.model", model),
@@ -532,10 +532,10 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 		var payload struct {
 			Index        int `json:"index"`
 			ContentBlock struct {
-				Type  string `json:"type"`
-				ID    string `json:"id,omitempty"`
-				Name  string `json:"name,omitempty"`
-				Text  string `json:"text,omitempty"`
+				Type string `json:"type"`
+				ID   string `json:"id,omitempty"`
+				Name string `json:"name,omitempty"`
+				Text string `json:"text,omitempty"`
 			} `json:"content_block"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -555,9 +555,9 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 		var payload struct {
 			Index int `json:"index"`
 			Delta struct {
-				Type           string `json:"type"`
-				Text           string `json:"text"`
-				PartialJSON    string `json:"partial_json,omitempty"`
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				PartialJSON string `json:"partial_json,omitempty"`
 			} `json:"delta"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -661,7 +661,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 // Complete makes a non-streaming completion call.
 func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	ctx, span := feotel.StartSpan(ctx, "nanite.provider.anthropic.complete")
+	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("nanite.provider", "anthropic"),
@@ -758,13 +758,13 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 // Capabilities returns the capabilities supported by the Anthropic provider.
 func (a *Anthropic) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
-		SupportsStreamJSON:          true,  // Anthropic supports streaming with tool use
-		SupportsPreToolHooks:        false, // No direct pre-tool hook support
-		SupportsPostToolHooks:       false, // No direct post-tool hook support
-		SupportsSystemPromptCaching: true,  // Anthropic supports prompt caching
-		SupportsToolCalling:         true,  // Anthropic supports function calling
-		SupportsBatch:               false, // No batch API support in current implementation
-		SupportsImageInput:          true,  // Anthropic supports image inputs
+		SupportsStreamJSON:          true,   // Anthropic supports streaming with tool use
+		SupportsPreToolHooks:        false,  // No direct pre-tool hook support
+		SupportsPostToolHooks:       false,  // No direct post-tool hook support
+		SupportsSystemPromptCaching: true,   // Anthropic supports prompt caching
+		SupportsToolCalling:         true,   // Anthropic supports function calling
+		SupportsBatch:               false,  // No batch API support in current implementation
+		SupportsImageInput:          true,   // Anthropic supports image inputs
 		MaxTokens:                   16384,  // Claude max output tokens (default)
 		ContextWindowSize:           200000, // Claude models support 200k context window
 	}
