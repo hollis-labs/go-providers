@@ -77,8 +77,8 @@ if e, ok := p.(provider.Embedder); ok {
 
 ### Registry (`provider/registry.go`)
 
-- `Registry` — map from name to `Provider`.
-- `NewRegistry`, `Register`, `Get`, `Has`, `Names`.
+- `Registry` — map from name to `Provider`. Safe for concurrent use.
+- `NewRegistry`, `Register`, `Unregister`, `Get`, `Has`, `Names`.
 
 ### HTTP LLM providers
 
