@@ -5,6 +5,100 @@ import (
 	"testing"
 )
 
+func TestBuildSystemFromRequest_SlotsWithCacheControl(t *testing.T) {
+	a := NewAnthropic()
+	in := ChatRequest{
+		SlotBlocks: []SlotBlock{
+			{Name: "system", Content: "stable system rules", Changed: false},
+			{Name: "memory", Content: "fresh memory recall", Changed: true},
+			{Name: "agent", Content: "stable agent profile", Changed: false},
+			{Name: "conversation", Content: "", Changed: true}, // empty: skipped
+		},
+	}
+	blocks := a.buildSystemFromRequest(in)
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 non-empty blocks, got %d", len(blocks))
+	}
+	// Block 0: unchanged → cache_control present.
+	if _, ok := blocks[0]["cache_control"]; !ok {
+		t.Errorf("block 0 (unchanged) missing cache_control")
+	}
+	// Block 1: changed → cache_control absent.
+	if _, ok := blocks[1]["cache_control"]; ok {
+		t.Errorf("block 1 (changed) should not have cache_control")
+	}
+	// Block 2: unchanged → cache_control present.
+	if _, ok := blocks[2]["cache_control"]; !ok {
+		t.Errorf("block 2 (unchanged) missing cache_control")
+	}
+}
+
+func TestBuildSystemFromRequest_FallsBackToSystemPromptWhenNoSlots(t *testing.T) {
+	a := NewAnthropic()
+	a.SetCacheHints([]CacheHint{{Position: "system"}})
+	in := ChatRequest{SystemPrompt: "legacy flat prompt"}
+	blocks := a.buildSystemFromRequest(in)
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	if blocks[0]["text"] != "legacy flat prompt" {
+		t.Errorf("unexpected text: %v", blocks[0]["text"])
+	}
+	if _, ok := blocks[0]["cache_control"]; !ok {
+		t.Errorf("expected cache_control from CacheHint")
+	}
+}
+
+func TestChatRequest_EffectiveSystemPrompt(t *testing.T) {
+	t.Run("no slots returns SystemPrompt verbatim", func(t *testing.T) {
+		got := ChatRequest{SystemPrompt: "hello"}.EffectiveSystemPrompt()
+		if got != "hello" {
+			t.Errorf("got %q", got)
+		}
+	})
+	t.Run("slots concatenate after SystemPrompt", func(t *testing.T) {
+		in := ChatRequest{
+			SystemPrompt: "base",
+			SlotBlocks: []SlotBlock{
+				{Name: "memory", Content: "mem"},
+				{Name: "agent", Content: ""}, // skipped
+				{Name: "rules", Content: "rules"},
+			},
+		}
+		got := in.EffectiveSystemPrompt()
+		want := "base\n\nmem\n\nrules"
+		if got != want {
+			t.Errorf("got %q want %q", got, want)
+		}
+	})
+	t.Run("slots only with no SystemPrompt", func(t *testing.T) {
+		in := ChatRequest{
+			SlotBlocks: []SlotBlock{
+				{Name: "system", Content: "rules"},
+				{Name: "memory", Content: ""},    // skipped
+				{Name: "agent", Content: "agent"},
+			},
+		}
+		got := in.EffectiveSystemPrompt()
+		want := "rules\n\nagent"
+		if got != want {
+			t.Errorf("got %q want %q", got, want)
+		}
+	})
+	t.Run("all slot contents empty returns empty string", func(t *testing.T) {
+		in := ChatRequest{
+			SlotBlocks: []SlotBlock{
+				{Name: "a", Content: ""},
+				{Name: "b", Content: ""},
+			},
+		}
+		got := in.EffectiveSystemPrompt()
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+}
+
 func TestBuildSystemBlocks(t *testing.T) {
 	t.Run("empty prompt returns nil", func(t *testing.T) {
 		blocks := buildSystemBlocks("")

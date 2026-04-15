@@ -45,14 +45,17 @@ type openaiMessage struct {
 }
 
 // StreamChat implements Provider.StreamChat using OpenAI's streaming SSE API.
-func (o *OpenAI) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (o *OpenAI) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if o.apiKey == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "gpt-4o"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	// Build messages array with system prompt first.
 	msgs := make([]openaiMessage, 0, len(messages)+1)
@@ -175,20 +178,18 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat, ignoring tools (not yet supported for OpenAI).
-func (o *OpenAI) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return o.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to OpenAI.
-func (o *OpenAI) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (o *OpenAI) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if o.apiKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "gpt-4o"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {

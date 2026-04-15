@@ -37,14 +37,17 @@ func NewOpenZen() *OpenZen {
 }
 
 // StreamChat implements Provider.StreamChat using OpenZen's OpenAI-compatible streaming API.
-func (oz *OpenZen) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (oz *OpenZen) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if oz.apiKey == "" {
 		return nil, fmt.Errorf("OPENZEN_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
@@ -160,20 +163,18 @@ func (oz *OpenZen) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for OpenZen).
-func (oz *OpenZen) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return oz.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to OpenZen.
-func (oz *OpenZen) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (oz *OpenZen) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if oz.apiKey == "" {
 		return "", fmt.Errorf("OPENZEN_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {

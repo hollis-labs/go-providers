@@ -99,8 +99,40 @@ func (a *Anthropic) buildSystemBlocks(systemPrompt string) []map[string]any {
 	return []map[string]any{block}
 }
 
-// buildSystemBlocksStatic is the legacy static version used by tests and non-method callers.
-// It always applies cache_control for backwards compatibility.
+// buildSystemFromRequest renders the system portion of a request. When the
+// request carries SlotBlocks, each block becomes its own content block and
+// unchanged blocks (Changed == false) get a cache_control: ephemeral marker.
+// When there are no slots, falls back to the legacy flat-system path.
+func (a *Anthropic) buildSystemFromRequest(in ChatRequest) []map[string]any {
+	if len(in.SlotBlocks) == 0 {
+		return a.buildSystemBlocks(in.SystemPrompt)
+	}
+	out := make([]map[string]any, 0, len(in.SlotBlocks)+1)
+	if in.SystemPrompt != "" {
+		block := map[string]any{"type": "text", "text": in.SystemPrompt}
+		if a.hasCacheHint("system") {
+			block["cache_control"] = map[string]string{"type": "ephemeral"}
+		}
+		out = append(out, block)
+	}
+	for _, s := range in.SlotBlocks {
+		if s.Content == "" {
+			continue
+		}
+		block := map[string]any{"type": "text", "text": s.Content}
+		if !s.Changed {
+			block["cache_control"] = map[string]string{"type": "ephemeral"}
+		}
+		out = append(out, block)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// buildSystemBlocks is the package-level (static) version used by tests and
+// non-method callers. It always applies cache_control for backwards compatibility.
 func buildSystemBlocks(systemPrompt string) []map[string]any {
 	if systemPrompt == "" {
 		return nil
@@ -138,7 +170,7 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	return result
 }
 
-// buildToolsWithCacheControlStatic is the legacy static version for tests.
+// buildToolsWithCacheControl is the package-level (static) version for tests.
 // It always marks the last tool with cache_control.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
@@ -262,23 +294,14 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 }
 
 // StreamChat implements Provider.StreamChat using Anthropic's streaming SSE API.
-func (a *Anthropic) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	return a.streamChatInternal(ctx, systemPrompt, messages, model, nil)
-}
-
-// StreamChatWithTools implements Provider.StreamChatWithTools using Anthropic's streaming SSE API with tool definitions.
-func (a *Anthropic) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return a.streamChatInternal(ctx, systemPrompt, messages, model, tools)
-}
-
-// streamChatInternal is the shared implementation for StreamChat and StreamChatWithTools.
-func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.stream")
 	span.SetAttributes(
 		attribute.String("nanite.provider", "anthropic"),
-		attribute.String("nanite.model", model),
-		attribute.Int("nanite.messages.count", len(messages)),
-		attribute.Int("nanite.tools.count", len(tools)),
+		attribute.String("nanite.model", in.Model),
+		attribute.Int("nanite.messages.count", len(in.Messages)),
+		attribute.Int("nanite.tools.count", len(in.Tools)),
+		attribute.Int("nanite.slots.count", len(in.SlotBlocks)),
 	)
 
 	if a.apiKey == "" {
@@ -287,6 +310,7 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
 	}
@@ -294,14 +318,16 @@ func (a *Anthropic) streamChatInternal(ctx context.Context, systemPrompt string,
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 16384,
-		System:    a.buildSystemBlocks(systemPrompt),
-		Messages:  a.marshalMessages(messages),
+		System:    a.buildSystemFromRequest(in),
+		Messages:  a.marshalMessages(in.Messages),
 		Stream:    true,
 	}
-	if len(tools) > 0 {
-		body.Tools = a.buildToolsWithCacheControl(tools)
+	if len(in.Tools) > 0 {
+		body.Tools = a.buildToolsWithCacheControl(in.Tools)
 	}
 
+	// anthropicRequest is fully built; remainder of function constructs the
+	// HTTP call and spawns the SSE reader.
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -660,13 +686,14 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 }
 
 // Complete makes a non-streaming completion call.
-func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("nanite.provider", "anthropic"),
-		attribute.String("nanite.model", model),
-		attribute.Int("nanite.messages.count", len(messages)),
+		attribute.String("nanite.model", in.Model),
+		attribute.Int("nanite.messages.count", len(in.Messages)),
+		attribute.Int("nanite.slots.count", len(in.SlotBlocks)),
 	)
 
 	if a.apiKey == "" {
@@ -674,6 +701,7 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "claude-sonnet-4-20250514"
 	}
@@ -681,8 +709,8 @@ func (a *Anthropic) Complete(ctx context.Context, systemPrompt string, messages 
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 128,
-		System:    a.buildSystemBlocks(systemPrompt),
-		Messages:  a.marshalMessages(messages),
+		System:    a.buildSystemFromRequest(in),
+		Messages:  a.marshalMessages(in.Messages),
 		Stream:    false,
 	}
 

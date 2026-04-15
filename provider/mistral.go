@@ -32,14 +32,17 @@ func NewMistral() *Mistral {
 }
 
 // StreamChat implements Provider.StreamChat using Mistral's OpenAI-compatible streaming API.
-func (m *Mistral) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (m *Mistral) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if m.apiKey == "" {
 		return nil, fmt.Errorf("MISTRAL_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "mistral-large-latest"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
@@ -155,20 +158,18 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for Mistral).
-func (m *Mistral) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return m.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to Mistral.
-func (m *Mistral) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (m *Mistral) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if m.apiKey == "" {
 		return "", fmt.Errorf("MISTRAL_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "mistral-large-latest"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {

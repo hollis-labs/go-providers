@@ -72,7 +72,7 @@ func TestGeminiBuildRequest(t *testing.T) {
 func TestGeminiStreamChat(t *testing.T) {
 	t.Run("missing API key returns error", func(t *testing.T) {
 		g := &Gemini{apiKey: "", client: &http.Client{}}
-		_, err := g.StreamChat(context.Background(), "", nil, "")
+		_, err := g.StreamChat(context.Background(), ChatRequest{})
 		if err == nil {
 			t.Fatal("expected error for missing API key")
 		}
@@ -82,7 +82,7 @@ func TestGeminiStreamChat(t *testing.T) {
 func TestGeminiComplete(t *testing.T) {
 	t.Run("missing API key returns error", func(t *testing.T) {
 		g := &Gemini{apiKey: "", client: &http.Client{}}
-		_, err := g.Complete(context.Background(), "", nil, "")
+		_, err := g.Complete(context.Background(), ChatRequest{})
 		if err == nil {
 			t.Fatal("expected error for missing API key")
 		}

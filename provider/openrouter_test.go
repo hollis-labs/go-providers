@@ -54,11 +54,11 @@ func TestOpenRouter_Complete(t *testing.T) {
 
 func TestOpenRouter_NoAPIKey(t *testing.T) {
 	o := &OpenRouter{apiKey: "", client: http.DefaultClient}
-	_, err := o.StreamChat(context.Background(), "", nil, "")
+	_, err := o.StreamChat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Error("expected error for missing API key")
 	}
-	_, err = o.Complete(context.Background(), "", nil, "")
+	_, err = o.Complete(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Error("expected error for missing API key")
 	}

@@ -51,7 +51,7 @@ func (az *AzureOpenAI) url() string {
 }
 
 // StreamChat implements Provider.StreamChat using Azure OpenAI's streaming API.
-func (az *AzureOpenAI) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (az *AzureOpenAI) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if az.apiKey == "" {
 		return nil, fmt.Errorf("AZURE_OPENAI_API_KEY not set")
 	}
@@ -59,7 +59,9 @@ func (az *AzureOpenAI) StreamChat(ctx context.Context, systemPrompt string, mess
 		return nil, fmt.Errorf("AZURE_OPENAI_ENDPOINT not set")
 	}
 
-	// model param is ignored for Azure — the deployment determines the model.
+	// in.Model is ignored for Azure — the deployment determines the model.
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
 		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})
@@ -173,13 +175,8 @@ func (az *AzureOpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for Azure OpenAI).
-func (az *AzureOpenAI) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return az.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to Azure OpenAI.
-func (az *AzureOpenAI) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (az *AzureOpenAI) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if az.apiKey == "" {
 		return "", fmt.Errorf("AZURE_OPENAI_API_KEY not set")
 	}
@@ -187,6 +184,8 @@ func (az *AzureOpenAI) Complete(ctx context.Context, systemPrompt string, messag
 		return "", fmt.Errorf("AZURE_OPENAI_ENDPOINT not set")
 	}
 
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
 		msgs = append(msgs, openaiMessage{Role: "system", Content: systemPrompt})

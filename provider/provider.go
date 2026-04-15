@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"strings"
 )
 
 // ProviderCapabilities describes the capabilities supported by a provider.
@@ -91,12 +92,68 @@ type ChatMessage struct {
 	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
 }
 
+// SlotBlock is a pre-assembled region of the context window. Providers that
+// support prompt caching (e.g., Anthropic) translate each block into a
+// cache-aware content block; providers that don't concatenate them into the
+// system prompt.
+//
+// Changed == false means the block's content matches the previous turn's
+// cache key; adapters may use this to emit cache markers.
+type SlotBlock struct {
+	// Name is the slot identifier (e.g., "system", "memory", "conversation").
+	Name string
+	// Content is the rendered text for this slot.
+	Content string
+	// CacheKey is a content hash used by callers to detect changes across turns.
+	CacheKey string
+	// Changed is true when CacheKey differs from the previous turn.
+	Changed bool
+}
+
+// ChatRequest is the unified input to provider chat methods. Tools are
+// optional; providers that don't support tools ignore the field. SlotBlocks
+// are optional; when non-empty they extend SystemPrompt (appended after it)
+// and give adapters the chance to emit slot-aware payloads (e.g., Anthropic
+// cache_control). To avoid duplication, callers should put system content
+// exclusively in SlotBlocks and leave SystemPrompt empty.
+type ChatRequest struct {
+	Model        string
+	SystemPrompt string
+	SlotBlocks   []SlotBlock
+	Messages     []ChatMessage
+	Tools        []ToolDefinition
+}
+
+// EffectiveSystemPrompt returns SystemPrompt when no slots are set, otherwise
+// returns SystemPrompt (if non-empty) followed by each non-empty slot's content
+// joined with "\n\n". Adapters that don't exploit slot boundaries should call
+// this to preserve the full semantic content.
+func (r ChatRequest) EffectiveSystemPrompt() string {
+	if len(r.SlotBlocks) == 0 {
+		return r.SystemPrompt
+	}
+	var b strings.Builder
+	if r.SystemPrompt != "" {
+		b.WriteString(r.SystemPrompt)
+	}
+	for _, s := range r.SlotBlocks {
+		if s.Content == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(s.Content)
+	}
+	return b.String()
+}
+
 // Provider is the interface for LLM provider adapters.
 type Provider interface {
-	StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error)
-	StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error)
-	// Complete makes a simple non-streaming completion call.
-	Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error)
+	// StreamChat streams a response for the given request. Tools are optional.
+	StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error)
+	// Complete makes a non-streaming completion call.
+	Complete(ctx context.Context, req ChatRequest) (string, error)
 	// Capabilities returns the capabilities supported by this provider.
 	Capabilities() ProviderCapabilities
 }

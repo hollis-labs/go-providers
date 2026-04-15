@@ -48,10 +48,13 @@ type ollamaMessage struct {
 
 // StreamChat implements Provider.StreamChat using Ollama's streaming API.
 // Ollama streams newline-delimited JSON with message.content fields.
-func (o *Ollama) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (o *Ollama) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+	model := in.Model
 	if model == "" {
 		model = "llama3.1"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	// Build messages array with system prompt first.
 	msgs := make([]ollamaMessage, 0, len(messages)+1)
@@ -94,11 +97,6 @@ func (o *Ollama) StreamChat(ctx context.Context, systemPrompt string, messages [
 	ch := make(chan StreamEvent, 64)
 	go o.readStream(ctx, resp.Body, ch)
 	return ch, nil
-}
-
-// StreamChatWithTools delegates to StreamChat, ignoring tools (not yet supported for Ollama).
-func (o *Ollama) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return o.StreamChat(ctx, systemPrompt, messages, model)
 }
 
 // readStream parses the newline-delimited JSON stream from Ollama.
@@ -158,10 +156,13 @@ func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- S
 }
 
 // Complete makes a non-streaming completion call to Ollama.
-func (o *Ollama) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (o *Ollama) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	model := in.Model
 	if model == "" {
 		model = "llama3.1"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]ollamaMessage, 0, len(messages)+1)
 	if systemPrompt != "" {

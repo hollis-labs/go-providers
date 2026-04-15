@@ -39,19 +39,14 @@ func NewPTYBridgeWithAdapter(adapter CLIAdapter, cliPath string) *PTYBridge {
 	return &PTYBridge{adapter: adapter, cliPath: cliPath}
 }
 
-func (p *PTYBridge) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	return p.streamCLI(ctx, systemPrompt, messages)
+func (p *PTYBridge) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+	return p.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 }
 
-func (p *PTYBridge) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	// Claude CLI manages its own tools — ignore the tools parameter.
-	return p.streamCLI(ctx, systemPrompt, messages)
-}
-
-func (p *PTYBridge) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (p *PTYBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	// Complete is always single-turn — strip any resume session ID.
 	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
-	ch, err := p.streamCLI(ctx, systemPrompt, messages)
+	ch, err := p.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 	if err != nil {
 		return "", err
 	}

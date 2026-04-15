@@ -28,7 +28,7 @@ func TestSubprocessBridge_Capabilities(t *testing.T) {
 
 func TestSubprocessBridge_StreamChat_NoUserMessage(t *testing.T) {
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), "/usr/bin/echo")
-	_, err := bridge.StreamChat(context.Background(), "", nil, "")
+	_, err := bridge.StreamChat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error for empty messages")
 	}
@@ -36,9 +36,9 @@ func TestSubprocessBridge_StreamChat_NoUserMessage(t *testing.T) {
 
 func TestSubprocessBridge_StreamChat_SystemOnly(t *testing.T) {
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), "/usr/bin/echo")
-	_, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+	_, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
 		{Role: "system", Content: "test"},
-	}, "")
+	}})
 	if err == nil {
 		t.Fatal("expected error for no user message")
 	}
@@ -56,9 +56,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Hello from
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	result, err := bridge.Complete(context.Background(), "", []ChatMessage{
+	result, err := bridge.Complete(context.Background(), ChatRequest{Messages: []ChatMessage{
 		{Role: "user", Content: "test prompt"},
-	}, "")
+	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,9 +80,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
 		{Role: "user", Content: "test"},
-	}, "")
+	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,9 +133,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	ctx := WithSandboxDir(context.Background(), sandboxDir)
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	result, err := bridge.Complete(ctx, "", []ChatMessage{
+	result, err := bridge.Complete(ctx, ChatRequest{Messages: []ChatMessage{
 		{Role: "user", Content: "test"},
-	}, "")
+	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,9 +157,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 
 	ctx, cancel := context.WithCancel(context.Background())
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(ctx, "", []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
 		{Role: "user", Content: "test"},
-	}, "")
+	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
