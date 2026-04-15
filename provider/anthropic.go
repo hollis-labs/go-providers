@@ -131,8 +131,8 @@ func (a *Anthropic) buildSystemFromRequest(in ChatRequest) []map[string]any {
 	return out
 }
 
-// buildSystemBlocksStatic is the legacy static version used by tests and non-method callers.
-// It always applies cache_control for backwards compatibility.
+// buildSystemBlocks is the package-level (static) version used by tests and
+// non-method callers. It always applies cache_control for backwards compatibility.
 func buildSystemBlocks(systemPrompt string) []map[string]any {
 	if systemPrompt == "" {
 		return nil
@@ -170,7 +170,7 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	return result
 }
 
-// buildToolsWithCacheControlStatic is the legacy static version for tests.
+// buildToolsWithCacheControl is the package-level (static) version for tests.
 // It always marks the last tool with cache_control.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {

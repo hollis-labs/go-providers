@@ -112,8 +112,10 @@ type SlotBlock struct {
 
 // ChatRequest is the unified input to provider chat methods. Tools are
 // optional; providers that don't support tools ignore the field. SlotBlocks
-// are optional; when non-empty they supersede SystemPrompt and give adapters
-// the chance to emit slot-aware payloads (e.g., Anthropic cache_control).
+// are optional; when non-empty they extend SystemPrompt (appended after it)
+// and give adapters the chance to emit slot-aware payloads (e.g., Anthropic
+// cache_control). To avoid duplication, callers should put system content
+// exclusively in SlotBlocks and leave SystemPrompt empty.
 type ChatRequest struct {
 	Model        string
 	SystemPrompt string
@@ -123,8 +125,9 @@ type ChatRequest struct {
 }
 
 // EffectiveSystemPrompt returns SystemPrompt when no slots are set, otherwise
-// concatenates slot content in order. Adapters that don't exploit slot
-// boundaries should call this to preserve semantic content.
+// returns SystemPrompt (if non-empty) followed by each non-empty slot's content
+// joined with "\n\n". Adapters that don't exploit slot boundaries should call
+// this to preserve the full semantic content.
 func (r ChatRequest) EffectiveSystemPrompt() string {
 	if len(r.SlotBlocks) == 0 {
 		return r.SystemPrompt

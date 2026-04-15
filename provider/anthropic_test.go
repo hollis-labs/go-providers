@@ -71,6 +71,32 @@ func TestChatRequest_EffectiveSystemPrompt(t *testing.T) {
 			t.Errorf("got %q want %q", got, want)
 		}
 	})
+	t.Run("slots only with no SystemPrompt", func(t *testing.T) {
+		in := ChatRequest{
+			SlotBlocks: []SlotBlock{
+				{Name: "system", Content: "rules"},
+				{Name: "memory", Content: ""},    // skipped
+				{Name: "agent", Content: "agent"},
+			},
+		}
+		got := in.EffectiveSystemPrompt()
+		want := "rules\n\nagent"
+		if got != want {
+			t.Errorf("got %q want %q", got, want)
+		}
+	})
+	t.Run("all slot contents empty returns empty string", func(t *testing.T) {
+		in := ChatRequest{
+			SlotBlocks: []SlotBlock{
+				{Name: "a", Content: ""},
+				{Name: "b", Content: ""},
+			},
+		}
+		got := in.EffectiveSystemPrompt()
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
 }
 
 func TestBuildSystemBlocks(t *testing.T) {
