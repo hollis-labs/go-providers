@@ -8,11 +8,11 @@ import (
 
 func TestOpenZen_NoAPIKey(t *testing.T) {
 	oz := &OpenZen{apiKey: "", baseURL: openzenAPI, client: http.DefaultClient}
-	_, err := oz.StreamChat(context.Background(), "", nil, "")
+	_, err := oz.StreamChat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Error("expected error for missing API key")
 	}
-	_, err = oz.Complete(context.Background(), "", nil, "")
+	_, err = oz.Complete(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Error("expected error for missing API key")
 	}

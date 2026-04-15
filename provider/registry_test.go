@@ -9,13 +9,10 @@ import (
 // stubProvider is a minimal Provider used for registry tests.
 type stubProvider struct{}
 
-func (stubProvider) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (stubProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	return nil, nil
 }
-func (stubProvider) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return nil, nil
-}
-func (stubProvider) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (stubProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return "", nil
 }
 func (stubProvider) Capabilities() ProviderCapabilities { return ProviderCapabilities{} }

@@ -30,14 +30,17 @@ func NewOpenRouter() *OpenRouter {
 }
 
 // StreamChat implements Provider.StreamChat using OpenRouter's OpenAI-compatible streaming API.
-func (o *OpenRouter) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (o *OpenRouter) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if o.apiKey == "" {
 		return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "anthropic/claude-sonnet-4"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {
@@ -153,20 +156,18 @@ func (o *OpenRouter) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- 
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for OpenRouter).
-func (o *OpenRouter) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return o.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to OpenRouter.
-func (o *OpenRouter) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (o *OpenRouter) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if o.apiKey == "" {
 		return "", fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "anthropic/claude-sonnet-4"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	msgs := make([]openaiMessage, 0, len(messages)+1)
 	if systemPrompt != "" {

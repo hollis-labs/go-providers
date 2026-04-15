@@ -93,44 +93,20 @@ func NewEventReactionPipeline(provider Provider, config EventReactionConfig) *Ev
 }
 
 // StreamChat implements Provider.StreamChat with event monitoring.
-func (p *EventReactionPipeline) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	// Check if provider supports streaming
+func (p *EventReactionPipeline) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if !p.provider.Capabilities().SupportsStreamJSON {
-		// Graceful fallback for non-streaming providers
-		return p.fallbackToNonStreaming(ctx, systemPrompt, messages, model, nil)
+		return p.fallbackToNonStreaming(ctx, in)
 	}
-
-	// Get the original stream
-	originalStream, err := p.provider.StreamChat(ctx, systemPrompt, messages, model)
+	originalStream, err := p.provider.StreamChat(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-
-	// Create monitored stream
-	return p.monitorStream(ctx, originalStream), nil
-}
-
-// StreamChatWithTools implements Provider.StreamChatWithTools with event monitoring.
-func (p *EventReactionPipeline) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	// Check if provider supports streaming
-	if !p.provider.Capabilities().SupportsStreamJSON {
-		// Graceful fallback for non-streaming providers
-		return p.fallbackToNonStreaming(ctx, systemPrompt, messages, model, tools)
-	}
-
-	// Get the original stream
-	originalStream, err := p.provider.StreamChatWithTools(ctx, systemPrompt, messages, model, tools)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create monitored stream
 	return p.monitorStream(ctx, originalStream), nil
 }
 
 // Complete implements Provider.Complete (no streaming monitoring needed).
-func (p *EventReactionPipeline) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
-	return p.provider.Complete(ctx, systemPrompt, messages, model)
+func (p *EventReactionPipeline) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	return p.provider.Complete(ctx, in)
 }
 
 // Capabilities implements Provider.Capabilities.
@@ -231,7 +207,7 @@ func (p *EventReactionPipeline) terminate(reason string) {
 }
 
 // fallbackToNonStreaming handles providers that don't support streaming.
-func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	log.Printf("Provider does not support streaming - using fallback mode")
 
 	stream := make(chan StreamEvent, 1)
@@ -239,15 +215,7 @@ func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, syst
 	go func() {
 		defer close(stream)
 
-		var result string
-		var err error
-
-		if tools != nil {
-			// For tools, we need to fall back to the non-tool version since Complete doesn't support tools
-			result, err = p.provider.Complete(ctx, systemPrompt, messages, model)
-		} else {
-			result, err = p.provider.Complete(ctx, systemPrompt, messages, model)
-		}
+		result, err := p.provider.Complete(ctx, in)
 
 		if err != nil {
 			stream <- StreamEvent{

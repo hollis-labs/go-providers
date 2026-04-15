@@ -11,15 +11,11 @@ import (
 
 type exampleProvider struct{}
 
-func (exampleProvider) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (exampleProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (exampleProvider) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (exampleProvider) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (exampleProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return "", nil
 }
 
@@ -71,7 +67,10 @@ func ExampleAnthropic_StreamChat() {
 		},
 	}
 
-	stream, err := a.StreamChat(context.Background(), "", []ChatMessage{{Role: "user", Content: "hi"}}, "demo-model")
+	stream, err := a.StreamChat(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+		Model:    "demo-model",
+	})
 	if err != nil {
 		panic(err)
 	}

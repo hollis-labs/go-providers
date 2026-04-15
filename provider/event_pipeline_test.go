@@ -31,7 +31,7 @@ func TestEventReactionPipelineBasic(t *testing.T) {
 	ctx := context.Background()
 	messages := []ChatMessage{{Role: "user", Content: "Hello"}}
 
-	stream, err := pipeline.StreamChat(ctx, "system", messages, "test-model")
+	stream, err := pipeline.StreamChat(ctx, ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
 	if err != nil {
 		t.Fatalf("StreamChat failed: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestEventReactionPipelineNonStreaming(t *testing.T) {
 	ctx := context.Background()
 	messages := []ChatMessage{{Role: "user", Content: "Hello"}}
 
-	stream, err := pipeline.StreamChat(ctx, "system", messages, "test-model")
+	stream, err := pipeline.StreamChat(ctx, ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
 	if err != nil {
 		t.Fatalf("StreamChat failed: %v", err)
 	}
@@ -274,27 +274,19 @@ type mockStreamingProvider struct {
 	events       []StreamEvent
 }
 
-func (m *mockStreamingProvider) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	return m.StreamChatWithTools(ctx, systemPrompt, messages, model, nil)
-}
-
-func (m *mockStreamingProvider) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+func (m *mockStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 10)
-
 	go func() {
 		defer close(ch)
-
-		// Send some test events
 		ch <- StreamEvent{Type: "delta", Content: "Hello"}
 		ch <- StreamEvent{Type: "delta", Content: " world"}
 		ch <- StreamEvent{Type: "usage", Usage: &Usage{InputTokens: 10, OutputTokens: 5}}
 		ch <- StreamEvent{Type: "done"}
 	}()
-
 	return ch, nil
 }
 
-func (m *mockStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (m *mockStreamingProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return "Hello world", nil
 }
 
@@ -307,16 +299,12 @@ type mockNonStreamingProvider struct {
 	response     string
 }
 
-func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	return m.StreamChatWithTools(ctx, systemPrompt, messages, model, nil)
-}
-
-func (m *mockNonStreamingProvider) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
+func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	// Should not be called for non-streaming providers
 	return nil, nil
 }
 
-func (m *mockNonStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (m *mockNonStreamingProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return m.response, nil
 }
 

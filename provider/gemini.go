@@ -51,14 +51,17 @@ type geminiGenerationConfig struct {
 }
 
 // StreamChat implements Provider.StreamChat using Gemini's streaming SSE API.
-func (g *Gemini) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
+func (g *Gemini) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	if g.apiKey == "" {
 		return nil, fmt.Errorf("GOOGLE_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "gemini-2.5-flash"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	body := g.buildRequest(systemPrompt, messages)
 
@@ -214,20 +217,18 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 }
 
-// StreamChatWithTools delegates to StreamChat (tool calling not yet implemented for Gemini HTTP).
-func (g *Gemini) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return g.StreamChat(ctx, systemPrompt, messages, model)
-}
-
 // Complete makes a non-streaming completion call to Gemini.
-func (g *Gemini) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (g *Gemini) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	if g.apiKey == "" {
 		return "", fmt.Errorf("GOOGLE_API_KEY not set")
 	}
 
+	model := in.Model
 	if model == "" {
 		model = "gemini-2.5-flash"
 	}
+	systemPrompt := in.EffectiveSystemPrompt()
+	messages := in.Messages
 
 	body := g.buildRequest(systemPrompt, messages)
 

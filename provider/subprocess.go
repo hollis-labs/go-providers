@@ -27,17 +27,13 @@ func NewSubprocessBridge(adapter CLIAdapter, cliPath string) *SubprocessBridge {
 	return &SubprocessBridge{adapter: adapter, cliPath: cliPath}
 }
 
-func (s *SubprocessBridge) StreamChat(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (<-chan StreamEvent, error) {
-	return s.streamCLI(ctx, systemPrompt, messages)
+func (s *SubprocessBridge) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+	return s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 }
 
-func (s *SubprocessBridge) StreamChatWithTools(ctx context.Context, systemPrompt string, messages []ChatMessage, model string, tools []ToolDefinition) (<-chan StreamEvent, error) {
-	return s.streamCLI(ctx, systemPrompt, messages)
-}
-
-func (s *SubprocessBridge) Complete(ctx context.Context, systemPrompt string, messages []ChatMessage, model string) (string, error) {
+func (s *SubprocessBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
-	ch, err := s.streamCLI(ctx, systemPrompt, messages)
+	ch, err := s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 	if err != nil {
 		return "", err
 	}

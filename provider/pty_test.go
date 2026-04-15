@@ -47,7 +47,7 @@ func TestPTYBridge_Capabilities(t *testing.T) {
 
 func TestPTYBridge_StreamChat_NoUserMessage(t *testing.T) {
 	bridge := &PTYBridge{adapter: NewClaudeAdapter(), cliPath: "/usr/bin/echo"}
-	_, err := bridge.StreamChat(context.Background(), "", nil, "")
+	_, err := bridge.StreamChat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error for empty messages")
 	}
@@ -68,9 +68,9 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 	// For a proper integration test, we'd need the real CLI.
 
 	// Test that the provider correctly returns an error for missing user message.
-	_, err := bridge.StreamChat(context.Background(), "", []ChatMessage{
+	_, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
 		{Role: "system", Content: "test"},
-	}, "")
+	}})
 	if err == nil {
 		t.Fatal("expected error for no user message")
 	}
