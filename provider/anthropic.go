@@ -345,20 +345,24 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	// Rate-limit pacing: estimate request tokens and wait if necessary.
 	if a.RateTracker != nil {
 		estimatedTokens := len(payload) / 4
+		avail, limit := a.RateTracker.Remaining()
+		// If the request alone is larger than the per-minute window, no
+		// amount of waiting can fit it — signal the caller to compact
+		// history instead of repeating 58s waits until the outer context
+		// deadline fires.
+		if limit > 0 && estimatedTokens > limit {
+			log.Printf("provider: request ~%d tokens exceeds per-minute rate budget %d — signalling caller to compact",
+				estimatedTokens, limit)
+			span.SetStatus(codes.Error, "request exceeds rate budget")
+			span.End()
+			return nil, fmt.Errorf("%w: estimated %d tokens vs %d limit",
+				ErrRequestExceedsRateBudget, estimatedTokens, limit)
+		}
 		if wait := a.RateTracker.WaitTime(estimatedTokens); wait > 0 {
-			avail, limit := a.RateTracker.Remaining()
-			if estimatedTokens > limit {
-				log.Printf("provider: request ~%d tokens exceeds per-minute rate limit %d, proceeding anyway", estimatedTokens, limit)
-			}
-			if a.OnStatus != nil {
-				a.OnStatus(fmt.Sprintf("Waiting %ds for rate limit budget...", int(wait.Seconds()+0.5)))
-			}
 			log.Printf("provider: pacing — waiting %s for rate limit budget (est. %d tokens, available %d/%d)",
 				wait.Round(time.Millisecond), estimatedTokens, avail, limit)
-			select {
-			case <-ctx.Done():
-				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", ctx.Err())
-			case <-time.After(wait):
+			if err := PacingWait(ctx, wait, a.OnStatus); err != nil {
+				return nil, fmt.Errorf("context cancelled during rate limit wait: %w", err)
 			}
 		}
 	}

@@ -1,7 +1,10 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -196,5 +199,68 @@ func TestTokenRateTracker_ConcurrentAccess(t *testing.T) {
 	avail := tr.Available()
 	if avail < 0 || avail > 100000 {
 		t.Errorf("available out of range after concurrent access: %d", avail)
+	}
+}
+
+func TestPacingWait_EmitsImmediateAndHeartbeat(t *testing.T) {
+	// Heartbeat cadence is 10s by default; override for the test to force a
+	// second emission within a short window.
+	orig := pacingHeartbeat
+	pacingHeartbeat = 50 * time.Millisecond
+	defer func() { pacingHeartbeat = orig }()
+
+	var calls atomic.Int32
+	err := PacingWait(context.Background(), 180*time.Millisecond, func(string) {
+		calls.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := calls.Load(); got < 2 {
+		t.Errorf("expected at least 2 status emissions (immediate + heartbeat), got %d", got)
+	}
+}
+
+func TestPacingWait_ReturnsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := PacingWait(ctx, 5*time.Second, func(string) {})
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("expected return within 200ms of cancel, took %s", elapsed)
+	}
+}
+
+func TestPacingWait_ZeroDurationNoops(t *testing.T) {
+	var calls atomic.Int32
+	err := PacingWait(context.Background(), 0, func(string) {
+		calls.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Errorf("expected 0 status emissions for zero duration, got %d", got)
+	}
+}
+
+func TestPacingWait_NilCallbackIsSafe(t *testing.T) {
+	orig := pacingHeartbeat
+	pacingHeartbeat = 20 * time.Millisecond
+	defer func() { pacingHeartbeat = orig }()
+
+	// nil callback must not panic, even when the heartbeat fires.
+	err := PacingWait(context.Background(), 60*time.Millisecond, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
