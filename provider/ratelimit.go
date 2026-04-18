@@ -1,11 +1,75 @@
 package provider
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
 
 const defaultWindowDuration = 60 * time.Second
+
+// pacingHeartbeat is the cadence for PacingWait status-callback emissions
+// while blocked waiting for rate-limit budget. Declared as a var so tests
+// can shorten it.
+var pacingHeartbeat = 10 * time.Second
+
+// ErrRequestExceedsRateBudget signals that the caller's estimated request
+// size is larger than the current per-minute rate-limit window. Waiting
+// cannot fix this — the caller must reduce the request (e.g. compact
+// history) before retrying. Callers should check with errors.Is.
+var ErrRequestExceedsRateBudget = errors.New("request exceeds per-minute rate budget")
+
+// PacingWait blocks for the given duration while emitting periodic status
+// updates via onStatus, and returns early with ctx.Err() if the context is
+// cancelled. It is intended to replace the inline
+// select { case <-ctx.Done(): ...; case <-time.After(wait): } pattern used
+// by provider adapters during rate-limit pacing, where a silent wait is
+// misclassified as a hang by upstream stall watchdogs.
+//
+// onStatus may be nil. When non-nil, it is called once immediately with
+// the full wait duration, then again every pacingHeartbeat with the
+// remaining time. A zero or negative wait returns immediately without
+// any callback.
+func PacingWait(ctx context.Context, wait time.Duration, onStatus func(string)) error {
+	if wait <= 0 {
+		return nil
+	}
+	notify := func(remaining time.Duration) {
+		if onStatus == nil {
+			return
+		}
+		secs := int(remaining.Seconds() + 0.5)
+		if secs < 1 {
+			secs = 1
+		}
+		onStatus(fmt.Sprintf("Rate-limit pacing: waiting %ds for provider budget...", secs))
+	}
+
+	deadline := time.Now().Add(wait)
+	notify(wait)
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	ticker := time.NewTicker(pacingHeartbeat)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		case now := <-ticker.C:
+			remaining := deadline.Sub(now)
+			if remaining <= 0 {
+				return nil
+			}
+			notify(remaining)
+		}
+	}
+}
 
 // tokenRecord represents a single token usage event within the sliding window.
 type tokenRecord struct {
