@@ -110,7 +110,7 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
+			ch <- StreamEvent{Type: EventError, Error: "context cancelled"}
 			return
 		default:
 		}
@@ -124,7 +124,7 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == "[DONE]" {
-			ch <- StreamEvent{Type: "done"}
+			ch <- StreamEvent{Type: EventDone}
 			return
 		}
 
@@ -148,13 +148,13 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta.Content
 			if delta != "" {
-				ch <- StreamEvent{Type: "delta", Content: delta}
+				ch <- StreamEvent{Type: EventDelta, Content: delta}
 			}
 
 			if chunk.Choices[0].FinishReason != nil {
 				reason := *chunk.Choices[0].FinishReason
 				ch <- StreamEvent{
-					Type: "usage",
+					Type: EventUsage,
 					Usage: &Usage{
 						StopReason: reason,
 					},
@@ -164,7 +164,7 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 
 		if chunk.Usage != nil {
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  chunk.Usage.PromptTokens,
 					OutputTokens: chunk.Usage.CompletionTokens,
@@ -174,7 +174,7 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
 	}
 }
 

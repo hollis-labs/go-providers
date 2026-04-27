@@ -11,6 +11,11 @@ import (
 // Uses `kiro-cli chat --no-interactive --trust-all-tools "prompt"` for
 // non-interactive execution. Output is plain text by default; JSON events
 // are parsed when present.
+//
+// Turn boundary: emits EventDone when a JSON line matches `{"type":"done"}`
+// or EventError on `{"type":"error",...}`. Plain-text output (the default)
+// produces no terminal event in ParseLine — the bridge then synthesizes
+// EventDone on clean process exit.
 type KiroAdapter struct{}
 
 func NewKiroAdapter() *KiroAdapter { return &KiroAdapter{} }
@@ -73,12 +78,12 @@ func parseKiroStreamLine(line []byte) ([]StreamEvent, error) {
 			switch ev.Type {
 			case "message", "assistant", "delta":
 				if ev.Content != "" {
-					return []StreamEvent{{Type: "delta", Content: ev.Content}}, nil
+					return []StreamEvent{{Type: EventDelta, Content: ev.Content}}, nil
 				}
 			case "error":
-				return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+				return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 			case "done", "result":
-				return []StreamEvent{{Type: "done"}}, nil
+				return []StreamEvent{{Type: EventDone}}, nil
 			}
 			return nil, nil
 		}
@@ -99,10 +104,10 @@ func parseKiroStreamLine(line []byte) ([]StreamEvent, error) {
 
 	// Check for error patterns.
 	if strings.HasPrefix(trimmed, "Error:") || strings.HasPrefix(trimmed, "error:") {
-		return []StreamEvent{{Type: "error", Error: trimmed}}, nil
+		return []StreamEvent{{Type: EventError, Error: trimmed}}, nil
 	}
 
-	return []StreamEvent{{Type: "delta", Content: text + "\n"}}, nil
+	return []StreamEvent{{Type: EventDelta, Content: text + "\n"}}, nil
 }
 
 // parseKiroJSON parses a structured JSON event from Kiro.
@@ -114,11 +119,11 @@ func parseKiroJSON(line []byte) ([]StreamEvent, error) {
 
 	switch ev.Type {
 	case "message":
-		return []StreamEvent{{Type: "delta", Content: ev.Content}}, nil
+		return []StreamEvent{{Type: EventDelta, Content: ev.Content}}, nil
 	case "error":
-		return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+		return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 	case "done":
-		return []StreamEvent{{Type: "done"}}, nil
+		return []StreamEvent{{Type: EventDone}}, nil
 	default:
 		return nil, nil
 	}

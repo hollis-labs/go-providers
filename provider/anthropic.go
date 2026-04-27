@@ -501,7 +501,7 @@ func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser,
 	}()
 	for ev := range inner {
 		// Record input tokens in the rate tracker when we see usage from message_start.
-		if ev.Type == "usage" && ev.Usage != nil {
+		if ev.Type == EventUsage && ev.Usage != nil {
 			if ev.Usage.InputTokens > 0 {
 				totalInput += ev.Usage.InputTokens
 				if a.RateTracker != nil {
@@ -542,7 +542,7 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
+			ch <- StreamEvent{Type: EventError, Error: "context cancelled"}
 			return
 		default:
 		}
@@ -562,7 +562,7 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 	}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
 	}
 }
 
@@ -607,7 +607,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 		switch payload.Delta.Type {
 		case "text_delta":
-			ch <- StreamEvent{Type: "delta", Content: payload.Delta.Text}
+			ch <- StreamEvent{Type: EventDelta, Content: payload.Delta.Text}
 		case "input_json_delta":
 			if *currentToolUse != nil {
 				(*currentToolUse).inputJSON.WriteString(payload.Delta.PartialJSON)
@@ -628,7 +628,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 				input = map[string]any{}
 			}
 			ch <- StreamEvent{
-				Type: "tool_use",
+				Type: EventToolUse,
 				ToolUse: &ToolUseBlock{
 					ID:    tu.id,
 					Name:  tu.name,
@@ -649,7 +649,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err == nil {
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					OutputTokens: payload.Usage.OutputTokens,
 					StopReason:   payload.Delta.StopReason,
@@ -674,7 +674,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 					u.CacheCreationTokens, u.CacheReadTokens, u.InputTokens)
 			}
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:         u.InputTokens,
 					CacheCreationTokens: u.CacheCreationTokens,
@@ -684,7 +684,7 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 		}
 
 	case "message_stop":
-		ch <- StreamEvent{Type: "done"}
+		ch <- StreamEvent{Type: EventDone}
 
 	case "error":
 		var payload struct {
@@ -693,9 +693,9 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err == nil {
-			ch <- StreamEvent{Type: "error", Error: payload.Error.Message}
+			ch <- StreamEvent{Type: EventError, Error: payload.Error.Message}
 		} else {
-			ch <- StreamEvent{Type: "error", Error: data}
+			ch <- StreamEvent{Type: EventError, Error: data}
 		}
 	}
 }

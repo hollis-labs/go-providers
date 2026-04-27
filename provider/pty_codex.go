@@ -7,6 +7,10 @@ import (
 )
 
 // CodexAdapter implements CLIAdapter for the OpenAI Codex CLI.
+//
+// Turn boundary: emits EventDone on the `turn.completed` event, EventError on
+// `turn.failed` or top-level `error` events. Codex always runs single-turn via
+// `codex exec`, so each invocation produces exactly one turn boundary.
 type CodexAdapter struct{}
 
 func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }
@@ -80,20 +84,20 @@ func parseCodexStreamLine(line []byte) ([]StreamEvent, error) {
 				text = msg.Content
 			}
 			if text != "" {
-				return []StreamEvent{{Type: "delta", Content: text}}, nil
+				return []StreamEvent{{Type: EventDelta, Content: text}}, nil
 			}
 		}
 		return nil, nil
 
 	case "turn.completed":
-		return []StreamEvent{{Type: "done"}}, nil
+		return []StreamEvent{{Type: EventDone}}, nil
 
 	case "turn.failed", "error":
 		var errEvt codexError
 		if err := json.Unmarshal(line, &errEvt); err == nil && errEvt.Message != "" {
-			return []StreamEvent{{Type: "error", Error: errEvt.Message}}, nil
+			return []StreamEvent{{Type: EventError, Error: errEvt.Message}}, nil
 		}
-		return []StreamEvent{{Type: "error", Error: "codex error"}}, nil
+		return []StreamEvent{{Type: EventError, Error: "codex error"}}, nil
 
 	case "thread.started", "turn.started":
 		// Informational — skip.

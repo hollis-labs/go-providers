@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSubprocessBridge_Capabilities(t *testing.T) {
@@ -98,11 +99,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	hasDone := false
 	for _, ev := range events {
 		switch ev.Type {
-		case "session_id":
+		case EventSessionID:
 			hasSessionID = true
-		case "delta":
+		case EventDelta:
 			deltaCount++
-		case "done":
+		case EventDone:
 			hasDone = true
 		}
 	}
@@ -175,13 +176,13 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	const guardMsg = "CLI bridge cannot forward tool calls"
 	guardIdx, doneIdx, guardCount := -1, -1, 0
 	for i, ev := range events {
-		if ev.Type == "error" && ev.Error == guardMsg {
+		if ev.Type == EventError && ev.Error == guardMsg {
 			guardCount++
 			if guardIdx == -1 {
 				guardIdx = i
 			}
 		}
-		if ev.Type == "done" && doneIdx == -1 {
+		if ev.Type == EventDone && doneIdx == -1 {
 			doneIdx = i
 		}
 	}
@@ -222,9 +223,114 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	for ev := range ch {
-		if ev.Type == "error" && ev.Error == "CLI bridge cannot forward tool calls" {
+		if ev.Type == EventError && ev.Error == "CLI bridge cannot forward tool calls" {
 			t.Errorf("guard fired but a delta was present in the stream")
 		}
+	}
+}
+
+// TestSubprocessBridge_GracePeriodOrdering verifies the SIGTERM-then-SIGKILL
+// contract on context cancellation: the spawner sends SIGTERM first, waits up
+// to WaitDelay for the process to exit, and only then sends SIGKILL.
+//
+// Mechanism: the mock script traps SIGTERM and writes a marker file before
+// continuing to loop. This proves:
+//   - SIGTERM was delivered (marker file exists after termination).
+//   - WaitDelay was honored (the bridge waited at least WaitDelay before the
+//     process was force-killed; otherwise the trap wouldn't have run).
+//   - SIGKILL eventually fired (the process didn't run forever).
+func TestSubprocessBridge_GracePeriodOrdering(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "sigterm.marker")
+	script := filepath.Join(dir, "stubborn-cli.sh")
+	// The script must not let any child process inherit the stdout pipe;
+	// otherwise the inherited fd keeps the pipe open after the parent shell
+	// is SIGKILL'd, and cmd.Wait blocks until the child dies naturally.
+	// Each `sleep` is redirected to /dev/null for stdin/stdout/stderr.
+	scriptBody := `#!/bin/sh
+trap 'touch "` + marker + `"' TERM
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"start"}]}}'
+while true; do
+    sleep 0.1 </dev/null >/dev/null 2>/dev/null
+done
+`
+	if err := os.WriteFile(script, []byte(scriptBody), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	const waitDelay = 200 * time.Millisecond
+	ctx, cancel := context.WithCancel(WithWaitDelay(context.Background(), waitDelay))
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+		{Role: "user", Content: "test"},
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Read the first event so we know the script is running and has installed its trap.
+	first := <-ch
+	if first.Type != EventDelta {
+		t.Fatalf("expected first event to be delta, got %s", first.Type)
+	}
+
+	start := time.Now()
+	cancel()
+
+	// Drain remaining events. Bridge must close the channel after the process
+	// is fully terminated; if it hangs past WaitDelay+slack, SIGKILL didn't fire.
+	for range ch {
+	}
+	elapsed := time.Since(start)
+
+	// SIGTERM must have been delivered: the trap ran.
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("SIGTERM marker file missing: %v (process was likely SIGKILL'd immediately)", err)
+	}
+	// SIGKILL must have happened within WaitDelay+slack — this catches a regression
+	// where WaitDelay isn't wired through and the process runs until natural exit.
+	const slack = 5 * time.Second
+	if elapsed > waitDelay+slack {
+		t.Errorf("drain took %v, expected ≤ WaitDelay (%v) + slack (%v)", elapsed, waitDelay, slack)
+	}
+}
+
+// TestSubprocessBridge_SyntheticDoneOnCleanExit verifies the terminal-event
+// contract: when the adapter doesn't emit EventDone (e.g. unstructured copilot
+// output), the bridge synthesizes one on clean process exit so consumers always
+// see an explicit boundary before the channel closes.
+func TestSubprocessBridge_SyntheticDoneOnCleanExit(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "text-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo "this is plain text"
+echo "another line"
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewCopilotAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+		{Role: "user", Content: "test"},
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("expected at least a synthetic EventDone, got no events")
+	}
+	last := events[len(events)-1]
+	if !IsTurnComplete(last) {
+		t.Errorf("last event must be turn-terminal; got %+v", last)
+	}
+	if last.Type != EventDone {
+		t.Errorf("clean exit must synthesize EventDone, got %q", last.Type)
 	}
 }
 

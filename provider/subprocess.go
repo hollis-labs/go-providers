@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // SubprocessBridge is a provider that wraps CLI tools using standard pipes
@@ -52,11 +53,11 @@ func (s *SubprocessBridge) CompleteWithUsage(ctx context.Context, in ChatRequest
 	var usage *Usage
 	for ev := range ch {
 		switch ev.Type {
-		case "delta":
+		case EventDelta:
 			sb.WriteString(ev.Content)
-		case "usage":
+		case EventUsage:
 			usage = ev.Usage
-		case "error":
+		case EventError:
 			return CompleteResult{}, fmt.Errorf("cli error: %s", ev.Error)
 		}
 	}
@@ -95,6 +96,12 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 	log.Printf("subprocess[%s]: launching CLI with %d args", s.adapter.Name(), len(args))
 
 	cmd := exec.CommandContext(ctx, s.cliPath, args...)
+	// On context cancellation, send SIGTERM and let the process flush stream
+	// output, then SIGKILL after WaitDelay if it hasn't exited. Replaces the
+	// stdlib default of immediate SIGKILL. On Windows, SIGTERM is not
+	// meaningful and stdlib falls back to TerminateProcess after WaitDelay.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = WaitDelayFromContext(ctx)
 
 	if dir, ok := SandboxDirFromContext(ctx); ok {
 		cmd.Dir = dir
@@ -131,7 +138,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// Returns true if the guard was emitted on this call.
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
-				ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
+				ch <- StreamEvent{Type: EventError, Error: "CLI bridge cannot forward tool calls"}
 				terminalSent = true
 				return true
 			}
@@ -139,16 +146,6 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		}
 
 		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
-				ch <- StreamEvent{Type: "error", Error: "context cancelled"}
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
-				}
-				return
-			default:
-			}
-
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
@@ -166,17 +163,17 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 			for _, ev := range events {
 				switch ev.Type {
-				case "delta":
+				case EventDelta:
 					seenDelta = true
-				case "tool_use":
+				case EventToolUse:
 					seenToolUse = true
-				case "done":
+				case EventDone:
 					// Inject the no-silent-drop guard *before* the terminal
 					// done event so consumers that stop reading at "done"
 					// still see the error.
 					emitGuardIfNeeded()
 					terminalSent = true
-				case "error":
+				case EventError:
 					// Upstream already signalled failure — don't pile on.
 					terminalSent = true
 				}
@@ -192,10 +189,26 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// the error so callers don't hang on an empty result.
 		emitGuardIfNeeded()
 
-		if err := cmd.Wait(); err != nil {
-			if ctx.Err() == nil {
-				log.Printf("subprocess[%s]: process exited: %v", s.adapter.Name(), err)
-			}
+		// Wait for process to finish. cmd.Cancel + cmd.WaitDelay handle
+		// SIGTERM-then-SIGKILL on context cancellation.
+		waitErr := cmd.Wait()
+
+		// Always emit a terminal event so consumers see an explicit boundary
+		// before the channel closes. See PTYBridge.streamCLI for the same
+		// protocol; both bridges guarantee one of EventDone or EventError.
+		switch {
+		case terminalSent:
+			// Adapter took care of the boundary.
+		case ctx.Err() != nil:
+			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("context cancelled: %v", ctx.Err())}
+		case waitErr != nil:
+			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("process exited: %v", waitErr)}
+		default:
+			ch <- StreamEvent{Type: EventDone}
+		}
+
+		if waitErr != nil && ctx.Err() == nil {
+			log.Printf("subprocess[%s]: process exited: %v", s.adapter.Name(), waitErr)
 		}
 
 		// Notify process tracker that process has exited.

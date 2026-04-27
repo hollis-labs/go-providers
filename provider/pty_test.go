@@ -114,13 +114,13 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	const guardMsg = "CLI bridge cannot forward tool calls"
 	guardIdx, doneIdx, guardCount := -1, -1, 0
 	for i, ev := range events {
-		if ev.Type == "error" && ev.Error == guardMsg {
+		if ev.Type == EventError && ev.Error == guardMsg {
 			guardCount++
 			if guardIdx == -1 {
 				guardIdx = i
 			}
 		}
-		if ev.Type == "done" && doneIdx == -1 {
+		if ev.Type == EventDone && doneIdx == -1 {
 			doneIdx = i
 		}
 	}

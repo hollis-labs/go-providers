@@ -80,10 +80,10 @@ func ExampleAnthropic_StreamChat() {
 	}
 
 	for ev := range stream {
-		if ev.Type == "delta" {
+		if ev.Type == EventDelta {
 			fmt.Print(strings.TrimSpace(ev.Content))
 		}
-		if ev.Type == "done" {
+		if ev.Type == EventDone {
 			break
 		}
 	}

@@ -52,11 +52,11 @@ func NewScopeGuard(allowedPatterns []string, violationMode string) *ScopeGuard {
 // CheckEvent examines a stream event for scope violations.
 func (sg *ScopeGuard) CheckEvent(event StreamEvent) *ScopeViolation {
 	switch event.Type {
-	case "tool_use":
+	case EventToolUse:
 		return sg.checkToolUse(event)
-	case "delta":
+	case EventDelta:
 		return sg.checkTextContent(event)
-	case "error":
+	case EventError:
 		return sg.checkError(event)
 	default:
 		return nil

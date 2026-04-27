@@ -109,7 +109,7 @@ func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- S
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
+			ch <- StreamEvent{Type: EventError, Error: "context cancelled"}
 			return
 		default:
 		}
@@ -133,25 +133,25 @@ func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- S
 		}
 
 		if chunk.Message.Content != "" {
-			ch <- StreamEvent{Type: "delta", Content: chunk.Message.Content}
+			ch <- StreamEvent{Type: EventDelta, Content: chunk.Message.Content}
 		}
 
 		if chunk.Done {
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  chunk.PromptEvalCount,
 					OutputTokens: chunk.EvalCount,
 					StopReason:   "end_turn",
 				},
 			}
-			ch <- StreamEvent{Type: "done"}
+			ch <- StreamEvent{Type: EventDone}
 			return
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
 	}
 }
 

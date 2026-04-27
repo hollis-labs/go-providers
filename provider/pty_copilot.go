@@ -10,6 +10,13 @@ import (
 // CopilotAdapter implements CLIAdapter for GitHub Copilot CLI.
 // Supports both standalone `copilot` binary and `gh copilot` extension.
 // No structured JSON output is available, so ParseLine treats each line as a text delta.
+//
+// Turn boundary: ParseLine never produces a terminal event because Copilot's
+// output is unstructured plain text with no completion marker. The bridge
+// (PTYBridge / SubprocessBridge) detects clean process exit and synthesizes
+// EventDone in that case, EventError if the process exited non-zero. Consumers
+// should rely on IsTurnComplete on the channel-final event, not on adapter
+// output alone.
 type CopilotAdapter struct {
 	// ghMode is true when the detected binary is `gh` (needs "copilot" subcommand prefix).
 	ghMode bool
@@ -40,7 +47,7 @@ func (a *CopilotAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
 		return nil, nil
 	}
 
-	return []StreamEvent{{Type: "delta", Content: text + "\n"}}, nil
+	return []StreamEvent{{Type: EventDelta, Content: text + "\n"}}, nil
 }
 
 func (a *CopilotAdapter) Detect() (string, bool) {

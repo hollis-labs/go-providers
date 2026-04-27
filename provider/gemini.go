@@ -147,7 +147,7 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
+			ch <- StreamEvent{Type: EventError, Error: "context cancelled"}
 			return
 		default:
 		}
@@ -184,13 +184,13 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 			cand := chunk.Candidates[0]
 			for _, part := range cand.Content.Parts {
 				if part.Text != "" {
-					ch <- StreamEvent{Type: "delta", Content: part.Text}
+					ch <- StreamEvent{Type: EventDelta, Content: part.Text}
 				}
 			}
 
 			if cand.FinishReason != "" && cand.FinishReason != "STOP" {
 				ch <- StreamEvent{
-					Type: "usage",
+					Type: EventUsage,
 					Usage: &Usage{
 						StopReason: strings.ToLower(cand.FinishReason),
 					},
@@ -200,7 +200,7 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 
 		if chunk.UsageMetadata != nil {
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  chunk.UsageMetadata.PromptTokenCount,
 					OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
@@ -210,10 +210,10 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 	}
 
 	// Emit done after stream ends.
-	ch <- StreamEvent{Type: "done"}
+	ch <- StreamEvent{Type: EventDone}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
 	}
 }
 

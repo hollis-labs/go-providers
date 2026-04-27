@@ -252,7 +252,7 @@ func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in C
 
 		// Send done event
 		stream <- StreamEvent{
-			Type: "done",
+			Type: EventDone,
 		}
 	}()
 

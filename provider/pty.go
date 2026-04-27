@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/creack/pty"
 )
@@ -65,11 +64,11 @@ func (p *PTYBridge) CompleteWithUsage(ctx context.Context, in ChatRequest) (Comp
 	var usage *Usage
 	for ev := range ch {
 		switch ev.Type {
-		case "delta":
+		case EventDelta:
 			sb.WriteString(ev.Content)
-		case "usage":
+		case EventUsage:
 			usage = ev.Usage
-		case "error":
+		case EventError:
 			return CompleteResult{}, fmt.Errorf("claude cli error: %s", ev.Error)
 		}
 	}
@@ -111,6 +110,11 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	log.Printf("pty[%s]: launching CLI with %d args", p.adapter.Name(), len(args))
 
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
+	// On context cancellation, send SIGTERM and let the process flush stream
+	// output, then SIGKILL after WaitDelay if it hasn't exited. Replaces the
+	// stdlib default of immediate SIGKILL.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = WaitDelayFromContext(ctx)
 
 	// Run in the sandbox directory if one was provided.
 	if dir, ok := SandboxDirFromContext(ctx); ok {
@@ -146,7 +150,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Returns true if the guard was emitted on this call.
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
-				ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
+				ch <- StreamEvent{Type: EventError, Error: "CLI bridge cannot forward tool calls"}
 				terminalSent = true
 				return true
 			}
@@ -154,14 +158,6 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		}
 
 		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
-				ch <- StreamEvent{Type: "error", Error: "context cancelled"}
-				p.killProcess(cmd)
-				return
-			default:
-			}
-
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
@@ -179,17 +175,17 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 			for _, ev := range events {
 				switch ev.Type {
-				case "delta":
+				case EventDelta:
 					seenDelta = true
-				case "tool_use":
+				case EventToolUse:
 					seenToolUse = true
-				case "done":
+				case EventDone:
 					// Inject the no-silent-drop guard *before* the terminal
 					// done event so consumers that stop reading at "done"
 					// still see the error.
 					emitGuardIfNeeded()
 					terminalSent = true
-				case "error":
+				case EventError:
 					// Upstream already signalled failure — don't pile on.
 					terminalSent = true
 				}
@@ -209,12 +205,29 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// the error so callers don't hang on an empty result.
 		emitGuardIfNeeded()
 
-		// Wait for process to finish.
-		if err := cmd.Wait(); err != nil {
-			if ctx.Err() == nil {
-				// Only log if not a context cancellation.
-				log.Printf("pty: process exited: %v", err)
-			}
+		// Wait for process to finish. cmd.Cancel + cmd.WaitDelay handle
+		// SIGTERM-then-SIGKILL on context cancellation.
+		waitErr := cmd.Wait()
+
+		// Always emit a terminal event so consumers see an explicit boundary
+		// before the channel closes. Order of preference:
+		//   1. Adapter already emitted EventDone or EventError (terminalSent).
+		//   2. Context was cancelled — surface as EventError.
+		//   3. Process exited non-zero — surface as EventError with exit info.
+		//   4. Clean exit with no adapter terminal — synthesize EventDone.
+		switch {
+		case terminalSent:
+			// Adapter took care of the boundary.
+		case ctx.Err() != nil:
+			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("context cancelled: %v", ctx.Err())}
+		case waitErr != nil:
+			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("process exited: %v", waitErr)}
+		default:
+			ch <- StreamEvent{Type: EventDone}
+		}
+
+		if waitErr != nil && ctx.Err() == nil {
+			log.Printf("pty: process exited: %v", waitErr)
 		}
 
 		// Notify process tracker that process has exited.
@@ -224,22 +237,4 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 	}()
 
 	return ch, nil
-}
-
-// killProcess sends SIGTERM, then SIGKILL after a grace period.
-func (p *PTYBridge) killProcess(cmd *exec.Cmd) {
-	if cmd.Process == nil {
-		return
-	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = cmd.Process.Kill()
-	}
 }
