@@ -66,14 +66,18 @@ type ToolUseBlock struct {
 // NOTE: Input uses a pointer to distinguish "absent" from "empty object".
 // Anthropic requires the input field on tool_use blocks even when empty.
 type ContentBlock struct {
-	Type      string          `json:"type"`                  // text, tool_use, tool_result
-	Text      string          `json:"text,omitempty"`        // text block
+	Type      string          `json:"type"`                  // text, tool_use, tool_result, thinking
+	Text      string          `json:"text,omitempty"`        // text block; also thinking text for type="thinking"
 	ID        string          `json:"id,omitempty"`          // tool_use block ID
 	Name      string          `json:"name,omitempty"`        // tool_use tool name
 	Input     *map[string]any `json:"input,omitempty"`       // tool_use input (always set for tool_use blocks)
 	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result reference
 	Content   string          `json:"content,omitempty"`     // tool_result text
 	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag (Anthropic API)
+	// Signature is the cryptographic signature Anthropic attaches to thinking
+	// blocks (type="thinking"). Must be preserved verbatim for round-trip
+	// across turn boundaries (F3 / CW-20260420-0023). Empty for non-thinking blocks.
+	Signature string `json:"signature,omitempty"`
 }
 
 // EventType identifies the kind of a StreamEvent. The zero value is the empty
@@ -98,16 +102,34 @@ const (
 	// StreamEvent.SessionID, used by adapters that support resume (e.g. Claude's
 	// --resume flag). Emitted as informational metadata, not a turn boundary.
 	EventSessionID EventType = "session_id"
+	// EventThinking carries a completed interleaved thinking block from the
+	// Anthropic interleaved-thinking-2025-05-14 beta (F3 / CW-20260420-0023).
+	// The payload is in StreamEvent.ThinkingBlock. Emitted once per complete
+	// thinking block (after content_block_stop), not as incremental deltas.
+	// The signature field is cryptographically signed by Anthropic and must be
+	// preserved verbatim to satisfy the round-trip contract on subsequent turns.
+	EventThinking EventType = "thinking"
 )
+
+// ThinkingBlock carries the content and Anthropic-signed signature of one
+// interleaved thinking block (F3 / CW-20260420-0023).
+type ThinkingBlock struct {
+	// Thinking is the raw thinking text accumulated from thinking_delta events.
+	Thinking string
+	// Signature is the cryptographic signature Anthropic attaches to the block.
+	// Must be preserved verbatim and round-tripped to subsequent turns.
+	Signature string
+}
 
 // StreamEvent represents a single event from a streaming provider response.
 type StreamEvent struct {
-	Type      EventType
-	Content   string        // EventDelta payload
-	Usage     *Usage        // EventUsage payload; may also appear on EventDone
-	Error     string        // EventError payload
-	ToolUse   *ToolUseBlock // EventToolUse payload
-	SessionID string        // EventSessionID payload
+	Type          EventType
+	Content       string         // EventDelta payload
+	Usage         *Usage         // EventUsage payload; may also appear on EventDone
+	Error         string         // EventError payload
+	ToolUse       *ToolUseBlock  // EventToolUse payload
+	SessionID     string         // EventSessionID payload
+	ThinkingBlock *ThinkingBlock // EventThinking payload (F3 / CW-20260420-0023)
 }
 
 // IsTurnComplete reports whether ev is a terminal event marking the end of an
@@ -219,6 +241,39 @@ type ProviderWithUsage interface {
 	// CompleteWithUsage makes a non-streaming completion call and returns
 	// any token usage the underlying provider surfaces.
 	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
+}
+
+// ReasoningConfig carries per-turn reasoning/thinking configuration for
+// providers that support it (e.g. Anthropic interleaved thinking).
+// Callers inject this via WithReasoningConfig before calling StreamChat.
+// F3 / CW-20260420-0023.
+type ReasoningConfig struct {
+	// Enabled reports whether reasoning/thinking blocks should be requested.
+	Enabled bool
+	// BudgetTokens is the token budget for the reasoning pass. Required
+	// (must be > 0) for reasoning to actually be requested. With Enabled=true
+	// and BudgetTokens=0, providers will not send a reasoning request — the
+	// pair must be set explicitly.
+	BudgetTokens int
+	// BetasHeader is an additional beta header value to append (e.g.
+	// "interleaved-thinking-2025-05-14"). Empty means no extra flag.
+	BetasHeader string
+}
+
+type reasoningConfigKeyType struct{}
+
+// WithReasoningConfig returns a context carrying the given ReasoningConfig.
+// The Anthropic adapter reads this to decide whether to send the
+// interleaved-thinking beta header and thinking_config parameter.
+func WithReasoningConfig(ctx context.Context, cfg ReasoningConfig) context.Context {
+	return context.WithValue(ctx, reasoningConfigKeyType{}, cfg)
+}
+
+// ReasoningConfigFromContext extracts the ReasoningConfig from ctx, if set.
+// Returns zero-value ReasoningConfig (Enabled=false) when not set.
+func ReasoningConfigFromContext(ctx context.Context) ReasoningConfig {
+	cfg, _ := ctx.Value(reasoningConfigKeyType{}).(ReasoningConfig)
+	return cfg
 }
 
 // ptySessionKeyType is the context key for passing a CLI session ID
