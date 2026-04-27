@@ -19,6 +19,10 @@ func (exampleProvider) Complete(ctx context.Context, in ChatRequest) (string, er
 	return "", nil
 }
 
+func (exampleProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{}, nil
+}
+
 func (exampleProvider) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{}
 }

@@ -702,6 +702,15 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 
 // Complete makes a non-streaming completion call.
 func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := a.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage makes a non-streaming completion call and preserves usage metadata.
+func (a *Anthropic) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.complete")
 	defer span.End()
 	span.SetAttributes(
@@ -713,7 +722,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 
 	if a.apiKey == "" {
 		span.SetStatus(codes.Error, "ANTHROPIC_API_KEY not set")
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+		return CompleteResult{}, fmt.Errorf("ANTHROPIC_API_KEY not set")
 	}
 
 	model := in.Model
@@ -731,7 +740,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return CompleteResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	// Retry loop with exponential backoff for rate limits and server errors.
@@ -739,7 +748,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 	for attempt := 0; attempt <= a.Retry.MaxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, "POST", anthropicAPI, bytes.NewReader(payload))
 		if err != nil {
-			return "", fmt.Errorf("create request: %w", err)
+			return CompleteResult{}, fmt.Errorf("create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("x-api-key", a.apiKey)
@@ -748,7 +757,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 
 		resp, err = a.client.Do(req)
 		if err != nil {
-			return "", fmt.Errorf("send request: %w", err)
+			return CompleteResult{}, fmt.Errorf("send request: %w", err)
 		}
 
 		if resp.StatusCode == http.StatusOK {
@@ -765,7 +774,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 		}
 
 		if !RetryableStatusCode(resp.StatusCode) || attempt == a.Retry.MaxRetries {
-			return "", apiErr
+			return CompleteResult{}, apiErr
 		}
 
 		delay := a.Retry.BackoffDelay(attempt, apiErr.RetryAfter)
@@ -774,7 +783,7 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return CompleteResult{}, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 		case <-time.After(delay):
 		}
 	}
@@ -785,17 +794,34 @@ func (a *Anthropic) Complete(ctx context.Context, in ChatRequest) (string, error
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		Usage struct {
+			InputTokens         int `json:"input_tokens"`
+			OutputTokens        int `json:"output_tokens"`
+			CacheCreationTokens int `json:"cache_creation_input_tokens"`
+			CacheReadTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+		StopReason string `json:"stop_reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return CompleteResult{}, fmt.Errorf("decode response: %w", err)
 	}
 
+	out := CompleteResult{
+		Usage: &Usage{
+			InputTokens:         result.Usage.InputTokens,
+			OutputTokens:        result.Usage.OutputTokens,
+			CacheCreationTokens: result.Usage.CacheCreationTokens,
+			CacheReadTokens:     result.Usage.CacheReadTokens,
+			StopReason:          result.StopReason,
+		},
+	}
 	for _, block := range result.Content {
 		if block.Type == "text" {
-			return strings.TrimSpace(block.Text), nil
+			out.Text = strings.TrimSpace(block.Text)
+			return out, nil
 		}
 	}
-	return "", nil
+	return out, nil
 }
 
 // Capabilities returns the capabilities supported by the Anthropic provider.

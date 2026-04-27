@@ -36,11 +36,15 @@ func main() {
     p, _ := reg.Get("anthropic")
 
     ctx := context.Background()
-    msgs := []provider.ChatMessage{
-        {Role: "user", Content: "Say hello in one short sentence."},
+    req := provider.ChatRequest{
+        Model:        "claude-sonnet-4-5",
+        SystemPrompt: "You are concise.",
+        Messages: []provider.ChatMessage{
+            {Role: "user", Content: "Say hello in one short sentence."},
+        },
     }
 
-    stream, err := p.StreamChat(ctx, "You are concise.", msgs, "claude-sonnet-4-5")
+    stream, err := p.StreamChat(ctx, req)
     if err != nil {
         panic(err)
     }
@@ -57,6 +61,19 @@ func main() {
 }
 ```
 
+For non-streaming callers that need token accounting, use `CompleteWithUsage`:
+
+```go
+result, err := p.CompleteWithUsage(ctx, req)
+if err != nil {
+    panic(err)
+}
+fmt.Println(result.Text)
+if result.Usage != nil {
+    fmt.Printf("input=%d output=%d\n", result.Usage.InputTokens, result.Usage.OutputTokens)
+}
+```
+
 Providers that also implement `Embedder` (OpenAI, Azure OpenAI, Gemini, Mistral, Ollama) can be type-asserted for embedding calls:
 
 ```go
@@ -70,9 +87,9 @@ if e, ok := p.(provider.Embedder); ok {
 
 ### Core interface (`provider/provider.go`)
 
-- `Provider` — interface: `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`.
+- `Provider` — interface: `StreamChat`, `Complete`, `CompleteWithUsage`, `Capabilities`.
 - `ProviderCapabilities` — struct describing streaming, tool calling, caching, embedding, image input, `MaxTokens`, `ContextWindowSize`, and embedding defaults.
-- `ChatMessage`, `ContentBlock`, `ToolDefinition`, `ToolUseBlock`, `StreamEvent`, `Usage` — message and stream-event shapes.
+- `ChatMessage`, `ContentBlock`, `ToolDefinition`, `ToolUseBlock`, `StreamEvent`, `Usage`, `CompleteResult` — message, event, and non-streaming result shapes.
 - `WithCLISessionID` / `CLISessionIDFromContext`, `WithSandboxDir` / `SandboxDirFromContext`, `WithProcessCallback` / `ProcessCallbackFromContext`, `WithActivityCallback` / `ActivityCallbackFromContext` — context-value helpers used by the PTY and subprocess bridges.
 
 ### Registry (`provider/registry.go`)

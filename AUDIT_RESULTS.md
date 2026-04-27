@@ -145,42 +145,42 @@ Grouped by file, exported types and top-level functions only. All in package `pr
 ### `anthropic.go`
 
 - types: `Anthropic`
-- funcs: `NewAnthropic`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `SetCacheHints`
+- funcs: `NewAnthropic`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `SetCacheHints`
 
 ### `openai.go`
 
 - types: `OpenAI`
-- funcs: `NewOpenAI`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
+- funcs: `NewOpenAI`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
 
 ### `gemini.go`
 
 - types: `Gemini`
-- funcs: `NewGemini`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
+- funcs: `NewGemini`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
 
 ### `mistral.go`
 
 - types: `Mistral`
-- funcs: `NewMistral`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
+- funcs: `NewMistral`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
 
 ### `azure_openai.go`
 
 - types: `AzureOpenAI`
-- funcs: `NewAzureOpenAI`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
+- funcs: `NewAzureOpenAI`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
 
 ### `openrouter.go`
 
 - types: `OpenRouter`
-- funcs: `NewOpenRouter`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`
+- funcs: `NewOpenRouter`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`
 
 ### `openzen.go`
 
 - types: `OpenZen`
-- funcs: `NewOpenZen`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`
+- funcs: `NewOpenZen`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`
 
 ### `ollama.go`
 
 - types: `Ollama`
-- funcs: `NewOllama`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
+- funcs: `NewOllama`, plus `StreamChat`, `StreamChatWithTools`, `Complete`, `CompleteWithUsage`, `Capabilities`, `Embed`, `EmbedBatch`, `EmbeddingDimensions`
 
 ### `pty.go` (build tag `!windows`)
 

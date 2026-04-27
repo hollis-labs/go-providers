@@ -109,6 +109,11 @@ func (p *EventReactionPipeline) Complete(ctx context.Context, in ChatRequest) (s
 	return p.provider.Complete(ctx, in)
 }
 
+// CompleteWithUsage implements Provider.CompleteWithUsage.
+func (p *EventReactionPipeline) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return p.provider.CompleteWithUsage(ctx, in)
+}
+
 // Capabilities implements Provider.Capabilities.
 func (p *EventReactionPipeline) Capabilities() ProviderCapabilities {
 	return p.provider.Capabilities()
@@ -215,7 +220,7 @@ func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in C
 	go func() {
 		defer close(stream)
 
-		result, err := p.provider.Complete(ctx, in)
+		result, err := p.provider.CompleteWithUsage(ctx, in)
 
 		if err != nil {
 			stream <- StreamEvent{
@@ -228,7 +233,14 @@ func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in C
 		// Simulate streaming by sending the complete response as a single delta
 		stream <- StreamEvent{
 			Type:    "delta",
-			Content: result,
+			Content: result.Text,
+		}
+
+		if result.Usage != nil {
+			stream <- StreamEvent{
+				Type:  "usage",
+				Usage: result.Usage,
+			}
 		}
 
 		// Send done event

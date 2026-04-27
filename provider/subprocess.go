@@ -32,22 +32,35 @@ func (s *SubprocessBridge) StreamChat(ctx context.Context, in ChatRequest) (<-ch
 }
 
 func (s *SubprocessBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
-	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
-	ch, err := s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
+	result, err := s.CompleteWithUsage(ctx, in)
 	if err != nil {
 		return "", err
 	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage returns the concatenated text output from the CLI.
+// Usage may be nil because the wrapped CLI is not required to surface it.
+func (s *SubprocessBridge) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
+	ch, err := s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
+	if err != nil {
+		return CompleteResult{}, err
+	}
 
 	var sb strings.Builder
+	var usage *Usage
 	for ev := range ch {
 		switch ev.Type {
 		case "delta":
 			sb.WriteString(ev.Content)
+		case "usage":
+			usage = ev.Usage
 		case "error":
-			return "", fmt.Errorf("cli error: %s", ev.Error)
+			return CompleteResult{}, fmt.Errorf("cli error: %s", ev.Error)
 		}
 	}
-	return sb.String(), nil
+	return CompleteResult{Text: sb.String(), Usage: usage}, nil
 }
 
 func (s *SubprocessBridge) Capabilities() ProviderCapabilities {

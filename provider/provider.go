@@ -65,14 +65,14 @@ type ToolUseBlock struct {
 // NOTE: Input uses a pointer to distinguish "absent" from "empty object".
 // Anthropic requires the input field on tool_use blocks even when empty.
 type ContentBlock struct {
-	Type      string          `json:"type"`                    // text, tool_use, tool_result
-	Text      string          `json:"text,omitempty"`          // text block
-	ID        string          `json:"id,omitempty"`            // tool_use block ID
-	Name      string          `json:"name,omitempty"`          // tool_use tool name
-	Input     *map[string]any `json:"input,omitempty"`         // tool_use input (always set for tool_use blocks)
-	ToolUseID string          `json:"tool_use_id,omitempty"`   // tool_result reference
-	Content   string          `json:"content,omitempty"`       // tool_result text
-	IsError   bool            `json:"is_error,omitempty"`      // tool_result error flag (Anthropic API)
+	Type      string          `json:"type"`                  // text, tool_use, tool_result
+	Text      string          `json:"text,omitempty"`        // text block
+	ID        string          `json:"id,omitempty"`          // tool_use block ID
+	Name      string          `json:"name,omitempty"`        // tool_use tool name
+	Input     *map[string]any `json:"input,omitempty"`       // tool_use input (always set for tool_use blocks)
+	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result reference
+	Content   string          `json:"content,omitempty"`     // tool_result text
+	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag (Anthropic API)
 }
 
 // StreamEvent represents a single event from a streaming provider response.
@@ -87,11 +87,18 @@ type StreamEvent struct {
 
 // Usage contains token usage information.
 type Usage struct {
-	InputTokens          int
-	OutputTokens         int
-	CacheCreationTokens  int
-	CacheReadTokens      int
-	StopReason           string
+	InputTokens         int
+	OutputTokens        int
+	CacheCreationTokens int
+	CacheReadTokens     int
+	StopReason          string
+}
+
+// CompleteResult contains the text and optional usage metadata for a
+// non-streaming completion call.
+type CompleteResult struct {
+	Text  string
+	Usage *Usage
 }
 
 // ChatMessage represents a single message in a conversation.
@@ -165,6 +172,9 @@ type Provider interface {
 	StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error)
 	// Complete makes a non-streaming completion call.
 	Complete(ctx context.Context, req ChatRequest) (string, error)
+	// CompleteWithUsage makes a non-streaming completion call and returns
+	// any token usage the underlying provider surfaces.
+	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
 	// Capabilities returns the capabilities supported by this provider.
 	Capabilities() ProviderCapabilities
 }

@@ -77,17 +77,21 @@ func TestEventReactionPipelineNonStreaming(t *testing.T) {
 		events = append(events, event)
 	}
 
-	// Should get delta and done events
-	if len(events) != 2 {
-		t.Errorf("Expected 2 events (delta + done), got %d", len(events))
+	// Should get delta, usage, and done events.
+	if len(events) != 3 {
+		t.Errorf("Expected 3 events (delta + usage + done), got %d", len(events))
 	}
 
 	if events[0].Type != "delta" || events[0].Content != "Test response" {
 		t.Error("First event should be delta with test response")
 	}
 
-	if events[1].Type != "done" {
-		t.Error("Second event should be done")
+	if events[1].Type != "usage" || events[1].Usage == nil {
+		t.Error("Second event should be usage")
+	}
+
+	if events[2].Type != "done" {
+		t.Error("Third event should be done")
 	}
 }
 
@@ -290,6 +294,10 @@ func (m *mockStreamingProvider) Complete(ctx context.Context, in ChatRequest) (s
 	return "Hello world", nil
 }
 
+func (m *mockStreamingProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{Text: "Hello world", Usage: &Usage{InputTokens: 10, OutputTokens: 5}}, nil
+}
+
 func (m *mockStreamingProvider) Capabilities() ProviderCapabilities {
 	return m.capabilities
 }
@@ -306,6 +314,10 @@ func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in ChatReques
 
 func (m *mockNonStreamingProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return m.response, nil
+}
+
+func (m *mockNonStreamingProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{Text: m.response, Usage: &Usage{InputTokens: 4, OutputTokens: 2}}, nil
 }
 
 func (m *mockNonStreamingProvider) Capabilities() ProviderCapabilities {

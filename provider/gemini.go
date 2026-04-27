@@ -31,8 +31,8 @@ func NewGemini() *Gemini {
 
 // geminiRequest is the request body for the Gemini generateContent API.
 type geminiRequest struct {
-	Contents         []geminiContent        `json:"contents"`
-	SystemInstruct   *geminiContent         `json:"systemInstruction,omitempty"`
+	Contents         []geminiContent         `json:"contents"`
+	SystemInstruct   *geminiContent          `json:"systemInstruction,omitempty"`
 	GenerationConfig *geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
@@ -219,8 +219,17 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 
 // Complete makes a non-streaming completion call to Gemini.
 func (g *Gemini) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := g.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage makes a non-streaming completion call to Gemini and preserves usage metadata.
+func (g *Gemini) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	if g.apiKey == "" {
-		return "", fmt.Errorf("GOOGLE_API_KEY not set")
+		return CompleteResult{}, fmt.Errorf("GOOGLE_API_KEY not set")
 	}
 
 	model := in.Model
@@ -234,25 +243,25 @@ func (g *Gemini) Complete(ctx context.Context, in ChatRequest) (string, error) {
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return CompleteResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/%s:generateContent?key=%s", geminiAPI, model, g.apiKey)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return CompleteResult{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return CompleteResult{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
+		return CompleteResult{}, fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
@@ -262,12 +271,24 @@ func (g *Gemini) Complete(ctx context.Context, in ChatRequest) (string, error) {
 					Text string `json:"text"`
 				} `json:"parts"`
 			} `json:"content"`
+			FinishReason string `json:"finishReason"`
 		} `json:"candidates"`
+		UsageMetadata *struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+		} `json:"usageMetadata"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return CompleteResult{}, fmt.Errorf("decode response: %w", err)
 	}
 
+	out := CompleteResult{}
+	if result.UsageMetadata != nil {
+		out.Usage = &Usage{
+			InputTokens:  result.UsageMetadata.PromptTokenCount,
+			OutputTokens: result.UsageMetadata.CandidatesTokenCount,
+		}
+	}
 	if len(result.Candidates) > 0 {
 		var parts []string
 		for _, p := range result.Candidates[0].Content.Parts {
@@ -275,9 +296,12 @@ func (g *Gemini) Complete(ctx context.Context, in ChatRequest) (string, error) {
 				parts = append(parts, p.Text)
 			}
 		}
-		return strings.TrimSpace(strings.Join(parts, "")), nil
+		out.Text = strings.TrimSpace(strings.Join(parts, ""))
+		if out.Usage != nil && result.Candidates[0].FinishReason != "" {
+			out.Usage.StopReason = strings.ToLower(result.Candidates[0].FinishReason)
+		}
 	}
-	return "", nil
+	return out, nil
 }
 
 // Capabilities returns the capabilities supported by the Gemini provider.
