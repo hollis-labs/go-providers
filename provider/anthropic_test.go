@@ -1,8 +1,11 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 )
 
 func TestBuildSystemFromRequest_SlotsWithCacheControl(t *testing.T) {
@@ -299,5 +302,38 @@ func TestAnthropicRequestJSON(t *testing.T) {
 	cc := block["cache_control"].(map[string]any)
 	if cc["type"] != "ephemeral" {
 		t.Errorf("expected ephemeral cache_control")
+	}
+}
+
+// TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel verifies that
+// when the estimated request size exceeds the per-minute rate-limit window,
+// StreamChat returns ErrRequestExceedsRateBudget immediately without waiting.
+// This is the signal nanite's compaction pipeline uses to trim history
+// instead of repeating 58s pacing waits until the outer context deadline.
+func TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel(t *testing.T) {
+	a := NewAnthropic()
+	a.SetAPIKey("test-key")
+	// Force an absurdly small window so any request exceeds it.
+	a.RateTracker.UpdateLimit(10)
+
+	in := ChatRequest{
+		Model:        "claude-sonnet-4-20250514",
+		SystemPrompt: "you are a helpful assistant used in a test",
+		Messages: []ChatMessage{
+			{Role: "user", Content: "hello, this is a test message that will clearly exceed a 10-token budget when estimated"},
+		},
+	}
+
+	start := time.Now()
+	_, err := a.StreamChat(context.Background(), in)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, ErrRequestExceedsRateBudget) {
+		t.Fatalf("expected ErrRequestExceedsRateBudget, got %v", err)
+	}
+	// Must fire BEFORE any wait — generous bound, just ensuring we didn't
+	// block on WaitTime (which would be tens of seconds).
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected immediate return, took %s", elapsed)
 	}
 }

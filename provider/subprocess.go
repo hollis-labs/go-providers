@@ -111,7 +111,19 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
-		var seenDelta, seenToolUse bool
+		var seenDelta, seenToolUse, terminalSent bool
+
+		// emitGuardIfNeeded emits the no-silent-drop error event exactly once,
+		// when the CLI produced only tool_use blocks and no text deltas.
+		// Returns true if the guard was emitted on this call.
+		emitGuardIfNeeded := func() bool {
+			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
+				ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
+				terminalSent = true
+				return true
+			}
+			return false
+		}
 
 		for scanner.Scan() {
 			select {
@@ -145,6 +157,15 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 					seenDelta = true
 				case "tool_use":
 					seenToolUse = true
+				case "done":
+					// Inject the no-silent-drop guard *before* the terminal
+					// done event so consumers that stop reading at "done"
+					// still see the error.
+					emitGuardIfNeeded()
+					terminalSent = true
+				case "error":
+					// Upstream already signalled failure — don't pile on.
+					terminalSent = true
 				}
 				ch <- ev
 			}
@@ -154,12 +175,9 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 			log.Printf("subprocess[%s]: scanner error: %v", s.adapter.Name(), err)
 		}
 
-		// No-silent-drop guard: if the CLI produced only tool_use blocks and no
-		// text deltas, the stream would close silently with no usable content.
-		// Emit an explicit error so callers can surface it rather than hang.
-		if seenToolUse && !seenDelta && ctx.Err() == nil {
-			ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
-		}
+		// Post-loop guard: stream ended without a terminal event. Still emit
+		// the error so callers don't hang on an empty result.
+		emitGuardIfNeeded()
 
 		if err := cmd.Wait(); err != nil {
 			if ctx.Err() == nil {

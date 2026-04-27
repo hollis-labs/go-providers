@@ -144,6 +144,90 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 }
 
+// TestSubprocessBridge_NoSilentDrop_ToolUseOnly verifies that when the CLI
+// emits only tool_use blocks (no text deltas), the bridge injects an
+// explicit "CLI bridge cannot forward tool calls" error event *before* the
+// terminal "done" event so consumers that stop reading at "done" still see
+// the failure.
+func TestSubprocessBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tool-only-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+		{Role: "user", Content: "test"},
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	const guardMsg = "CLI bridge cannot forward tool calls"
+	guardIdx, doneIdx, guardCount := -1, -1, 0
+	for i, ev := range events {
+		if ev.Type == "error" && ev.Error == guardMsg {
+			guardCount++
+			if guardIdx == -1 {
+				guardIdx = i
+			}
+		}
+		if ev.Type == "done" && doneIdx == -1 {
+			doneIdx = i
+		}
+	}
+
+	if guardCount != 1 {
+		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
+	}
+	if guardIdx == -1 {
+		t.Fatalf("expected guard error event %q, none found in: %+v", guardMsg, events)
+	}
+	if doneIdx == -1 {
+		t.Fatalf("expected done event, not found in: %+v", events)
+	}
+	if guardIdx >= doneIdx {
+		t.Errorf("guard error must come before done; guard at %d, done at %d", guardIdx, doneIdx)
+	}
+}
+
+// TestSubprocessBridge_NoSilentDrop_NotFiredWhenDeltaPresent verifies the
+// guard does NOT fire when the CLI mixed tool_use with at least one text
+// delta — that's a normal stream and consumers can use the deltas.
+func TestSubprocessBridge_NoSilentDrop_NotFiredWhenDeltaPresent(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mixed-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}},{"type":"text","text":"hello"}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+		{Role: "user", Content: "test"},
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for ev := range ch {
+		if ev.Type == "error" && ev.Error == "CLI bridge cannot forward tool calls" {
+			t.Errorf("guard fired but a delta was present in the stream")
+		}
+	}
+}
+
 func TestSubprocessBridge_ContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "slow-cli.sh")
