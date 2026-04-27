@@ -7,9 +7,17 @@ import (
 )
 
 // ClaudeAdapter implements CLIAdapter for the Claude Code CLI.
-type ClaudeAdapter struct{}
+type ClaudeAdapter struct {
+	// SkipPermissions adds --dangerously-skip-permissions to CLI args.
+	// Only set when developer_mode is enabled; never set for production.
+	SkipPermissions bool
+}
 
 func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
+
+// NewClaudeAdapterDev returns a ClaudeAdapter with --dangerously-skip-permissions
+// enabled, for developer-mode PTY sessions.
+func NewClaudeAdapterDev() *ClaudeAdapter { return &ClaudeAdapter{SkipPermissions: true} }
 
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
@@ -18,6 +26,9 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose",
+	}
+	if a.SkipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	if cliSessionID != "" {
 		args = append([]string{"--resume", cliSessionID}, args...)

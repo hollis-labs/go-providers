@@ -150,6 +150,7 @@ func buildSystemBlocks(systemPrompt string) []map[string]any {
 
 // buildToolsWithCacheControl converts tool definitions to []any.
 // If the provider has a "tools" cache hint, the last tool gets cache_control ephemeral.
+// Strict mode is emitted as "strict": true by default; set Strict to a pointer to false to opt out.
 func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
@@ -162,6 +163,11 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 			"description":  t.Description,
 			"input_schema": t.InputSchema,
 		}
+		// Emit strict:true by default. Callers opt out by setting Strict to a
+		// pointer to false. nil means "use default" which is true.
+		if t.Strict == nil || *t.Strict {
+			entry["strict"] = true
+		}
 		if shouldCache && i == len(tools)-1 {
 			entry["cache_control"] = map[string]string{"type": "ephemeral"}
 		}
@@ -172,6 +178,7 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 
 // buildToolsWithCacheControl is the package-level (static) version for tests.
 // It always marks the last tool with cache_control.
+// Strict mode is emitted as "strict": true by default; set Strict to a pointer to false to opt out.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
@@ -182,6 +189,10 @@ func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 			"name":         t.Name,
 			"description":  t.Description,
 			"input_schema": t.InputSchema,
+		}
+		// Emit strict:true by default; nil Strict means opt-in.
+		if t.Strict == nil || *t.Strict {
+			entry["strict"] = true
 		}
 		if i == len(tools)-1 {
 			entry["cache_control"] = map[string]string{"type": "ephemeral"}

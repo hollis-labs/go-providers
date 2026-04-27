@@ -111,6 +111,8 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		var seenDelta, seenToolUse bool
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -138,12 +140,25 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "delta":
+					seenDelta = true
+				case "tool_use":
+					seenToolUse = true
+				}
 				ch <- ev
 			}
 		}
 
 		if err := scanner.Err(); err != nil {
 			log.Printf("subprocess[%s]: scanner error: %v", s.adapter.Name(), err)
+		}
+
+		// No-silent-drop guard: if the CLI produced only tool_use blocks and no
+		// text deltas, the stream would close silently with no usable content.
+		// Emit an explicit error so callers can surface it rather than hang.
+		if seenToolUse && !seenDelta && ctx.Err() == nil {
+			ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
 		}
 
 		if err := cmd.Wait(); err != nil {

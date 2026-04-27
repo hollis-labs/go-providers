@@ -126,6 +126,8 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Set 1MB buffer for large tool results.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		var seenDelta, seenToolUse bool
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -151,6 +153,12 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "delta":
+					seenDelta = true
+				case "tool_use":
+					seenToolUse = true
+				}
 				ch <- ev
 			}
 		}
@@ -161,6 +169,13 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 			if !strings.Contains(err.Error(), "input/output error") {
 				log.Printf("pty: scanner error: %v", err)
 			}
+		}
+
+		// No-silent-drop guard: if the CLI produced only tool_use blocks and no
+		// text deltas, the stream would close silently with no usable content.
+		// Emit an explicit error so callers can surface it rather than hang.
+		if seenToolUse && !seenDelta && ctx.Err() == nil {
+			ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
 		}
 
 		// Wait for process to finish.

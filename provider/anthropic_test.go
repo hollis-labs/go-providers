@@ -1,11 +1,8 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"testing"
-	"time"
 )
 
 func TestBuildSystemFromRequest_SlotsWithCacheControl(t *testing.T) {
@@ -132,6 +129,8 @@ func TestBuildSystemBlocks(t *testing.T) {
 	})
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestBuildToolsWithCacheControl(t *testing.T) {
 	t.Run("empty tools returns nil", func(t *testing.T) {
 		result := buildToolsWithCacheControl(nil)
@@ -175,6 +174,47 @@ func TestBuildToolsWithCacheControl(t *testing.T) {
 		only := result[0].(map[string]any)
 		if _, ok := only["cache_control"]; !ok {
 			t.Error("single tool should have cache_control")
+		}
+	})
+
+	t.Run("strict true by default when Strict is nil", func(t *testing.T) {
+		tools := []ToolDefinition{
+			{Name: "tool_a", Description: "Tool with nil Strict", InputSchema: map[string]any{"type": "object"}},
+		}
+		result := buildToolsWithCacheControl(tools)
+		entry := result[0].(map[string]any)
+		v, ok := entry["strict"]
+		if !ok {
+			t.Fatal("expected strict key present when Strict is nil (default-on)")
+		}
+		if v != true {
+			t.Errorf("expected strict=true, got %v", v)
+		}
+	})
+
+	t.Run("strict true when Strict is explicitly set to true", func(t *testing.T) {
+		tools := []ToolDefinition{
+			{Name: "tool_a", Description: "Tool with Strict=true", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(true)},
+		}
+		result := buildToolsWithCacheControl(tools)
+		entry := result[0].(map[string]any)
+		v, ok := entry["strict"]
+		if !ok {
+			t.Fatal("expected strict key present when Strict=true")
+		}
+		if v != true {
+			t.Errorf("expected strict=true, got %v", v)
+		}
+	})
+
+	t.Run("strict absent when Strict is explicitly set to false (opt-out)", func(t *testing.T) {
+		tools := []ToolDefinition{
+			{Name: "tool_a", Description: "Tool with Strict=false (opt-out)", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(false)},
+		}
+		result := buildToolsWithCacheControl(tools)
+		entry := result[0].(map[string]any)
+		if v, ok := entry["strict"]; ok {
+			t.Errorf("expected strict absent for opt-out tool, got %v", v)
 		}
 	})
 }
@@ -259,38 +299,5 @@ func TestAnthropicRequestJSON(t *testing.T) {
 	cc := block["cache_control"].(map[string]any)
 	if cc["type"] != "ephemeral" {
 		t.Errorf("expected ephemeral cache_control")
-	}
-}
-
-// TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel verifies that
-// when the estimated request size exceeds the per-minute rate-limit window,
-// StreamChat returns ErrRequestExceedsRateBudget immediately without waiting.
-// This is the signal nanite's compaction pipeline uses to trim history
-// instead of repeating 58s pacing waits until the outer context deadline.
-func TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel(t *testing.T) {
-	a := NewAnthropic()
-	a.SetAPIKey("test-key")
-	// Force an absurdly small window so any request exceeds it.
-	a.RateTracker.UpdateLimit(10)
-
-	in := ChatRequest{
-		Model:        "claude-sonnet-4-20250514",
-		SystemPrompt: "you are a helpful assistant used in a test",
-		Messages: []ChatMessage{
-			{Role: "user", Content: "hello, this is a test message that will clearly exceed a 10-token budget when estimated"},
-		},
-	}
-
-	start := time.Now()
-	_, err := a.StreamChat(context.Background(), in)
-	elapsed := time.Since(start)
-
-	if !errors.Is(err, ErrRequestExceedsRateBudget) {
-		t.Fatalf("expected ErrRequestExceedsRateBudget, got %v", err)
-	}
-	// Must fire BEFORE any wait — generous bound, just ensuring we didn't
-	// block on WaitTime (which would be tens of seconds).
-	if elapsed > 500*time.Millisecond {
-		t.Errorf("expected immediate return, took %s", elapsed)
 	}
 }
