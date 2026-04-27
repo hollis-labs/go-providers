@@ -267,6 +267,125 @@ func TestMarshalMessagesCacheControl(t *testing.T) {
 	}
 }
 
+// TestMarshalMessages_CacheControlSkipsThinkingBlocks verifies that
+// marshalMessagesWithCacheCount applies cache_control to the last *non-thinking*
+// block. Anthropic rejects cache_control on thinking blocks; if the message
+// ends with a thinking block, caching must still attach to the prior block.
+func TestMarshalMessages_CacheControlSkipsThinkingBlocks(t *testing.T) {
+	t.Run("[text, thinking] ending → cache_control on text", func(t *testing.T) {
+		messages := []ChatMessage{
+			{Role: "user", Content: "ignored"},
+			{
+				Role: "assistant",
+				ContentBlocks: []ContentBlock{
+					{Type: "text", Text: "answer"},
+					{Type: "thinking", Text: "ponder", Signature: "sig"},
+				},
+			},
+			{Role: "user", Content: "follow-up"},
+		}
+		// cacheCount=2 → both user messages cached; assistant message at index 1
+		// is NOT in cacheSet, so its cache_control is purely a defensive check
+		// that the assistant blocks render correctly.
+		result := marshalMessagesWithCacheCount(messages, 2)
+		assistant := result[1].(map[string]any)
+		blocks, ok := assistant["content"].([]map[string]any)
+		if !ok {
+			t.Fatalf("expected []map[string]any blocks, got %T", assistant["content"])
+		}
+		if len(blocks) != 2 {
+			t.Fatalf("want 2 blocks, got %d", len(blocks))
+		}
+		// Assistant message isn't cached, so neither block carries cache_control.
+		// The point of this test is the [text, thinking] shape doesn't crash.
+		if _, ok := blocks[0]["cache_control"]; ok {
+			t.Error("uncached assistant text should not carry cache_control")
+		}
+		if _, ok := blocks[1]["cache_control"]; ok {
+			t.Error("thinking block must never carry cache_control")
+		}
+	})
+
+	t.Run("cached user message with [text, thinking] → cache_control on text", func(t *testing.T) {
+		// Construct a user message whose last block is thinking — exercises the
+		// lastNonThinkingIdx logic on a cached message.
+		messages := []ChatMessage{
+			{
+				Role: "user",
+				ContentBlocks: []ContentBlock{
+					{Type: "text", Text: "important"},
+					{Type: "thinking", Text: "scratch", Signature: "sig"},
+				},
+			},
+		}
+		result := marshalMessagesWithCacheCount(messages, 1)
+		user := result[0].(map[string]any)
+		blocks, ok := user["content"].([]map[string]any)
+		if !ok {
+			t.Fatalf("expected []map[string]any blocks, got %T", user["content"])
+		}
+		if len(blocks) != 2 {
+			t.Fatalf("want 2 blocks, got %d", len(blocks))
+		}
+		// Last NON-thinking block (index 0, the text) gets cache_control.
+		if _, ok := blocks[0]["cache_control"]; !ok {
+			t.Error("expected cache_control on the text block (last non-thinking)")
+		}
+		// Thinking block must never carry cache_control.
+		if _, ok := blocks[1]["cache_control"]; ok {
+			t.Error("thinking block must NOT carry cache_control")
+		}
+	})
+
+	t.Run("all-thinking message → no cache_control anywhere (no non-thinking block)", func(t *testing.T) {
+		messages := []ChatMessage{
+			{
+				Role: "user",
+				ContentBlocks: []ContentBlock{
+					{Type: "thinking", Text: "a", Signature: "s1"},
+					{Type: "thinking", Text: "b", Signature: "s2"},
+				},
+			},
+		}
+		result := marshalMessagesWithCacheCount(messages, 1)
+		user := result[0].(map[string]any)
+		blocks, ok := user["content"].([]map[string]any)
+		if !ok {
+			t.Fatalf("expected []map[string]any blocks, got %T", user["content"])
+		}
+		for i, b := range blocks {
+			if _, ok := b["cache_control"]; ok {
+				t.Errorf("block %d (thinking-only message) must not carry cache_control", i)
+			}
+		}
+	})
+
+	t.Run("trailing text block with thinking earlier → cache_control on trailing text", func(t *testing.T) {
+		messages := []ChatMessage{
+			{
+				Role: "user",
+				ContentBlocks: []ContentBlock{
+					{Type: "thinking", Text: "scratch", Signature: "sig"},
+					{Type: "text", Text: "answer"},
+				},
+			},
+		}
+		result := marshalMessagesWithCacheCount(messages, 1)
+		user := result[0].(map[string]any)
+		blocks, ok := user["content"].([]map[string]any)
+		if !ok {
+			t.Fatalf("expected []map[string]any blocks, got %T", user["content"])
+		}
+		// Last block (text, index 1) gets cache_control.
+		if _, ok := blocks[1]["cache_control"]; !ok {
+			t.Error("expected cache_control on trailing text block")
+		}
+		if _, ok := blocks[0]["cache_control"]; ok {
+			t.Error("leading thinking block must NOT carry cache_control")
+		}
+	})
+}
+
 func TestAnthropicRequestJSON(t *testing.T) {
 	// Verify the anthropicRequest marshals correctly with structured system blocks.
 	req := anthropicRequest{
@@ -314,8 +433,11 @@ func TestModelSupportsInterleavedThinking(t *testing.T) {
 	supported := []string{
 		"claude-opus-4-20250514",
 		"claude-sonnet-4-20250514",
-		"claude-opus-4-5-20250514",
-		"claude-sonnet-4-5-20250514",
+		"claude-opus-4-5-20250930",
+		"claude-sonnet-4-5-20250930",
+		"claude-haiku-4-5-20251001",
+		// Boundary: exactly the minimum date.
+		"claude-opus-4-20250514",
 	}
 	for _, m := range supported {
 		if !modelSupportsInterleavedThinking(m) {
@@ -323,19 +445,107 @@ func TestModelSupportsInterleavedThinking(t *testing.T) {
 		}
 	}
 
-	unsupported := []string{
-		"claude-3-opus-20240229",
-		"claude-3-sonnet-20240229",
-		"gpt-4o",
-		"gemini-1.5-pro",
-		"claude-2.1",
-		"",
+	unsupported := map[string]string{
+		"claude-3-opus-20240229":       "Claude 3 family",
+		"claude-3-sonnet-20240229":     "Claude 3 family",
+		"claude-3-5-sonnet-20241022":   "Claude 3.5 family (parts[1]=3)",
+		"gpt-4o":                       "wrong vendor",
+		"gemini-1.5-pro":               "wrong vendor",
+		"claude-2.1":                   "no date suffix, wrong shape",
+		"":                             "empty model",
+		"claude-opus-40-20250514":      "false-prefix candidate (parts[2]=40)",
+		"claude-opus-4-20250513":       "date one day before minimum",
+		"claude-opus-4-20240514":       "year before minimum",
+		"claude-flash-4-20250514":      "non-canonical family",
+		"claude-opus-4-x-20250514":     "non-numeric minor segment",
+		"claude-opus-4-20250514-extra": "trailing garbage (6 parts)",
+		"claude-opus-4":                "missing date",
+		"claude-opus-4-2025051":        "7-digit date",
+		"claude-opus-4-202505141":      "9-digit date",
 	}
-	for _, m := range unsupported {
+	for m, why := range unsupported {
 		if modelSupportsInterleavedThinking(m) {
-			t.Errorf("expected %q NOT to support interleaved thinking", m)
+			t.Errorf("expected %q NOT to support interleaved thinking (%s)", m, why)
 		}
 	}
+}
+
+// TestShouldEnableInterleavedThinking verifies the header+config pair gate.
+// Either being missing must result in no enable, so callers can't end up
+// sending the beta header without the corresponding thinking_config.
+func TestShouldEnableInterleavedThinking(t *testing.T) {
+	model := "claude-opus-4-20250514"
+	cases := []struct {
+		name string
+		cfg  ReasoningConfig
+		want bool
+	}{
+		{
+			name: "fully configured → enable",
+			cfg: ReasoningConfig{
+				Enabled:      true,
+				BudgetTokens: 8000,
+				BetasHeader:  InterleavedThinkingBetaHeader,
+			},
+			want: true,
+		},
+		{
+			name: "Enabled=true but BudgetTokens=0 → no enable (gate prevents silent no-op)",
+			cfg: ReasoningConfig{
+				Enabled:      true,
+				BudgetTokens: 0,
+				BetasHeader:  InterleavedThinkingBetaHeader,
+			},
+			want: false,
+		},
+		{
+			name: "Enabled=false → no enable",
+			cfg: ReasoningConfig{
+				Enabled:      false,
+				BudgetTokens: 8000,
+				BetasHeader:  InterleavedThinkingBetaHeader,
+			},
+			want: false,
+		},
+		{
+			name: "missing beta header → no enable",
+			cfg: ReasoningConfig{
+				Enabled:      true,
+				BudgetTokens: 8000,
+				BetasHeader:  "",
+			},
+			want: false,
+		},
+		{
+			name: "wrong beta header value → no enable",
+			cfg: ReasoningConfig{
+				Enabled:      true,
+				BudgetTokens: 8000,
+				BetasHeader:  "some-other-beta",
+			},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldEnableInterleavedThinking(tc.cfg, model)
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// Independent axis: unsupported model rejects even with a fully populated cfg.
+	t.Run("unsupported model → no enable", func(t *testing.T) {
+		cfg := ReasoningConfig{
+			Enabled:      true,
+			BudgetTokens: 8000,
+			BetasHeader:  InterleavedThinkingBetaHeader,
+		}
+		if shouldEnableInterleavedThinking(cfg, "claude-3-opus-20240229") {
+			t.Error("expected unsupported model to reject interleaved thinking")
+		}
+	})
 }
 
 // TestReasoningConfigContext verifies that WithReasoningConfig / ReasoningConfigFromContext

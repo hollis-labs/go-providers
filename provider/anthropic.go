@@ -26,26 +26,84 @@ const anthropicAPI = "https://api.anthropic.com/v1/messages"
 const anthropicBetaBase = "prompt-caching-2024-07-31"
 
 // InterleavedThinkingBetaHeader is the beta header value that enables
-// interleaved thinking (thinking_delta blocks). Supported on Claude Opus/Sonnet
-// 4.x models (date suffix ≥ 20250514). F3 / CW-20260420-0023.
+// interleaved thinking (thinking_delta blocks). Supported on Claude Opus/Sonnet/
+// Haiku 4.x models with a release-date suffix on or after 20250514.
+// F3 / CW-20260420-0023.
 const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 
+// minInterleavedThinkingModelDate is the earliest YYYYMMDD release-date suffix
+// for which interleaved thinking is supported (2025-05-14 GA).
+const minInterleavedThinkingModelDate = 20250514
+
 // modelSupportsInterleavedThinking reports whether the given model ID supports
-// the interleaved-thinking-2025-05-14 beta feature. The feature is available on
-// Claude Opus 4.x and Sonnet 4.x family (identified by the claude-*-4-* naming
-// pattern with date suffix ≥ 20250514).
+// the interleaved-thinking-2025-05-14 beta feature. Accepts the canonical
+// Anthropic naming pattern claude-{opus|sonnet|haiku}-4[-<minor>]-<YYYYMMDD>
+// and requires the trailing date to be on or after minInterleavedThinkingModelDate.
+//
+// Examples accepted:
+//
+//	claude-opus-4-20250514
+//	claude-sonnet-4-5-20250930
+//	claude-haiku-4-5-20251001
+//
+// Examples rejected: anything outside the family, claude-{family}-4 with date
+// before 20250514, or false-prefix matches like claude-opus-40-*.
 func modelSupportsInterleavedThinking(model string) bool {
-	lower := strings.ToLower(model)
-	for _, prefix := range []string{
-		"claude-opus-4-",
-		"claude-sonnet-4-",
-		"claude-haiku-4-", // future-proof; unlikely but included for completeness
-	} {
-		if strings.Contains(lower, strings.TrimSuffix(prefix, "-")) {
-			return true
+	parts := strings.Split(strings.ToLower(model), "-")
+	// Accept either claude-{family}-4-{date} (4 parts) or
+	// claude-{family}-4-{minor}-{date} (5 parts).
+	if len(parts) != 4 && len(parts) != 5 {
+		return false
+	}
+	if parts[0] != "claude" {
+		return false
+	}
+	switch parts[1] {
+	case "opus", "sonnet", "haiku":
+	default:
+		return false
+	}
+	// The major-version segment must be exactly "4" (rejects e.g. "40").
+	if parts[2] != "4" {
+		return false
+	}
+	if len(parts) == 5 && !allDigits(parts[3]) {
+		return false
+	}
+	datePart := parts[len(parts)-1]
+	if len(datePart) != 8 || !allDigits(datePart) {
+		return false
+	}
+	dateValue, err := strconv.Atoi(datePart)
+	if err != nil {
+		return false
+	}
+	return dateValue >= minInterleavedThinkingModelDate
+}
+
+// allDigits reports whether s is non-empty and contains only ASCII digits.
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// shouldEnableInterleavedThinking decides whether to send the
+// interleaved-thinking beta header and the thinking_config request parameter
+// for a request. The two are sent as a pair: Anthropic ignores the beta header
+// without a corresponding thinking_config, so we gate them together to avoid
+// silent no-ops.
+func shouldEnableInterleavedThinking(cfg ReasoningConfig, model string) bool {
+	return cfg.Enabled &&
+		cfg.BudgetTokens > 0 &&
+		cfg.BetasHeader == InterleavedThinkingBetaHeader &&
+		modelSupportsInterleavedThinking(model)
 }
 
 // Anthropic implements the Provider and CacheableProvider interfaces for the Anthropic Messages API.
@@ -314,12 +372,21 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 
 		if len(m.ContentBlocks) > 0 {
 			// Multi-block message (tool results, tool use, thinking blocks).
-			// If caching, add cache_control to the last non-thinking block.
-			// Thinking blocks do not receive cache_control markers.
+			// If caching, add cache_control to the last non-thinking block —
+			// Anthropic rejects cache_control on thinking blocks, but a message
+			// that ends with a thinking block (e.g. [text, thinking]) should
+			// still cache its prior content.
+			lastNonThinkingIdx := -1
+			for j := len(m.ContentBlocks) - 1; j >= 0; j-- {
+				if m.ContentBlocks[j].Type != "thinking" {
+					lastNonThinkingIdx = j
+					break
+				}
+			}
 			blocks := make([]map[string]any, len(m.ContentBlocks))
 			for j, b := range m.ContentBlocks {
 				block := contentBlockToMap(b)
-				if shouldCache && j == len(m.ContentBlocks)-1 && b.Type != "thinking" {
+				if shouldCache && j == lastNonThinkingIdx {
 					block["cache_control"] = map[string]string{"type": "ephemeral"}
 				}
 				blocks[j] = block
@@ -376,13 +443,11 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 		model = "claude-sonnet-4-20250514"
 	}
 
-	// F3 (CW-20260420-0023): read reasoning config from context. When reasoning
-	// is enabled AND the model supports interleaved thinking, we add the beta
-	// header and the thinking_config parameter.
+	// F3 (CW-20260420-0023): read reasoning config from context and decide
+	// whether to enable interleaved thinking. shouldEnableInterleavedThinking
+	// gates header + thinking_config as a pair (see helper docs).
 	reasoningCfg := ReasoningConfigFromContext(ctx)
-	interleavedThinking := reasoningCfg.Enabled &&
-		reasoningCfg.BetasHeader == InterleavedThinkingBetaHeader &&
-		modelSupportsInterleavedThinking(model)
+	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 
 	body := anthropicRequest{
 		Model:     model,
@@ -394,8 +459,10 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	if len(in.Tools) > 0 {
 		body.Tools = a.buildToolsWithCacheControl(in.Tools)
 	}
-	// F3: attach thinking_config when interleaved thinking is active.
-	if interleavedThinking && reasoningCfg.BudgetTokens > 0 {
+	// F3: attach thinking_config whenever the interleavedThinking gate is open.
+	// The gate already requires BudgetTokens > 0, so the pair (header + config)
+	// is always sent together.
+	if interleavedThinking {
 		body.ThinkingConfig = &anthropicThinkingConfig{
 			Type:         "enabled",
 			BudgetTokens: reasoningCfg.BudgetTokens,

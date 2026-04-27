@@ -250,8 +250,10 @@ type ProviderWithUsage interface {
 type ReasoningConfig struct {
 	// Enabled reports whether reasoning/thinking blocks should be requested.
 	Enabled bool
-	// BudgetTokens is the token budget hint for the reasoning pass.
-	// Only meaningful when Enabled is true. 0 means "use provider default."
+	// BudgetTokens is the token budget for the reasoning pass. Required
+	// (must be > 0) for reasoning to actually be requested. With Enabled=true
+	// and BudgetTokens=0, providers will not send a reasoning request — the
+	// pair must be set explicitly.
 	BudgetTokens int
 	// BetasHeader is an additional beta header value to append (e.g.
 	// "interleaved-thinking-2025-05-14"). Empty means no extra flag.
