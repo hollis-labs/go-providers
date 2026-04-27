@@ -305,6 +305,236 @@ func TestAnthropicRequestJSON(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// F3 (CW-20260420-0023) — interleaved thinking tests
+// ---------------------------------------------------------------------------
+
+// TestModelSupportsInterleavedThinking verifies the feature-detect function.
+func TestModelSupportsInterleavedThinking(t *testing.T) {
+	supported := []string{
+		"claude-opus-4-20250514",
+		"claude-sonnet-4-20250514",
+		"claude-opus-4-5-20250514",
+		"claude-sonnet-4-5-20250514",
+	}
+	for _, m := range supported {
+		if !modelSupportsInterleavedThinking(m) {
+			t.Errorf("expected %q to support interleaved thinking", m)
+		}
+	}
+
+	unsupported := []string{
+		"claude-3-opus-20240229",
+		"claude-3-sonnet-20240229",
+		"gpt-4o",
+		"gemini-1.5-pro",
+		"claude-2.1",
+		"",
+	}
+	for _, m := range unsupported {
+		if modelSupportsInterleavedThinking(m) {
+			t.Errorf("expected %q NOT to support interleaved thinking", m)
+		}
+	}
+}
+
+// TestReasoningConfigContext verifies that WithReasoningConfig / ReasoningConfigFromContext
+// round-trip correctly via context transport.
+func TestReasoningConfigContext(t *testing.T) {
+	cfg := ReasoningConfig{
+		Enabled:      true,
+		BudgetTokens: 8000,
+		BetasHeader:  InterleavedThinkingBetaHeader,
+	}
+	ctx := WithReasoningConfig(context.Background(), cfg)
+	got := ReasoningConfigFromContext(ctx)
+	if got.Enabled != cfg.Enabled {
+		t.Errorf("Enabled: got %v want %v", got.Enabled, cfg.Enabled)
+	}
+	if got.BudgetTokens != cfg.BudgetTokens {
+		t.Errorf("BudgetTokens: got %d want %d", got.BudgetTokens, cfg.BudgetTokens)
+	}
+	if got.BetasHeader != cfg.BetasHeader {
+		t.Errorf("BetasHeader: got %q want %q", got.BetasHeader, cfg.BetasHeader)
+	}
+
+	// Zero context returns zero value.
+	zero := ReasoningConfigFromContext(context.Background())
+	if zero.Enabled {
+		t.Error("zero context should return Enabled=false")
+	}
+}
+
+// TestHandleSSEData_ThinkingDelta verifies that thinking_delta events are
+// accumulated and emitted as EventThinking on content_block_stop.
+func TestHandleSSEData_ThinkingDelta(t *testing.T) {
+	a := NewAnthropic()
+	ch := make(chan StreamEvent, 16)
+	var currentToolUse *toolUseAccumulator
+	var currentThinking *thinkingAccumulator
+	var blockIdx int
+
+	// Start a thinking block.
+	a.handleSSEData("content_block_start",
+		`{"index":0,"content_block":{"type":"thinking","signature":""}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, true)
+	if currentThinking == nil {
+		t.Fatal("expected thinkingAccumulator to be set after content_block_start")
+	}
+
+	// Send thinking_delta events.
+	a.handleSSEData("content_block_delta",
+		`{"index":0,"delta":{"type":"thinking_delta","thinking":"Let me think about"}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, true)
+	a.handleSSEData("content_block_delta",
+		`{"index":0,"delta":{"type":"thinking_delta","thinking":" this carefully."}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, true)
+
+	// Send signature_delta.
+	a.handleSSEData("content_block_delta",
+		`{"index":0,"delta":{"type":"signature_delta","signature":"sig-abc-123"}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, true)
+
+	// Stop the block — should emit EventThinking.
+	a.handleSSEData("content_block_stop",
+		`{"index":0}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, true)
+
+	close(ch)
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 EventThinking event, got %d: %+v", len(events), events)
+	}
+	ev := events[0]
+	if ev.Type != EventThinking {
+		t.Errorf("Type: got %q want %q", ev.Type, EventThinking)
+	}
+	if ev.ThinkingBlock == nil {
+		t.Fatal("ThinkingBlock must not be nil")
+	}
+	if ev.ThinkingBlock.Thinking != "Let me think about this carefully." {
+		t.Errorf("Thinking: got %q", ev.ThinkingBlock.Thinking)
+	}
+	if ev.ThinkingBlock.Signature != "sig-abc-123" {
+		t.Errorf("Signature: got %q", ev.ThinkingBlock.Signature)
+	}
+}
+
+// TestHandleSSEData_ThinkingDisabled verifies that thinking_delta events are
+// ignored when interleavedThinking=false (non-supporting models).
+func TestHandleSSEData_ThinkingDisabled(t *testing.T) {
+	a := NewAnthropic()
+	ch := make(chan StreamEvent, 16)
+	var currentToolUse *toolUseAccumulator
+	var currentThinking *thinkingAccumulator
+	var blockIdx int
+
+	// Even with type=thinking in the block start, no accumulator is set.
+	a.handleSSEData("content_block_start",
+		`{"index":0,"content_block":{"type":"thinking"}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, false)
+	if currentThinking != nil {
+		t.Error("expected thinkingAccumulator to be nil when interleavedThinking=false")
+	}
+
+	// thinking_delta should not emit anything.
+	a.handleSSEData("content_block_delta",
+		`{"index":0,"delta":{"type":"thinking_delta","thinking":"ignored"}}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, false)
+	a.handleSSEData("content_block_stop",
+		`{"index":0}`,
+		ch, &currentToolUse, &currentThinking, &blockIdx, false)
+
+	close(ch)
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected no events, got %d: %+v", len(events), events)
+	}
+}
+
+// TestContentBlockToMap_ThinkingBlock verifies that thinking ContentBlocks are
+// serialized with "thinking" and "signature" keys (not "text"), preserving
+// the signed block verbatim for round-trip.
+func TestContentBlockToMap_ThinkingBlock(t *testing.T) {
+	b := ContentBlock{
+		Type:      "thinking",
+		Text:      "I reasoned about this.",
+		Signature: "sig-xyz-456",
+	}
+	m := contentBlockToMap(b)
+	if m["type"] != "thinking" {
+		t.Errorf("type: got %v", m["type"])
+	}
+	if m["thinking"] != "I reasoned about this." {
+		t.Errorf("thinking: got %v", m["thinking"])
+	}
+	if m["signature"] != "sig-xyz-456" {
+		t.Errorf("signature: got %v", m["signature"])
+	}
+	// Must NOT include "text" key (Anthropic rejects unknown fields on thinking blocks).
+	if _, ok := m["text"]; ok {
+		t.Error("thinking block must not have 'text' key")
+	}
+}
+
+// TestThinkingBlockRoundTrip verifies that a thinking ContentBlock serialized
+// via marshalMessagesWithCacheCount produces the correct JSON shape.
+func TestThinkingBlockRoundTrip(t *testing.T) {
+	messages := []ChatMessage{
+		{
+			Role: "assistant",
+			ContentBlocks: []ContentBlock{
+				{Type: "thinking", Text: "reasoning here", Signature: "sig-round-trip"},
+				{Type: "text", Text: "Here is my answer."},
+			},
+		},
+	}
+	result := marshalMessagesWithCacheCount(messages, 0)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	msg, ok := result[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", result[0])
+	}
+	content, ok := msg["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("content should be []map, got %T", msg["content"])
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(content))
+	}
+
+	// Block 0: thinking
+	tb := content[0]
+	if tb["type"] != "thinking" {
+		t.Errorf("block 0 type: got %v", tb["type"])
+	}
+	if tb["thinking"] != "reasoning here" {
+		t.Errorf("block 0 thinking: got %v", tb["thinking"])
+	}
+	if tb["signature"] != "sig-round-trip" {
+		t.Errorf("block 0 signature: got %v", tb["signature"])
+	}
+	if _, hasText := tb["text"]; hasText {
+		t.Error("block 0 must not have 'text' key")
+	}
+
+	// Block 1: text
+	textBlock := content[1]
+	if textBlock["type"] != "text" {
+		t.Errorf("block 1 type: got %v", textBlock["type"])
+	}
+}
+
 // TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel verifies that
 // when the estimated request size exceeds the per-minute rate-limit window,
 // StreamChat returns ErrRequestExceedsRateBudget immediately without waiting.

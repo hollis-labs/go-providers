@@ -21,6 +21,33 @@ import (
 
 const anthropicAPI = "https://api.anthropic.com/v1/messages"
 
+// anthropicBetaBase is the baseline beta header value sent on all Anthropic
+// streaming requests (prompt caching).
+const anthropicBetaBase = "prompt-caching-2024-07-31"
+
+// InterleavedThinkingBetaHeader is the beta header value that enables
+// interleaved thinking (thinking_delta blocks). Supported on Claude Opus/Sonnet
+// 4.x models (date suffix ≥ 20250514). F3 / CW-20260420-0023.
+const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
+
+// modelSupportsInterleavedThinking reports whether the given model ID supports
+// the interleaved-thinking-2025-05-14 beta feature. The feature is available on
+// Claude Opus 4.x and Sonnet 4.x family (identified by the claude-*-4-* naming
+// pattern with date suffix ≥ 20250514).
+func modelSupportsInterleavedThinking(model string) bool {
+	lower := strings.ToLower(model)
+	for _, prefix := range []string{
+		"claude-opus-4-",
+		"claude-sonnet-4-",
+		"claude-haiku-4-", // future-proof; unlikely but included for completeness
+	} {
+		if strings.Contains(lower, strings.TrimSuffix(prefix, "-")) {
+			return true
+		}
+	}
+	return false
+}
+
 // Anthropic implements the Provider and CacheableProvider interfaces for the Anthropic Messages API.
 type Anthropic struct {
 	apiKey         string
@@ -75,12 +102,22 @@ func (a *Anthropic) recentMessageCacheCount() int {
 
 // anthropicRequest is the request body for the Anthropic Messages API.
 type anthropicRequest struct {
-	Model     string `json:"model"`
-	MaxTokens int    `json:"max_tokens"`
-	System    any    `json:"system,omitempty"`
-	Messages  []any  `json:"messages"`
-	Stream    bool   `json:"stream"`
-	Tools     []any  `json:"tools,omitempty"`
+	Model         string `json:"model"`
+	MaxTokens     int    `json:"max_tokens"`
+	System        any    `json:"system,omitempty"`
+	Messages      []any  `json:"messages"`
+	Stream        bool   `json:"stream"`
+	Tools         []any  `json:"tools,omitempty"`
+	// ThinkingConfig enables extended thinking when set. Only sent when
+	// interleaved thinking is active (F3 / CW-20260420-0023).
+	ThinkingConfig *anthropicThinkingConfig `json:"thinking,omitempty"`
+}
+
+// anthropicThinkingConfig is the thinking_config parameter for the
+// Anthropic Messages API when extended/interleaved thinking is enabled.
+type anthropicThinkingConfig struct {
+	Type      string `json:"type"`       // "enabled"
+	BudgetTokens int `json:"budget_tokens"`
 }
 
 // buildSystemBlocks wraps a system prompt in a content block.
@@ -216,6 +253,46 @@ func marshalMessages(messages []ChatMessage) []any {
 	return marshalMessagesWithCacheCount(messages, 2)
 }
 
+// contentBlockToMap converts a ContentBlock to the Anthropic API map format.
+// Thinking blocks (type="thinking") require "thinking" and "signature" keys
+// rather than "text" — this function handles that translation.
+// F3 / CW-20260420-0023.
+func contentBlockToMap(b ContentBlock) map[string]any {
+	block := map[string]any{"type": b.Type}
+	// thinking blocks use "thinking" key instead of "text"
+	if b.Type == "thinking" {
+		if b.Text != "" {
+			block["thinking"] = b.Text
+		}
+		if b.Signature != "" {
+			block["signature"] = b.Signature
+		}
+		return block
+	}
+	if b.Text != "" {
+		block["text"] = b.Text
+	}
+	if b.ID != "" {
+		block["id"] = b.ID
+	}
+	if b.Name != "" {
+		block["name"] = b.Name
+	}
+	if b.Input != nil {
+		block["input"] = b.Input
+	}
+	if b.ToolUseID != "" {
+		block["tool_use_id"] = b.ToolUseID
+	}
+	if b.Content != "" {
+		block["content"] = b.Content
+	}
+	if b.IsError {
+		block["is_error"] = true
+	}
+	return block
+}
+
 // marshalMessagesWithCacheCount is the shared implementation.
 // cacheCount controls how many of the trailing user messages get cache_control.
 func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any {
@@ -236,47 +313,20 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 		shouldCache := cacheSet[i]
 
 		if len(m.ContentBlocks) > 0 {
-			// Multi-block message (tool results, tool use responses).
-			// If caching, add cache_control to the last block.
-			if shouldCache {
-				blocks := make([]map[string]any, len(m.ContentBlocks))
-				for j, b := range m.ContentBlocks {
-					block := map[string]any{"type": b.Type}
-					if b.Text != "" {
-						block["text"] = b.Text
-					}
-					if b.ID != "" {
-						block["id"] = b.ID
-					}
-					if b.Name != "" {
-						block["name"] = b.Name
-					}
-					if b.Input != nil {
-						block["input"] = b.Input
-					}
-					if b.ToolUseID != "" {
-						block["tool_use_id"] = b.ToolUseID
-					}
-					if b.Content != "" {
-						block["content"] = b.Content
-					}
-					if b.IsError {
-						block["is_error"] = true
-					}
-					if j == len(m.ContentBlocks)-1 {
-						block["cache_control"] = map[string]string{"type": "ephemeral"}
-					}
-					blocks[j] = block
+			// Multi-block message (tool results, tool use, thinking blocks).
+			// If caching, add cache_control to the last non-thinking block.
+			// Thinking blocks do not receive cache_control markers.
+			blocks := make([]map[string]any, len(m.ContentBlocks))
+			for j, b := range m.ContentBlocks {
+				block := contentBlockToMap(b)
+				if shouldCache && j == len(m.ContentBlocks)-1 && b.Type != "thinking" {
+					block["cache_control"] = map[string]string{"type": "ephemeral"}
 				}
-				result[i] = map[string]any{
-					"role":    m.Role,
-					"content": blocks,
-				}
-			} else {
-				result[i] = map[string]any{
-					"role":    m.Role,
-					"content": m.ContentBlocks,
-				}
+				blocks[j] = block
+			}
+			result[i] = map[string]any{
+				"role":    m.Role,
+				"content": blocks,
 			}
 		} else {
 			// Simple text message.
@@ -326,6 +376,14 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 		model = "claude-sonnet-4-20250514"
 	}
 
+	// F3 (CW-20260420-0023): read reasoning config from context. When reasoning
+	// is enabled AND the model supports interleaved thinking, we add the beta
+	// header and the thinking_config parameter.
+	reasoningCfg := ReasoningConfigFromContext(ctx)
+	interleavedThinking := reasoningCfg.Enabled &&
+		reasoningCfg.BetasHeader == InterleavedThinkingBetaHeader &&
+		modelSupportsInterleavedThinking(model)
+
 	body := anthropicRequest{
 		Model:     model,
 		MaxTokens: 16384,
@@ -335,6 +393,13 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	}
 	if len(in.Tools) > 0 {
 		body.Tools = a.buildToolsWithCacheControl(in.Tools)
+	}
+	// F3: attach thinking_config when interleaved thinking is active.
+	if interleavedThinking && reasoningCfg.BudgetTokens > 0 {
+		body.ThinkingConfig = &anthropicThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: reasoningCfg.BudgetTokens,
+		}
 	}
 
 	// anthropicRequest is fully built; remainder of function constructs the
@@ -389,7 +454,13 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("x-api-key", a.apiKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		// F3 (CW-20260420-0023): append the interleaved-thinking beta header when
+		// the model and effort level support it; baseline prompt-caching is always set.
+		betaHeader := anthropicBetaBase
+		if interleavedThinking {
+			betaHeader += "," + InterleavedThinkingBetaHeader
+		}
+		req.Header.Set("anthropic-beta", betaHeader)
 
 		resp, err = a.client.Do(req)
 		if err != nil {
@@ -458,7 +529,7 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	)
 
 	ch := make(chan StreamEvent, 64)
-	go a.readSSEWithTracking(ctx, resp.Body, ch, span)
+	go a.readSSEWithTracking(ctx, resp.Body, ch, span, interleavedThinking)
 	return ch, nil
 }
 
@@ -483,10 +554,11 @@ func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
 
 // readSSEWithTracking wraps readSSE to record input tokens via the rate tracker
 // and finalize the provider span with token counts.
-func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent, span trace.Span) {
+// interleavedThinking signals whether thinking_delta events should be parsed.
+func (a *Anthropic) readSSEWithTracking(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent, span trace.Span, interleavedThinking bool) {
 	// Create an intermediary channel to intercept usage events.
 	inner := make(chan StreamEvent, 64)
-	go a.readSSE(ctx, body, inner)
+	go a.readSSE(ctx, body, inner, interleavedThinking)
 
 	var totalInput, totalOutput int
 	defer func() {
@@ -526,7 +598,7 @@ type toolUseAccumulator struct {
 }
 
 // readSSE parses the SSE stream from Anthropic and emits StreamEvents.
-func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent) {
+func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamEvent, interleavedThinking bool) {
 	defer close(ch)
 	defer body.Close()
 
@@ -536,6 +608,8 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 
 	var eventType string
 	var currentToolUse *toolUseAccumulator
+	// F3 (CW-20260420-0023): thinking block accumulator. One per content block.
+	var currentThinking *thinkingAccumulator
 	var currentBlockIdx int
 	_ = currentBlockIdx // tracked for correlation
 
@@ -556,7 +630,7 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			a.handleSSEData(eventType, data, ch, &currentToolUse, &currentBlockIdx)
+			a.handleSSEData(eventType, data, ch, &currentToolUse, &currentThinking, &currentBlockIdx, interleavedThinking)
 			continue
 		}
 	}
@@ -566,30 +640,55 @@ func (a *Anthropic) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- S
 	}
 }
 
+// thinkingAccumulator accumulates the thinking text and signature for one
+// interleaved thinking content block. Signature arrives in content_block_start
+// for redacted thinking; for standard thinking blocks it comes in the final
+// content_block_stop payload. In practice, thinking deltas arrive via
+// thinking_delta events and the signature via signature_delta events.
+// F3 / CW-20260420-0023.
+type thinkingAccumulator struct {
+	thinking  strings.Builder
+	signature string
+}
+
 // handleSSEData processes a single SSE data payload based on event type.
-func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent, currentToolUse **toolUseAccumulator, currentBlockIdx *int) {
+// interleavedThinking gates parsing of thinking_delta / signature_delta events.
+func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent, currentToolUse **toolUseAccumulator, currentThinking **thinkingAccumulator, currentBlockIdx *int, interleavedThinking bool) {
 	switch eventType {
 	case "content_block_start":
 		var payload struct {
 			Index        int `json:"index"`
 			ContentBlock struct {
-				Type string `json:"type"`
-				ID   string `json:"id,omitempty"`
-				Name string `json:"name,omitempty"`
-				Text string `json:"text,omitempty"`
+				Type      string `json:"type"`
+				ID        string `json:"id,omitempty"`
+				Name      string `json:"name,omitempty"`
+				Text      string `json:"text,omitempty"`
+				Signature string `json:"signature,omitempty"`
 			} `json:"content_block"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			return
 		}
 		*currentBlockIdx = payload.Index
-		if payload.ContentBlock.Type == "tool_use" {
+		switch payload.ContentBlock.Type {
+		case "tool_use":
 			*currentToolUse = &toolUseAccumulator{
 				id:   payload.ContentBlock.ID,
 				name: payload.ContentBlock.Name,
 			}
-		} else {
+			*currentThinking = nil
+		case "thinking":
+			if interleavedThinking {
+				acc := &thinkingAccumulator{}
+				// Signature may arrive here (unlikely for standard thinking) or
+				// via signature_delta events later.
+				acc.signature = payload.ContentBlock.Signature
+				*currentThinking = acc
+			}
 			*currentToolUse = nil
+		default:
+			*currentToolUse = nil
+			*currentThinking = nil
 		}
 
 	case "content_block_delta":
@@ -599,6 +698,8 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json,omitempty"`
+				Thinking    string `json:"thinking,omitempty"`    // thinking_delta
+				Signature   string `json:"signature,omitempty"`   // signature_delta
 			} `json:"delta"`
 		}
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -611,6 +712,16 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 		case "input_json_delta":
 			if *currentToolUse != nil {
 				(*currentToolUse).inputJSON.WriteString(payload.Delta.PartialJSON)
+			}
+		case "thinking_delta":
+			// F3 (CW-20260420-0023): accumulate thinking content.
+			if interleavedThinking && *currentThinking != nil {
+				(*currentThinking).thinking.WriteString(payload.Delta.Thinking)
+			}
+		case "signature_delta":
+			// F3: signature arrives as a separate delta event; append to the accumulator.
+			if interleavedThinking && *currentThinking != nil {
+				(*currentThinking).signature += payload.Delta.Signature
 			}
 		}
 
@@ -636,6 +747,18 @@ func (a *Anthropic) handleSSEData(eventType, data string, ch chan<- StreamEvent,
 				},
 			}
 			*currentToolUse = nil
+		}
+		// F3 (CW-20260420-0023): emit completed thinking block with signature.
+		if interleavedThinking && *currentThinking != nil {
+			acc := *currentThinking
+			ch <- StreamEvent{
+				Type: EventThinking,
+				ThinkingBlock: &ThinkingBlock{
+					Thinking:  acc.thinking.String(),
+					Signature: acc.signature,
+				},
+			}
+			*currentThinking = nil
 		}
 
 	case "message_delta":
