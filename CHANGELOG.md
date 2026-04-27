@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## v0.5.1
+
+- Added Anthropic interleaved-thinking-2025-05-14 support: new `ReasoningConfig` (with `Enabled`, `BudgetTokens`, `BetasHeader`) plumbed via `WithReasoningConfig` / `ReasoningConfigFromContext`. The Anthropic adapter sends the `interleaved-thinking-2025-05-14` beta header and `thinking_config` request parameter as a pair, gated on `BudgetTokens > 0` AND a supported model.
+- Added `EventThinking` stream event and `ThinkingBlock` payload (`Thinking` text + cryptographic `Signature`). The Anthropic adapter parses `thinking_delta` + `signature_delta` SSE blocks and emits a complete `EventThinking` on `content_block_stop`. Signatures must round-trip verbatim on subsequent turns; assistant-message marshaling preserves them via the new `Signature` field on `ContentBlock`.
+- Added `modelSupportsInterleavedThinking` feature detection. Accepts the canonical `claude-{opus|sonnet|haiku}-4[-<minor>]-<YYYYMMDD>` shape and requires the trailing date ≥ `20250514` (`minInterleavedThinkingModelDate`). Structured matching avoids `strings.Contains` false positives like `claude-opus-40-*`.
+- Fixed `marshalMessagesWithCacheCount` cache_control handling for messages ending with a thinking block (e.g. `[text, thinking]`). Previously, cache_control was skipped entirely when the last block was thinking; now `lastNonThinkingIdx` is computed and cache_control attaches to the last non-thinking block.
+- Tightened the interleaved-thinking gate: `Enabled=true` with `BudgetTokens=0` no longer sends the beta header (which would have been a silent no-op without `thinking_config`). Extracted as `shouldEnableInterleavedThinking` helper. `ReasoningConfig.BudgetTokens` doc updated to require `> 0` for reasoning to actually be requested.
+- Added regression tests: model-detection boundaries (false-prefix, pre-min-date, year-mismatch, non-numeric-minor, trailing-garbage); gate combinations (full enable, BudgetTokens=0, Enabled=false, missing/wrong header, unsupported model); cache_control with `[text, thinking]`, `[thinking, text]`, all-thinking, and cached-multi-block shapes; SSE thinking-delta accumulation + disabled-path no-op; thinking-block round-trip serialization.
+
+### Compatibility
+
+- `ContentBlock` gains a `Signature` field (only set on `type="thinking"` blocks). Existing callers of `ContentBlock` that don't construct thinking blocks are unaffected.
+- `StreamEvent` gains a `ThinkingBlock` field; existing event consumers that switch on `Type` can ignore `EventThinking` until they're ready to consume thinking deltas.
+
 ## v0.5.0
 
 - Introduced distinct named type `EventType` with canonical constants (`EventDelta`, `EventToolUse`, `EventUsage`, `EventError`, `EventDone`, `EventSessionID`); `StreamEvent.Type` is now compiler-enforced and consumers should use the named constants instead of string literals.
