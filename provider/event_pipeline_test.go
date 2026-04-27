@@ -95,6 +95,29 @@ func TestEventReactionPipelineNonStreaming(t *testing.T) {
 	}
 }
 
+func TestEventReactionPipelineCompleteWithUsageFallback(t *testing.T) {
+	mockProvider := stubNoUsageProvider{
+		response: "fallback response",
+		caps: ProviderCapabilities{
+			SupportsStreamJSON: false,
+		},
+	}
+
+	pipeline := NewEventReactionPipeline(mockProvider, DefaultEventReactionConfig())
+	result, err := pipeline.CompleteWithUsage(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "Hello"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteWithUsage failed: %v", err)
+	}
+	if result.Text != "fallback response" {
+		t.Fatalf("unexpected text: %q", result.Text)
+	}
+	if result.Usage != nil {
+		t.Fatalf("expected nil usage, got %+v", result.Usage)
+	}
+}
+
 // TestScopeGuardViolations tests the scope guard component.
 func TestScopeGuardViolations(t *testing.T) {
 	// Test with restrictive patterns
@@ -307,6 +330,11 @@ type mockNonStreamingProvider struct {
 	response     string
 }
 
+type stubNoUsageProvider struct {
+	response string
+	caps     ProviderCapabilities
+}
+
 func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	// Should not be called for non-streaming providers
 	return nil, nil
@@ -322,6 +350,18 @@ func (m *mockNonStreamingProvider) CompleteWithUsage(ctx context.Context, in Cha
 
 func (m *mockNonStreamingProvider) Capabilities() ProviderCapabilities {
 	return m.capabilities
+}
+
+func (s stubNoUsageProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+	return nil, nil
+}
+
+func (s stubNoUsageProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	return s.response, nil
+}
+
+func (s stubNoUsageProvider) Capabilities() ProviderCapabilities {
+	return s.caps
 }
 
 // TestGlobToRegex tests the glob pattern to regex conversion.

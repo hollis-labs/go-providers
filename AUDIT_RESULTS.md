@@ -22,7 +22,7 @@
 | 7 | Tests exist (`*_test.go`) | pass | 29 test files in `provider/`. HTTP adapters use `httptest.NewServer`; no network or API keys required. Coverage percentage not computed in this read-only audit. |
 | 8 | Examples (`example_test.go` or `examples/`) | pass | `provider/example_test.go` adds runnable examples for the registry and Anthropic streaming path. |
 | 9 | State/session files NOT misclassified as library docs | pass | No `.agentrc/`, `BOOT.md`, `CLAUDE.md`, `bootstrap.md`, `boot-prompt.md`, or `boot/` directory present in this library. |
-| 10 | Public API sanity: errors typed/sentinel, context.Context first arg | pass | `APIError` is a typed error with `Error()` + `RetryAfter`; `BudgetViolation`, `ScopeViolation`, `ProgressLoop` all implement `Error()`. All `Provider` methods (`StreamChat`, `Complete`, `CompleteWithUsage`), `Embedder` methods, and bridge stream calls take `context.Context` as the first parameter. |
+| 10 | Public API sanity: errors typed/sentinel, context.Context first arg | pass | `APIError` is a typed error with `Error()` + `RetryAfter`; `BudgetViolation`, `ScopeViolation`, `ProgressLoop` all implement `Error()`. `Provider` methods (`StreamChat`, `Complete`), optional `ProviderWithUsage.CompleteWithUsage`, `Embedder` methods, and bridge stream calls take `context.Context` as the first parameter. |
 | 11 | `CHANGELOG.md` present (nice to have) | pass | `CHANGELOG.md` added with an `Unreleased` entry. |
 | 12 | No circular/suspicious deps on other framework libs | pass | No framework-internal dependencies remain; Anthropic tracing now uses a local helper package under this module. |
 
@@ -95,7 +95,7 @@ Grouped by file, exported types and top-level functions only. All in package `pr
 
 ### `provider.go`
 
-- types: `ProviderCapabilities`, `ToolDefinition`, `ToolUseBlock`, `ContentBlock`, `StreamEvent`, `Usage`, `CompleteResult`, `ChatMessage`, `Provider` (interface), `ProcessCallback`, `ActivityCallback`
+- types: `ProviderCapabilities`, `ToolDefinition`, `ToolUseBlock`, `ContentBlock`, `StreamEvent`, `Usage`, `CompleteResult`, `ChatMessage`, `Provider` (interface), `ProviderWithUsage` (interface), `ProcessCallback`, `ActivityCallback`
 - funcs: `WithCLISessionID`, `CLISessionIDFromContext`, `WithSandboxDir`, `SandboxDirFromContext`, `WithProcessCallback`, `ProcessCallbackFromContext`, `WithActivityCallback`, `ActivityCallbackFromContext`
 
 ### `registry.go`

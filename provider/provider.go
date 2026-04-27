@@ -172,11 +172,17 @@ type Provider interface {
 	StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error)
 	// Complete makes a non-streaming completion call.
 	Complete(ctx context.Context, req ChatRequest) (string, error)
+	// Capabilities returns the capabilities supported by this provider.
+	Capabilities() ProviderCapabilities
+}
+
+// ProviderWithUsage is an optional extension interface for providers that can
+// return token usage for non-streaming completions.
+type ProviderWithUsage interface {
+	Provider
 	// CompleteWithUsage makes a non-streaming completion call and returns
 	// any token usage the underlying provider surfaces.
 	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
-	// Capabilities returns the capabilities supported by this provider.
-	Capabilities() ProviderCapabilities
 }
 
 // ptySessionKeyType is the context key for passing a CLI session ID

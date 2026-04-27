@@ -109,9 +109,16 @@ func (p *EventReactionPipeline) Complete(ctx context.Context, in ChatRequest) (s
 	return p.provider.Complete(ctx, in)
 }
 
-// CompleteWithUsage implements Provider.CompleteWithUsage.
+// CompleteWithUsage implements the optional ProviderWithUsage extension.
 func (p *EventReactionPipeline) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
-	return p.provider.CompleteWithUsage(ctx, in)
+	if providerWithUsage, ok := p.provider.(ProviderWithUsage); ok {
+		return providerWithUsage.CompleteWithUsage(ctx, in)
+	}
+	result, err := p.provider.Complete(ctx, in)
+	if err != nil {
+		return CompleteResult{}, err
+	}
+	return CompleteResult{Text: result}, nil
 }
 
 // Capabilities implements Provider.Capabilities.
@@ -220,7 +227,7 @@ func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in C
 	go func() {
 		defer close(stream)
 
-		result, err := p.provider.CompleteWithUsage(ctx, in)
+		result, err := p.CompleteWithUsage(ctx, in)
 
 		if err != nil {
 			stream <- StreamEvent{
