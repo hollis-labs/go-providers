@@ -4,6 +4,8 @@ package provider
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -79,6 +81,61 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 	_ = mockOutput // Used conceptually; real integration test would use this.
 	if bridge.cliPath != "/bin/sh" {
 		t.Errorf("expected cliPath=/bin/sh, got %s", bridge.cliPath)
+	}
+}
+
+// TestPTYBridge_NoSilentDrop_ToolUseOnly verifies that when the CLI emits
+// only tool_use blocks (no text deltas), the PTY bridge injects an explicit
+// "CLI bridge cannot forward tool calls" error event *before* the terminal
+// "done" event, matching the SubprocessBridge behavior.
+func TestPTYBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tool-only-cli.sh")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}'
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
+	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+		{Role: "user", Content: "test"},
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	const guardMsg = "CLI bridge cannot forward tool calls"
+	guardIdx, doneIdx, guardCount := -1, -1, 0
+	for i, ev := range events {
+		if ev.Type == "error" && ev.Error == guardMsg {
+			guardCount++
+			if guardIdx == -1 {
+				guardIdx = i
+			}
+		}
+		if ev.Type == "done" && doneIdx == -1 {
+			doneIdx = i
+		}
+	}
+
+	if guardCount != 1 {
+		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
+	}
+	if guardIdx == -1 {
+		t.Fatalf("expected guard error event %q, none found in: %+v", guardMsg, events)
+	}
+	if doneIdx == -1 {
+		t.Fatalf("expected done event, not found in: %+v", events)
+	}
+	if guardIdx >= doneIdx {
+		t.Errorf("guard error must come before done; guard at %d, done at %d", guardIdx, doneIdx)
 	}
 }
 

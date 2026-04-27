@@ -126,6 +126,20 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Set 1MB buffer for large tool results.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		var seenDelta, seenToolUse, terminalSent bool
+
+		// emitGuardIfNeeded emits the no-silent-drop error event exactly once,
+		// when the CLI produced only tool_use blocks and no text deltas.
+		// Returns true if the guard was emitted on this call.
+		emitGuardIfNeeded := func() bool {
+			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
+				ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
+				terminalSent = true
+				return true
+			}
+			return false
+		}
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -151,6 +165,21 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "delta":
+					seenDelta = true
+				case "tool_use":
+					seenToolUse = true
+				case "done":
+					// Inject the no-silent-drop guard *before* the terminal
+					// done event so consumers that stop reading at "done"
+					// still see the error.
+					emitGuardIfNeeded()
+					terminalSent = true
+				case "error":
+					// Upstream already signalled failure — don't pile on.
+					terminalSent = true
+				}
 				ch <- ev
 			}
 		}
@@ -162,6 +191,10 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				log.Printf("pty: scanner error: %v", err)
 			}
 		}
+
+		// Post-loop guard: stream ended without a terminal event. Still emit
+		// the error so callers don't hang on an empty result.
+		emitGuardIfNeeded()
 
 		// Wait for process to finish.
 		if err := cmd.Wait(); err != nil {

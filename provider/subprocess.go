@@ -111,6 +111,20 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
+		var seenDelta, seenToolUse, terminalSent bool
+
+		// emitGuardIfNeeded emits the no-silent-drop error event exactly once,
+		// when the CLI produced only tool_use blocks and no text deltas.
+		// Returns true if the guard was emitted on this call.
+		emitGuardIfNeeded := func() bool {
+			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
+				ch <- StreamEvent{Type: "error", Error: "CLI bridge cannot forward tool calls"}
+				terminalSent = true
+				return true
+			}
+			return false
+		}
+
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -138,6 +152,21 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 			}
 
 			for _, ev := range events {
+				switch ev.Type {
+				case "delta":
+					seenDelta = true
+				case "tool_use":
+					seenToolUse = true
+				case "done":
+					// Inject the no-silent-drop guard *before* the terminal
+					// done event so consumers that stop reading at "done"
+					// still see the error.
+					emitGuardIfNeeded()
+					terminalSent = true
+				case "error":
+					// Upstream already signalled failure — don't pile on.
+					terminalSent = true
+				}
 				ch <- ev
 			}
 		}
@@ -145,6 +174,10 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		if err := scanner.Err(); err != nil {
 			log.Printf("subprocess[%s]: scanner error: %v", s.adapter.Name(), err)
 		}
+
+		// Post-loop guard: stream ended without a terminal event. Still emit
+		// the error so callers don't hang on an empty result.
+		emitGuardIfNeeded()
 
 		if err := cmd.Wait(); err != nil {
 			if ctx.Err() == nil {
