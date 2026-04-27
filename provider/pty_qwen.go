@@ -9,6 +9,10 @@ import (
 // QwenAdapter implements CLIAdapter for the Qwen Code CLI.
 // Uses `qwen -o stream-json "prompt"` for streaming JSON output.
 // Qwen supports the same stream-json format as Claude Code.
+//
+// Turn boundary: emits EventDone on the `result` event with
+// `subtype: "success"`, EventError on `is_error: true` or `subtype: "error"`.
+// Same turn-boundary shape as ClaudeAdapter.
 type QwenAdapter struct{}
 
 func NewQwenAdapter() *QwenAdapter { return &QwenAdapter{} }
@@ -148,7 +152,7 @@ func parseQwenAssistant(line []byte) ([]StreamEvent, error) {
 				_ = json.Unmarshal(block.Input, &input)
 			}
 			events = append(events, StreamEvent{
-				Type: "tool_use",
+				Type: EventToolUse,
 				ToolUse: &ToolUseBlock{
 					ID:    block.ID,
 					Name:  block.Name,
@@ -169,7 +173,7 @@ func parseQwenResult(line []byte) ([]StreamEvent, error) {
 
 	if ev.IsError || ev.Subtype == "error" {
 		return []StreamEvent{
-			{Type: "error", Error: ev.Result},
+			{Type: EventError, Error: ev.Result},
 		}, nil
 	}
 
@@ -180,7 +184,7 @@ func parseQwenResult(line []byte) ([]StreamEvent, error) {
 			stopReason = "end_turn"
 		}
 		events = append(events, StreamEvent{
-			Type: "usage",
+			Type: EventUsage,
 			Usage: &Usage{
 				InputTokens:  ev.Usage.InputTokens,
 				OutputTokens: ev.Usage.OutputTokens,
@@ -188,7 +192,7 @@ func parseQwenResult(line []byte) ([]StreamEvent, error) {
 			},
 		})
 	}
-	events = append(events, StreamEvent{Type: "done"})
+	events = append(events, StreamEvent{Type: EventDone})
 	return events, nil
 }
 
@@ -199,7 +203,7 @@ func parseQwenSystem(line []byte) ([]StreamEvent, error) {
 	}
 	if ev.Subtype == "init" && ev.SessionID != "" {
 		return []StreamEvent{
-			{Type: "session_id", SessionID: ev.SessionID},
+			{Type: EventSessionID, SessionID: ev.SessionID},
 		}, nil
 	}
 	return nil, nil
@@ -211,6 +215,6 @@ func parseQwenError(line []byte) ([]StreamEvent, error) {
 		return nil, fmt.Errorf("parse qwen error: %w", err)
 	}
 	return []StreamEvent{
-		{Type: "error", Error: ev.Error.Message},
+		{Type: EventError, Error: ev.Error.Message},
 	}, nil
 }

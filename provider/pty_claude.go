@@ -7,6 +7,11 @@ import (
 )
 
 // ClaudeAdapter implements CLIAdapter for the Claude Code CLI.
+//
+// Turn boundary: emits EventDone when ParseLine sees a stream-json `result`
+// event with `subtype: "success"`, and EventError when `is_error: true` or
+// `subtype: "error"`. EventUsage is emitted alongside EventDone when token
+// usage is available on the `result` event.
 type ClaudeAdapter struct {
 	// SkipPermissions adds --dangerously-skip-permissions to CLI args.
 	// Only set when developer_mode is enabled; never set for production.
@@ -169,7 +174,7 @@ func parseClaudeAssistant(line []byte) ([]StreamEvent, error) {
 				_ = json.Unmarshal(block.Input, &input)
 			}
 			events = append(events, StreamEvent{
-				Type: "tool_use",
+				Type: EventToolUse,
 				ToolUse: &ToolUseBlock{
 					ID:    block.ID,
 					Name:  block.Name,
@@ -191,7 +196,7 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 
 	if ev.IsError || ev.Subtype == "error" {
 		return []StreamEvent{
-			{Type: "error", Error: ev.Result},
+			{Type: EventError, Error: ev.Result},
 		}, nil
 	}
 
@@ -204,7 +209,7 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 			stopReason = "end_turn"
 		}
 		events = append(events, StreamEvent{
-			Type: "usage",
+			Type: EventUsage,
 			Usage: &Usage{
 				InputTokens:         ev.Usage.InputTokens,
 				OutputTokens:        ev.Usage.OutputTokens,
@@ -215,7 +220,7 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 		})
 	}
 
-	events = append(events, StreamEvent{Type: "done"})
+	events = append(events, StreamEvent{Type: EventDone})
 	return events, nil
 }
 
@@ -226,7 +231,7 @@ func parseClaudeSystem(line []byte) ([]StreamEvent, error) {
 	}
 	if ev.Subtype == "init" && ev.SessionID != "" {
 		return []StreamEvent{
-			{Type: "session_id", SessionID: ev.SessionID},
+			{Type: EventSessionID, SessionID: ev.SessionID},
 		}, nil
 	}
 	return nil, nil
@@ -238,6 +243,6 @@ func parseClaudeError(line []byte) ([]StreamEvent, error) {
 		return nil, fmt.Errorf("parse error event: %w", err)
 	}
 	return []StreamEvent{
-		{Type: "error", Error: ev.Error.Message},
+		{Type: EventError, Error: ev.Error.Message},
 	}, nil
 }

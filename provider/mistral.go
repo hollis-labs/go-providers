@@ -96,7 +96,7 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			ch <- StreamEvent{Type: "error", Error: "context cancelled"}
+			ch <- StreamEvent{Type: EventError, Error: "context cancelled"}
 			return
 		default:
 		}
@@ -108,7 +108,7 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
-			ch <- StreamEvent{Type: "done"}
+			ch <- StreamEvent{Type: EventDone}
 			return
 		}
 
@@ -132,11 +132,11 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta.Content
 			if delta != "" {
-				ch <- StreamEvent{Type: "delta", Content: delta}
+				ch <- StreamEvent{Type: EventDelta, Content: delta}
 			}
 			if chunk.Choices[0].FinishReason != nil {
 				ch <- StreamEvent{
-					Type:  "usage",
+					Type:  EventUsage,
 					Usage: &Usage{StopReason: *chunk.Choices[0].FinishReason},
 				}
 			}
@@ -144,7 +144,7 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 
 		if chunk.Usage != nil {
 			ch <- StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  chunk.Usage.PromptTokens,
 					OutputTokens: chunk.Usage.CompletionTokens,
@@ -154,7 +154,7 @@ func (m *Mistral) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Str
 	}
 
 	if err := scanner.Err(); err != nil {
-		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("read stream: %v", err)}
+		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
 	}
 }
 

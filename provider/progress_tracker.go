@@ -82,9 +82,9 @@ func (pt *ProgressTracker) CheckEvent(event StreamEvent) *ProgressLoop {
 	pt.cleanOldRecords(now)
 
 	switch event.Type {
-	case "delta":
+	case EventDelta:
 		return pt.checkContentLoop(event, now)
-	case "tool_use":
+	case EventToolUse:
 		return pt.checkToolLoop(event, now)
 	default:
 		// For other events, check general state patterns

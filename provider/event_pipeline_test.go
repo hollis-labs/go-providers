@@ -126,7 +126,7 @@ func TestScopeGuardViolations(t *testing.T) {
 
 	// Test allowed file access
 	allowedEvent := StreamEvent{
-		Type: "tool_use",
+		Type: EventToolUse,
 		ToolUse: &ToolUseBlock{
 			Name:  "read_file",
 			Input: map[string]any{"file_path": "/allowed/test.txt"},
@@ -139,7 +139,7 @@ func TestScopeGuardViolations(t *testing.T) {
 
 	// Test disallowed file access
 	disallowedEvent := StreamEvent{
-		Type: "tool_use",
+		Type: EventToolUse,
 		ToolUse: &ToolUseBlock{
 			Name:  "read_file",
 			Input: map[string]any{"file_path": "/etc/passwd"},
@@ -152,7 +152,7 @@ func TestScopeGuardViolations(t *testing.T) {
 
 	// Test dangerous tool usage
 	dangerousEvent := StreamEvent{
-		Type: "tool_use",
+		Type: EventToolUse,
 		ToolUse: &ToolUseBlock{
 			Name:  "rm_command",
 			Input: map[string]any{"args": "-rf /"},
@@ -198,7 +198,7 @@ func TestProgressTrackerLoops(t *testing.T) {
 	// Test tool loop detection
 	tracker2 := NewProgressTracker(2, time.Minute, "log")
 	toolEvent := StreamEvent{
-		Type: "tool_use",
+		Type: EventToolUse,
 		ToolUse: &ToolUseBlock{
 			Name:  "test_tool",
 			Input: map[string]any{"param": "value"},
@@ -223,7 +223,7 @@ func TestCostMonitorBudgets(t *testing.T) {
 
 	// Test within budget
 	usageEvent := StreamEvent{
-		Type: "usage",
+		Type: EventUsage,
 		Usage: &Usage{
 			InputTokens:  30,
 			OutputTokens: 20,
@@ -236,7 +236,7 @@ func TestCostMonitorBudgets(t *testing.T) {
 
 	// Test exceeding token budget
 	largeUsageEvent := StreamEvent{
-		Type: "usage",
+		Type: EventUsage,
 		Usage: &Usage{
 			InputTokens:  60,
 			OutputTokens: 50,
@@ -253,7 +253,7 @@ func TestCostMonitorBudgets(t *testing.T) {
 	// Test cost monitoring
 	monitor2 := NewCostMonitor(10000, 0.01, "log") // Very low cost budget
 	highCostEvent := StreamEvent{
-		Type: "usage",
+		Type: EventUsage,
 		Usage: &Usage{
 			InputTokens:  1000,
 			OutputTokens: 1000,
@@ -271,7 +271,7 @@ func TestUsageSummary(t *testing.T) {
 
 	// Add some usage
 	usageEvent := StreamEvent{
-		Type: "usage",
+		Type: EventUsage,
 		Usage: &Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -305,10 +305,10 @@ func (m *mockStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) 
 	ch := make(chan StreamEvent, 10)
 	go func() {
 		defer close(ch)
-		ch <- StreamEvent{Type: "delta", Content: "Hello"}
-		ch <- StreamEvent{Type: "delta", Content: " world"}
-		ch <- StreamEvent{Type: "usage", Usage: &Usage{InputTokens: 10, OutputTokens: 5}}
-		ch <- StreamEvent{Type: "done"}
+		ch <- StreamEvent{Type: EventDelta, Content: "Hello"}
+		ch <- StreamEvent{Type: EventDelta, Content: " world"}
+		ch <- StreamEvent{Type: EventUsage, Usage: &Usage{InputTokens: 10, OutputTokens: 5}}
+		ch <- StreamEvent{Type: EventDone}
 	}()
 	return ch, nil
 }

@@ -9,6 +9,9 @@ import (
 
 // JunieAdapter implements CLIAdapter for the JetBrains Junie CLI.
 // Uses `junie --output-format json "task"` for non-interactive JSON output.
+//
+// Turn boundary: emits EventDone on the `result` event with
+// `subtype: "success"`, EventError on errors. Same shape as ClaudeAdapter.
 type JunieAdapter struct{}
 
 func NewJunieAdapter() *JunieAdapter { return &JunieAdapter{} }
@@ -95,7 +98,7 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 		if strings.Contains(text, "//////") || strings.Contains(text, "junie") {
 			return nil, nil
 		}
-		return []StreamEvent{{Type: "delta", Content: string(line) + "\n"}}, nil
+		return []StreamEvent{{Type: EventDelta, Content: string(line) + "\n"}}, nil
 	}
 
 	var envelope junieEvent
@@ -114,7 +117,7 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 			text = msg.Content
 		}
 		if text != "" && (msg.Role == "" || msg.Role == "assistant") {
-			return []StreamEvent{{Type: "delta", Content: text}}, nil
+			return []StreamEvent{{Type: EventDelta, Content: text}}, nil
 		}
 		return nil, nil
 
@@ -124,7 +127,7 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 			return nil, fmt.Errorf("parse junie tool_use: %w", err)
 		}
 		return []StreamEvent{{
-			Type: "tool_use",
+			Type: EventToolUse,
 			ToolUse: &ToolUseBlock{
 				ID:    tu.ToolID,
 				Name:  tu.ToolName,
@@ -135,7 +138,7 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 	case "session":
 		var ev junieSessionEvent
 		if err := json.Unmarshal(line, &ev); err == nil && ev.SessionID != "" {
-			return []StreamEvent{{Type: "session_id", SessionID: ev.SessionID}}, nil
+			return []StreamEvent{{Type: EventSessionID, SessionID: ev.SessionID}}, nil
 		}
 		return nil, nil
 
@@ -145,12 +148,12 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 			return nil, fmt.Errorf("parse junie result: %w", err)
 		}
 		if ev.Error != "" {
-			return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+			return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 		}
 		var events []StreamEvent
 		if ev.Usage != nil {
 			events = append(events, StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  ev.Usage.InputTokens,
 					OutputTokens: ev.Usage.OutputTokens,
@@ -158,15 +161,15 @@ func parseJunieStreamLine(line []byte) ([]StreamEvent, error) {
 				},
 			})
 		}
-		events = append(events, StreamEvent{Type: "done"})
+		events = append(events, StreamEvent{Type: EventDone})
 		return events, nil
 
 	case "error":
 		var ev junieResultEvent
 		if err := json.Unmarshal(line, &ev); err == nil && ev.Error != "" {
-			return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+			return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 		}
-		return []StreamEvent{{Type: "error", Error: "junie error"}}, nil
+		return []StreamEvent{{Type: EventError, Error: "junie error"}}, nil
 
 	default:
 		return nil, nil

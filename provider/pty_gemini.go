@@ -7,6 +7,9 @@ import (
 )
 
 // GeminiAdapter implements CLIAdapter for the Google Gemini CLI.
+//
+// Turn boundary: emits EventDone on the `result` event with
+// `subtype: "success"`, EventError on errors. Same shape as ClaudeAdapter.
 type GeminiAdapter struct{}
 
 func NewGeminiAdapter() *GeminiAdapter { return &GeminiAdapter{} }
@@ -93,7 +96,7 @@ func parseGeminiStreamLine(line []byte) ([]StreamEvent, error) {
 			return nil, fmt.Errorf("parse gemini init: %w", err)
 		}
 		if ev.SessionID != "" {
-			return []StreamEvent{{Type: "session_id", SessionID: ev.SessionID}}, nil
+			return []StreamEvent{{Type: EventSessionID, SessionID: ev.SessionID}}, nil
 		}
 		return nil, nil
 
@@ -108,7 +111,7 @@ func parseGeminiStreamLine(line []byte) ([]StreamEvent, error) {
 				text = msg.Content
 			}
 			if text != "" {
-				return []StreamEvent{{Type: "delta", Content: text}}, nil
+				return []StreamEvent{{Type: EventDelta, Content: text}}, nil
 			}
 		}
 		return nil, nil
@@ -119,7 +122,7 @@ func parseGeminiStreamLine(line []byte) ([]StreamEvent, error) {
 			return nil, fmt.Errorf("parse gemini tool_use: %w", err)
 		}
 		return []StreamEvent{{
-			Type: "tool_use",
+			Type: EventToolUse,
 			ToolUse: &ToolUseBlock{
 				Name:  tu.ToolName,
 				Input: tu.Args,
@@ -132,12 +135,12 @@ func parseGeminiStreamLine(line []byte) ([]StreamEvent, error) {
 			return nil, fmt.Errorf("parse gemini result: %w", err)
 		}
 		if ev.Error != "" {
-			return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+			return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 		}
 		var events []StreamEvent
 		if ev.Stats != nil {
 			events = append(events, StreamEvent{
-				Type: "usage",
+				Type: EventUsage,
 				Usage: &Usage{
 					InputTokens:  ev.Stats.TokensInput,
 					OutputTokens: ev.Stats.TokensOutput,
@@ -145,7 +148,7 @@ func parseGeminiStreamLine(line []byte) ([]StreamEvent, error) {
 				},
 			})
 		}
-		events = append(events, StreamEvent{Type: "done"})
+		events = append(events, StreamEvent{Type: EventDone})
 		return events, nil
 
 	default:

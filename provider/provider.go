@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 )
 
 // ProviderCapabilities describes the capabilities supported by a provider.
@@ -75,14 +76,49 @@ type ContentBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag (Anthropic API)
 }
 
+// EventType identifies the kind of a StreamEvent. The zero value is the empty
+// string; well-formed events always set one of the named constants below.
+type EventType string
+
+const (
+	// EventDelta carries an incremental text fragment in StreamEvent.Content.
+	EventDelta EventType = "delta"
+	// EventToolUse carries a tool invocation in StreamEvent.ToolUse.
+	EventToolUse EventType = "tool_use"
+	// EventUsage carries token-usage data in StreamEvent.Usage. May appear
+	// alongside or in place of EventDone depending on the adapter.
+	EventUsage EventType = "usage"
+	// EventError is a terminal failure event with the message in StreamEvent.Error.
+	// No further events follow on the same channel.
+	EventError EventType = "error"
+	// EventDone is a terminal success event marking the end of a turn. No
+	// further events follow on the same channel.
+	EventDone EventType = "done"
+	// EventSessionID carries an adapter-assigned CLI session identifier in
+	// StreamEvent.SessionID, used by adapters that support resume (e.g. Claude's
+	// --resume flag). Emitted as informational metadata, not a turn boundary.
+	EventSessionID EventType = "session_id"
+)
+
 // StreamEvent represents a single event from a streaming provider response.
 type StreamEvent struct {
-	Type      string        // "delta", "tool_use", "usage", "error", "done", "session_id"
-	Content   string        // text delta
-	Usage     *Usage        // only on "usage" or "done" events
-	Error     string        // only on "error" events
-	ToolUse   *ToolUseBlock // only on "tool_use" events
-	SessionID string        // only on "session_id" events (PTY bridge: CLI session ID for --resume)
+	Type      EventType
+	Content   string        // EventDelta payload
+	Usage     *Usage        // EventUsage payload; may also appear on EventDone
+	Error     string        // EventError payload
+	ToolUse   *ToolUseBlock // EventToolUse payload
+	SessionID string        // EventSessionID payload
+}
+
+// IsTurnComplete reports whether ev is a terminal event marking the end of an
+// agent turn. Consumers iterating a stream can use this to detect turn
+// boundaries without inspecting StreamEvent fields directly.
+//
+// Both EventDone (success) and EventError (failure) are turn-terminal; either
+// guarantees no further events on the same channel. Per-adapter turn-boundary
+// semantics are documented in each adapter's package-level docstring.
+func IsTurnComplete(ev StreamEvent) bool {
+	return ev.Type == EventDone || ev.Type == EventError
 }
 
 // Usage contains token usage information.
@@ -250,4 +286,31 @@ func WithActivityCallback(ctx context.Context, cb ActivityCallback) context.Cont
 func ActivityCallbackFromContext(ctx context.Context) (ActivityCallback, bool) {
 	cb, ok := ctx.Value(activityCallbackKeyType{}).(ActivityCallback)
 	return cb, ok && cb != nil
+}
+
+// DefaultWaitDelay is the grace period the spawner gives a child process between
+// SIGTERM and SIGKILL when the spawn context is cancelled. Tuned for CLI agents
+// that may need a moment to flush stream output before exiting.
+const DefaultWaitDelay = 5 * time.Second
+
+type waitDelayKeyType struct{}
+
+// WithWaitDelay returns a context carrying a custom grace period for child
+// process termination. When the context is cancelled, the spawner sends SIGTERM
+// and waits up to d for the process to exit before sending SIGKILL.
+//
+// Non-positive values (zero or negative) fall back to DefaultWaitDelay; the
+// helper does not validate or clamp negative inputs. Consumers that want
+// effectively-immediate SIGKILL should use a small positive duration.
+func WithWaitDelay(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, waitDelayKeyType{}, d)
+}
+
+// WaitDelayFromContext returns the configured grace period, or DefaultWaitDelay
+// if none was set. Always returns a usable duration; never returns zero.
+func WaitDelayFromContext(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(waitDelayKeyType{}).(time.Duration); ok && d > 0 {
+		return d
+	}
+	return DefaultWaitDelay
 }

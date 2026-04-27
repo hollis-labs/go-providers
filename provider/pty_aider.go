@@ -10,6 +10,11 @@ import (
 // AiderAdapter implements CLIAdapter for the Aider coding assistant.
 // Uses `aider --message "prompt" --no-auto-commits` for single-turn execution.
 // With `--message-format json`, Aider outputs structured JSON lines.
+//
+// Turn boundary: emits EventDone on `{"type":"done"}` JSON, EventError on
+// `{"type":"error",...}` or `Error:`-prefixed text. Plain-text output produces
+// no terminal event in ParseLine — the bridge synthesizes EventDone on clean
+// process exit.
 type AiderAdapter struct{}
 
 func NewAiderAdapter() *AiderAdapter { return &AiderAdapter{} }
@@ -87,12 +92,12 @@ func parseAiderLine(line []byte) ([]StreamEvent, error) {
 			switch ev.Type {
 			case "message":
 				if ev.Content != "" {
-					return []StreamEvent{{Type: "delta", Content: ev.Content}}, nil
+					return []StreamEvent{{Type: EventDelta, Content: ev.Content}}, nil
 				}
 			case "error":
-				return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+				return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 			case "done":
-				return []StreamEvent{{Type: "done"}}, nil
+				return []StreamEvent{{Type: EventDone}}, nil
 			}
 			return nil, nil
 		}
@@ -101,11 +106,11 @@ func parseAiderLine(line []byte) ([]StreamEvent, error) {
 
 	// Check for error patterns.
 	if strings.HasPrefix(trimmed, "Error:") || strings.HasPrefix(trimmed, "error:") {
-		return []StreamEvent{{Type: "error", Error: trimmed}}, nil
+		return []StreamEvent{{Type: EventError, Error: trimmed}}, nil
 	}
 
 	// Plain text content.
-	return []StreamEvent{{Type: "delta", Content: text + "\n"}}, nil
+	return []StreamEvent{{Type: EventDelta, Content: text + "\n"}}, nil
 }
 
 // parseAiderJSON is reserved for future use when Aider adds structured JSON output.
@@ -117,11 +122,11 @@ func parseAiderJSON(line []byte) ([]StreamEvent, error) {
 
 	switch ev.Type {
 	case "message":
-		return []StreamEvent{{Type: "delta", Content: ev.Content}}, nil
+		return []StreamEvent{{Type: EventDelta, Content: ev.Content}}, nil
 	case "error":
-		return []StreamEvent{{Type: "error", Error: ev.Error}}, nil
+		return []StreamEvent{{Type: EventError, Error: ev.Error}}, nil
 	case "done":
-		return []StreamEvent{{Type: "done"}}, nil
+		return []StreamEvent{{Type: EventDone}}, nil
 	default:
 		return nil, nil
 	}

@@ -27,7 +27,7 @@ func TestAiderParser(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		wantType string
+		wantType EventType
 		wantN    int
 	}{
 		{"empty", "", "", 0},
