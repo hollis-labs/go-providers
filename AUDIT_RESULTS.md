@@ -7,7 +7,7 @@
 
 ## Summary
 
-`go-providers` is a functional, well-tested library (26 `*_test.go` files covering every adapter, the circuit breaker, the rate tracker, retries, the cache strategy, and the event-reaction pipeline) that provides a unified `Provider` interface across 8 HTTP LLM providers, 8 CLI-bridge adapters, and a decorator-style monitoring pipeline. It now has a package-level `doc.go`, an MIT `LICENSE`, runnable examples, and a local Anthropic tracing helper so the module no longer depends on an out-of-tree `replace` target. The public API is broad (~60 exported types and constructors in a single flat package) but cohesive, and there are no state/session files to exclude.
+`go-providers` is a functional, well-tested library (29 `*_test.go` files covering every adapter, the circuit breaker, the rate tracker, retries, the cache strategy, and the event-reaction pipeline) that provides a unified `Provider` interface across 8 HTTP LLM providers, 8 CLI-bridge adapters, and a decorator-style monitoring pipeline. It now has a package-level `doc.go`, an MIT `LICENSE`, runnable examples, and a local Anthropic tracing helper so the module no longer depends on an out-of-tree `replace` target. The public API is broad (~60 exported types and constructors in a single flat package) but cohesive, and there are no state/session files to exclude.
 
 ## Checklist
 
@@ -19,10 +19,10 @@
 | 4 | `doc.go` with `// Package X ...` godoc comment | pass | `provider/doc.go` now carries the package overview. |
 | 5 | Module path matches intended repo layout | pass | `github.com/hollis-labs/go-providers` is retained as the standalone repo module path per D2; no external replace remains. |
 | 6 | README has standard sections (title, desc, install, usage, API, examples) | pass | README covers title, description, Status, Install, Usage, API Overview, Architecture Notes, Dependencies, Testing, License. |
-| 7 | Tests exist (`*_test.go`) | pass | 26 test files in `provider/`. HTTP adapters use `httptest.NewServer`; no network or API keys required. Coverage percentage not computed in this read-only audit. |
+| 7 | Tests exist (`*_test.go`) | pass | 29 test files in `provider/`. HTTP adapters use `httptest.NewServer`; no network or API keys required. Coverage percentage not computed in this read-only audit. |
 | 8 | Examples (`example_test.go` or `examples/`) | pass | `provider/example_test.go` adds runnable examples for the registry and Anthropic streaming path. |
 | 9 | State/session files NOT misclassified as library docs | pass | No `.agentrc/`, `BOOT.md`, `CLAUDE.md`, `bootstrap.md`, `boot-prompt.md`, or `boot/` directory present in this library. |
-| 10 | Public API sanity: errors typed/sentinel, context.Context first arg | pass | `APIError` is a typed error with `Error()` + `RetryAfter`; `BudgetViolation`, `ScopeViolation`, `ProgressLoop` all implement `Error()`. All `Provider` methods (`StreamChat`, `StreamChatWithTools`, `Complete`), `Embedder` methods, and bridge stream calls take `context.Context` as the first parameter. |
+| 10 | Public API sanity: errors typed/sentinel, context.Context first arg | pass | `APIError` is a typed error with `Error()` + `RetryAfter`; `BudgetViolation`, `ScopeViolation`, `ProgressLoop` all implement `Error()`. All `Provider` methods (`StreamChat`, `Complete`, `CompleteWithUsage`), `Embedder` methods, and bridge stream calls take `context.Context` as the first parameter. |
 | 11 | `CHANGELOG.md` present (nice to have) | pass | `CHANGELOG.md` added with an `Unreleased` entry. |
 | 12 | No circular/suspicious deps on other framework libs | pass | No framework-internal dependencies remain; Anthropic tracing now uses a local helper package under this module. |
 
@@ -91,11 +91,11 @@
 
 ## Public API Snapshot
 
-Grouped by file, exported types and top-level functions only. All in package `provider` at `libs/go-providers/provider/`.
+Grouped by file, exported types and top-level functions only. All in package `provider` at `provider/`.
 
 ### `provider.go`
 
-- types: `ProviderCapabilities`, `ToolDefinition`, `ToolUseBlock`, `ContentBlock`, `StreamEvent`, `Usage`, `ChatMessage`, `Provider` (interface), `ProcessCallback`, `ActivityCallback`
+- types: `ProviderCapabilities`, `ToolDefinition`, `ToolUseBlock`, `ContentBlock`, `StreamEvent`, `Usage`, `CompleteResult`, `ChatMessage`, `Provider` (interface), `ProcessCallback`, `ActivityCallback`
 - funcs: `WithCLISessionID`, `CLISessionIDFromContext`, `WithSandboxDir`, `SandboxDirFromContext`, `WithProcessCallback`, `ProcessCallbackFromContext`, `WithActivityCallback`, `ActivityCallbackFromContext`
 
 ### `registry.go`

@@ -4,7 +4,7 @@
 
 ## Status
 
-Beta — the core `Provider` interface is stable enough to have 26 test files exercising it and every adapter, but the surface is intentionally broad and still has a few evolving adapter details. See `AUDIT_RESULTS.md`.
+Beta — the core `Provider` interface is stable enough to have 29 test files exercising it and every adapter, but the surface is intentionally broad and still has a few evolving adapter details. See `AUDIT_RESULTS.md`.
 
 ## Install
 
@@ -144,7 +144,7 @@ if e, ok := p.(provider.Embedder); ok {
 
 ## Architecture Notes
 
-The package is intentionally flat: one Go package (`provider`) under `libs/go-providers/provider/`, one file per adapter. The shared `Provider` interface in `provider.go` is small (four methods), and all the cross-cutting features — retries, circuit breaking, token pacing, prompt-cache hints, cost/scope/loop monitoring — are expressed either as optional interfaces the adapter opts into (`CacheableProvider`, `APIKeySetter`, `Embedder`) or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
+The package is intentionally flat: one Go package (`provider`) under `provider/`, one file per adapter. The shared `Provider` interface in `provider.go` is small (four methods), and all the cross-cutting features — retries, circuit breaking, token pacing, prompt-cache hints, cost/scope/loop monitoring — are expressed either as optional interfaces the adapter opts into (`CacheableProvider`, `APIKeySetter`, `Embedder`) or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
 
 CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defines how to build arguments and parse one line of output, and a transport wrapper (`PTYBridge` for pty-based or `SubprocessBridge` for pipes) runs the child process and feeds lines through the adapter. Context-value helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`, `WithActivityCallback`) let callers pass session-resume IDs, working directories, and process-tracking hooks through to the bridge without widening the `Provider` interface. `pty.go` has a `//go:build !windows` build tag; the subprocess bridge is the portable fallback.
 
