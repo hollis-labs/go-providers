@@ -141,7 +141,7 @@ func (oz *OpenZen) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 			}
 			if chunk.Choices[0].FinishReason != nil {
 				ch <- StreamEvent{
-					Type:  "usage",
+					Type:  EventUsage,
 					Usage: &Usage{StopReason: *chunk.Choices[0].FinishReason},
 				}
 			}

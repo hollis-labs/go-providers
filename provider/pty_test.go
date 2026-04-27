@@ -85,9 +85,10 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 }
 
 // TestPTYBridge_NoSilentDrop_ToolUseOnly verifies that when the CLI emits
-// only tool_use blocks (no text deltas), the PTY bridge injects an explicit
-// "CLI bridge cannot forward tool calls" error event *before* the terminal
-// "done" event, matching the SubprocessBridge behavior.
+// only tool_use blocks (no text deltas), the PTY bridge replaces the
+// adapter's terminal EventDone with an explicit "CLI bridge cannot forward
+// tool calls" EventError so consumers see the failure as the SOLE terminal
+// event (mutually exclusive with EventDone per the IsTurnComplete contract).
 func TestPTYBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "tool-only-cli.sh")
@@ -112,30 +113,27 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	const guardMsg = "CLI bridge cannot forward tool calls"
-	guardIdx, doneIdx, guardCount := -1, -1, 0
-	for i, ev := range events {
+	guardCount, terminalCount := 0, 0
+	for _, ev := range events {
 		if ev.Type == EventError && ev.Error == guardMsg {
 			guardCount++
-			if guardIdx == -1 {
-				guardIdx = i
-			}
 		}
-		if ev.Type == EventDone && doneIdx == -1 {
-			doneIdx = i
+		if IsTurnComplete(ev) {
+			terminalCount++
 		}
 	}
 
 	if guardCount != 1 {
 		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
 	}
-	if guardIdx == -1 {
-		t.Fatalf("expected guard error event %q, none found in: %+v", guardMsg, events)
+	if terminalCount != 1 {
+		t.Errorf("expected exactly one terminal event (guard error replaces adapter's EventDone), got %d (events: %+v)", terminalCount, events)
 	}
-	if doneIdx == -1 {
-		t.Fatalf("expected done event, not found in: %+v", events)
+	if len(events) == 0 || !IsTurnComplete(events[len(events)-1]) {
+		t.Fatalf("expected last event to be turn-terminal; got: %+v", events)
 	}
-	if guardIdx >= doneIdx {
-		t.Errorf("guard error must come before done; guard at %d, done at %d", guardIdx, doneIdx)
+	if last := events[len(events)-1]; last.Type != EventError || last.Error != guardMsg {
+		t.Errorf("expected the terminal event to be the guard EventError; got %+v", last)
 	}
 }
 

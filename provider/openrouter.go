@@ -134,7 +134,7 @@ func (o *OpenRouter) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- 
 			}
 			if chunk.Choices[0].FinishReason != nil {
 				ch <- StreamEvent{
-					Type:  "usage",
+					Type:  EventUsage,
 					Usage: &Usage{StopReason: *chunk.Choices[0].FinishReason},
 				}
 			}

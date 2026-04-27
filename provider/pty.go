@@ -180,10 +180,14 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 				case EventToolUse:
 					seenToolUse = true
 				case EventDone:
-					// Inject the no-silent-drop guard *before* the terminal
-					// done event so consumers that stop reading at "done"
-					// still see the error.
-					emitGuardIfNeeded()
+					// If the adapter produced only tool_use blocks with no
+					// deltas, replace its EventDone with a terminal EventError
+					// so consumers see the failure. The contract on
+					// IsTurnComplete is "exactly one terminal event" — don't
+					// forward the adapter's EventDone after the guard fires.
+					if emitGuardIfNeeded() {
+						continue
+					}
 					terminalSent = true
 				case EventError:
 					// Upstream already signalled failure — don't pile on.

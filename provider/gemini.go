@@ -209,11 +209,12 @@ func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 		}
 	}
 
-	// Emit done after stream ends.
-	ch <- StreamEvent{Type: EventDone}
-
+	// Emit exactly one terminal event after the stream ends. EventDone and
+	// EventError are mutually exclusive per the IsTurnComplete contract.
 	if err := scanner.Err(); err != nil {
 		ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("read stream: %v", err)}
+	} else {
+		ch <- StreamEvent{Type: EventDone}
 	}
 }
 

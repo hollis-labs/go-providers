@@ -299,9 +299,9 @@ type waitDelayKeyType struct{}
 // process termination. When the context is cancelled, the spawner sends SIGTERM
 // and waits up to d for the process to exit before sending SIGKILL.
 //
-// d must be non-negative; a zero value falls back to DefaultWaitDelay. Consumers
-// that want immediate SIGKILL should use a small positive duration rather than
-// zero.
+// Non-positive values (zero or negative) fall back to DefaultWaitDelay; the
+// helper does not validate or clamp negative inputs. Consumers that want
+// effectively-immediate SIGKILL should use a small positive duration.
 func WithWaitDelay(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, waitDelayKeyType{}, d)
 }

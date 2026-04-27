@@ -149,7 +149,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 // emits only tool_use blocks (no text deltas), the bridge injects an
 // explicit "CLI bridge cannot forward tool calls" error event *before* the
 // terminal "done" event so consumers that stop reading at "done" still see
-// the failure.
+// the failure as the SOLE terminal event. Per the IsTurnComplete contract,
+// EventError and EventDone are mutually exclusive — the bridge must NOT
+// forward the adapter's EventDone after the guard fires.
 func TestSubprocessBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "tool-only-cli.sh")
@@ -174,30 +176,27 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	const guardMsg = "CLI bridge cannot forward tool calls"
-	guardIdx, doneIdx, guardCount := -1, -1, 0
-	for i, ev := range events {
+	guardCount, terminalCount := 0, 0
+	for _, ev := range events {
 		if ev.Type == EventError && ev.Error == guardMsg {
 			guardCount++
-			if guardIdx == -1 {
-				guardIdx = i
-			}
 		}
-		if ev.Type == EventDone && doneIdx == -1 {
-			doneIdx = i
+		if IsTurnComplete(ev) {
+			terminalCount++
 		}
 	}
 
 	if guardCount != 1 {
 		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
 	}
-	if guardIdx == -1 {
-		t.Fatalf("expected guard error event %q, none found in: %+v", guardMsg, events)
+	if terminalCount != 1 {
+		t.Errorf("expected exactly one terminal event (guard error replaces adapter's EventDone), got %d (events: %+v)", terminalCount, events)
 	}
-	if doneIdx == -1 {
-		t.Fatalf("expected done event, not found in: %+v", events)
+	if len(events) == 0 || !IsTurnComplete(events[len(events)-1]) {
+		t.Fatalf("expected last event to be turn-terminal; got: %+v", events)
 	}
-	if guardIdx >= doneIdx {
-		t.Errorf("guard error must come before done; guard at %d, done at %d", guardIdx, doneIdx)
+	if last := events[len(events)-1]; last.Type != EventError || last.Error != guardMsg {
+		t.Errorf("expected the terminal event to be the guard EventError; got %+v", last)
 	}
 }
 
@@ -230,15 +229,20 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 }
 
 // TestSubprocessBridge_GracePeriodOrdering verifies the SIGTERM-then-SIGKILL
-// contract on context cancellation: the spawner sends SIGTERM first, waits up
-// to WaitDelay for the process to exit, and only then sends SIGKILL.
+// contract on context cancellation: the spawner sends SIGTERM first, waits at
+// least WaitDelay for the process to exit, and only then sends SIGKILL.
 //
-// Mechanism: the mock script traps SIGTERM and writes a marker file before
-// continuing to loop. This proves:
-//   - SIGTERM was delivered (marker file exists after termination).
-//   - WaitDelay was honored (the bridge waited at least WaitDelay before the
-//     process was force-killed; otherwise the trap wouldn't have run).
-//   - SIGKILL eventually fired (the process didn't run forever).
+// Three independent assertions:
+//  1. Upper bound: drain elapsed ≤ WaitDelay + slack — proves SIGKILL eventually
+//     fired (the process loops forever, so without SIGKILL we'd hang).
+//  2. Lower bound: drain elapsed ≥ WaitDelay − tolerance — proves the bridge
+//     actually waited the configured grace period instead of SIGKILL'ing
+//     immediately after SIGTERM. This is the assertion Copilot flagged on the
+//     first revision; the upper bound alone permitted a regression where
+//     WaitDelay went un-wired.
+//  3. SIGTERM-delivery: trap-marker file exists — proves SIGTERM, not SIGKILL,
+//     was the first signal (SIGKILL is uncatchable so the trap couldn't run if
+//     SIGKILL came first).
 func TestSubprocessBridge_GracePeriodOrdering(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "sigterm.marker")
@@ -287,8 +291,17 @@ done
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("SIGTERM marker file missing: %v (process was likely SIGKILL'd immediately)", err)
 	}
-	// SIGKILL must have happened within WaitDelay+slack — this catches a regression
-	// where WaitDelay isn't wired through and the process runs until natural exit.
+	// Lower bound: bridge must have waited at least WaitDelay (minus a small
+	// tolerance for measurement jitter) before SIGKILL. The script loops on a
+	// 100ms sleep that never naturally exits, so elapsed is gated by WaitDelay
+	// alone — if WaitDelay were 0 or unwired, SIGKILL would fire immediately
+	// and elapsed would be ~0.
+	const tolerance = 50 * time.Millisecond
+	if elapsed < waitDelay-tolerance {
+		t.Errorf("drain took %v, expected ≥ WaitDelay (%v) − tolerance (%v); bridge SIGKILL'd before grace period elapsed", elapsed, waitDelay, tolerance)
+	}
+	// Upper bound: SIGKILL must have fired within WaitDelay+slack; otherwise
+	// the bridge isn't escalating from SIGTERM to SIGKILL at all.
 	const slack = 5 * time.Second
 	if elapsed > waitDelay+slack {
 		t.Errorf("drain took %v, expected ≤ WaitDelay (%v) + slack (%v)", elapsed, waitDelay, slack)
