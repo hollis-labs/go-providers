@@ -15,6 +15,9 @@ func (stubProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 func (stubProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
 	return "", nil
 }
+func (stubProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{}, nil
+}
 func (stubProvider) Capabilities() ProviderCapabilities { return ProviderCapabilities{} }
 
 func TestRegistryUnregisterRemoves(t *testing.T) {

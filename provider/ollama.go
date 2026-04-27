@@ -123,9 +123,9 @@ func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- S
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
-			Done               bool `json:"done"`
-			PromptEvalCount    int  `json:"prompt_eval_count"`
-			EvalCount          int  `json:"eval_count"`
+			Done            bool `json:"done"`
+			PromptEvalCount int  `json:"prompt_eval_count"`
+			EvalCount       int  `json:"eval_count"`
 		}
 
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
@@ -157,6 +157,15 @@ func (o *Ollama) readStream(ctx context.Context, body io.ReadCloser, ch chan<- S
 
 // Complete makes a non-streaming completion call to Ollama.
 func (o *Ollama) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := o.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage makes a non-streaming completion call to Ollama and preserves usage metadata.
+func (o *Ollama) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	model := in.Model
 	if model == "" {
 		model = "llama3.1"
@@ -180,37 +189,47 @@ func (o *Ollama) Complete(ctx context.Context, in ChatRequest) (string, error) {
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return CompleteResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := o.host + "/api/chat"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return CompleteResult{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return CompleteResult{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama API error %d: %s", resp.StatusCode, string(errBody))
+		return CompleteResult{}, fmt.Errorf("ollama API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		Done            bool `json:"done"`
+		PromptEvalCount int  `json:"prompt_eval_count"`
+		EvalCount       int  `json:"eval_count"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return CompleteResult{}, fmt.Errorf("decode response: %w", err)
 	}
 
-	return strings.TrimSpace(result.Message.Content), nil
+	return CompleteResult{
+		Text: strings.TrimSpace(result.Message.Content),
+		Usage: &Usage{
+			InputTokens:  result.PromptEvalCount,
+			OutputTokens: result.EvalCount,
+			StopReason:   "end_turn",
+		},
+	}, nil
 }
 
 // Capabilities returns the capabilities supported by the Ollama provider.

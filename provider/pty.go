@@ -44,23 +44,36 @@ func (p *PTYBridge) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 }
 
 func (p *PTYBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := p.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage returns the concatenated text output from the CLI.
+// Usage may be nil because the wrapped CLI is not required to surface it.
+func (p *PTYBridge) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	// Complete is always single-turn — strip any resume session ID.
 	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
 	ch, err := p.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 	if err != nil {
-		return "", err
+		return CompleteResult{}, err
 	}
 
 	var sb strings.Builder
+	var usage *Usage
 	for ev := range ch {
 		switch ev.Type {
 		case "delta":
 			sb.WriteString(ev.Content)
+		case "usage":
+			usage = ev.Usage
 		case "error":
-			return "", fmt.Errorf("claude cli error: %s", ev.Error)
+			return CompleteResult{}, fmt.Errorf("claude cli error: %s", ev.Error)
 		}
 	}
-	return sb.String(), nil
+	return CompleteResult{Text: sb.String(), Usage: usage}, nil
 }
 
 func (p *PTYBridge) Capabilities() ProviderCapabilities {

@@ -180,8 +180,17 @@ func (o *OpenAI) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- Stre
 
 // Complete makes a non-streaming completion call to OpenAI.
 func (o *OpenAI) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := o.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage makes a non-streaming completion call to OpenAI and preserves usage metadata.
+func (o *OpenAI) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	if o.apiKey == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY not set")
+		return CompleteResult{}, fmt.Errorf("OPENAI_API_KEY not set")
 	}
 
 	model := in.Model
@@ -207,25 +216,25 @@ func (o *OpenAI) Complete(ctx context.Context, in ChatRequest) (string, error) {
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return CompleteResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", openaiAPI, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return CompleteResult{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return CompleteResult{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("openai API error %d: %s", resp.StatusCode, string(errBody))
+		return CompleteResult{}, fmt.Errorf("openai API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
@@ -234,15 +243,26 @@ func (o *OpenAI) Complete(ctx context.Context, in ChatRequest) (string, error) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return CompleteResult{}, fmt.Errorf("decode response: %w", err)
 	}
 
-	if len(result.Choices) > 0 {
-		return strings.TrimSpace(result.Choices[0].Message.Content), nil
+	out := CompleteResult{}
+	if result.Usage != nil {
+		out.Usage = &Usage{
+			InputTokens:  result.Usage.PromptTokens,
+			OutputTokens: result.Usage.CompletionTokens,
+		}
 	}
-	return "", nil
+	if len(result.Choices) > 0 {
+		out.Text = strings.TrimSpace(result.Choices[0].Message.Content)
+	}
+	return out, nil
 }
 
 // Capabilities returns the capabilities supported by the OpenAI provider.

@@ -77,17 +77,44 @@ func TestEventReactionPipelineNonStreaming(t *testing.T) {
 		events = append(events, event)
 	}
 
-	// Should get delta and done events
-	if len(events) != 2 {
-		t.Errorf("Expected 2 events (delta + done), got %d", len(events))
+	// Should get delta, usage, and done events.
+	if len(events) != 3 {
+		t.Errorf("Expected 3 events (delta + usage + done), got %d", len(events))
 	}
 
 	if events[0].Type != "delta" || events[0].Content != "Test response" {
 		t.Error("First event should be delta with test response")
 	}
 
-	if events[1].Type != "done" {
-		t.Error("Second event should be done")
+	if events[1].Type != "usage" || events[1].Usage == nil {
+		t.Error("Second event should be usage")
+	}
+
+	if events[2].Type != "done" {
+		t.Error("Third event should be done")
+	}
+}
+
+func TestEventReactionPipelineCompleteWithUsageFallback(t *testing.T) {
+	mockProvider := stubNoUsageProvider{
+		response: "fallback response",
+		caps: ProviderCapabilities{
+			SupportsStreamJSON: false,
+		},
+	}
+
+	pipeline := NewEventReactionPipeline(mockProvider, DefaultEventReactionConfig())
+	result, err := pipeline.CompleteWithUsage(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "Hello"}},
+	})
+	if err != nil {
+		t.Fatalf("CompleteWithUsage failed: %v", err)
+	}
+	if result.Text != "fallback response" {
+		t.Fatalf("unexpected text: %q", result.Text)
+	}
+	if result.Usage != nil {
+		t.Fatalf("expected nil usage, got %+v", result.Usage)
 	}
 }
 
@@ -290,6 +317,10 @@ func (m *mockStreamingProvider) Complete(ctx context.Context, in ChatRequest) (s
 	return "Hello world", nil
 }
 
+func (m *mockStreamingProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{Text: "Hello world", Usage: &Usage{InputTokens: 10, OutputTokens: 5}}, nil
+}
+
 func (m *mockStreamingProvider) Capabilities() ProviderCapabilities {
 	return m.capabilities
 }
@@ -297,6 +328,11 @@ func (m *mockStreamingProvider) Capabilities() ProviderCapabilities {
 type mockNonStreamingProvider struct {
 	capabilities ProviderCapabilities
 	response     string
+}
+
+type stubNoUsageProvider struct {
+	response string
+	caps     ProviderCapabilities
 }
 
 func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
@@ -308,8 +344,24 @@ func (m *mockNonStreamingProvider) Complete(ctx context.Context, in ChatRequest)
 	return m.response, nil
 }
 
+func (m *mockNonStreamingProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+	return CompleteResult{Text: m.response, Usage: &Usage{InputTokens: 4, OutputTokens: 2}}, nil
+}
+
 func (m *mockNonStreamingProvider) Capabilities() ProviderCapabilities {
 	return m.capabilities
+}
+
+func (s stubNoUsageProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+	return nil, nil
+}
+
+func (s stubNoUsageProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	return s.response, nil
+}
+
+func (s stubNoUsageProvider) Capabilities() ProviderCapabilities {
+	return s.caps
 }
 
 // TestGlobToRegex tests the glob pattern to regex conversion.

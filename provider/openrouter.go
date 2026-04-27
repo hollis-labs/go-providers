@@ -158,8 +158,17 @@ func (o *OpenRouter) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- 
 
 // Complete makes a non-streaming completion call to OpenRouter.
 func (o *OpenRouter) Complete(ctx context.Context, in ChatRequest) (string, error) {
+	result, err := o.CompleteWithUsage(ctx, in)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// CompleteWithUsage makes a non-streaming completion call to OpenRouter and preserves usage metadata.
+func (o *OpenRouter) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
 	if o.apiKey == "" {
-		return "", fmt.Errorf("OPENROUTER_API_KEY not set")
+		return CompleteResult{}, fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
 	model := in.Model
@@ -185,25 +194,25 @@ func (o *OpenRouter) Complete(ctx context.Context, in ChatRequest) (string, erro
 
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return CompleteResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", openrouterAPI, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return CompleteResult{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return CompleteResult{}, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
+		return CompleteResult{}, fmt.Errorf("openrouter API error %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	var result struct {
@@ -212,15 +221,26 @@ func (o *OpenRouter) Complete(ctx context.Context, in ChatRequest) (string, erro
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return CompleteResult{}, fmt.Errorf("decode response: %w", err)
 	}
 
-	if len(result.Choices) > 0 {
-		return strings.TrimSpace(result.Choices[0].Message.Content), nil
+	out := CompleteResult{}
+	if result.Usage != nil {
+		out.Usage = &Usage{
+			InputTokens:  result.Usage.PromptTokens,
+			OutputTokens: result.Usage.CompletionTokens,
+		}
 	}
-	return "", nil
+	if len(result.Choices) > 0 {
+		out.Text = strings.TrimSpace(result.Choices[0].Message.Content)
+	}
+	return out, nil
 }
 
 // Capabilities returns the capabilities supported by the OpenRouter provider.
@@ -228,7 +248,7 @@ func (o *OpenRouter) Capabilities() ProviderCapabilities {
 	return ProviderCapabilities{
 		SupportsStreamJSON:  true,
 		SupportsToolCalling: false,
-		SupportsImageInput:  true, // Depends on underlying model, but most top models support it
+		SupportsImageInput:  true,   // Depends on underlying model, but most top models support it
 		MaxTokens:           0,      // Variable — depends on routed model
 		ContextWindowSize:   200000, // Upper bound for supported models
 	}
