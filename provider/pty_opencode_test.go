@@ -38,7 +38,7 @@ func TestOpencodeAdapter_BuildArgs(t *testing.T) {
 		assertArgsEqual(t, args, expected)
 	})
 
-	t.Run("empty agent", func(t *testing.T) {
+	t.Run("empty agent preserves cli validation", func(t *testing.T) {
 		a := NewOpencodeAdapter()
 		args := a.BuildArgs("fix the bug", "", "")
 		expected := []string{"run", "--agent", "", "fix the bug"}
@@ -80,8 +80,8 @@ func TestOpencodeAdapter_ParseLine(t *testing.T) {
 		if events[0].Type != EventDelta {
 			t.Errorf("expected delta, got %s", events[0].Type)
 		}
-		if events[0].Content != "Applied the patch" {
-			t.Errorf("expected content %q, got %q", "Applied the patch", events[0].Content)
+		if events[0].Content != "Applied the patch\n" {
+			t.Errorf("expected content %q, got %q", "Applied the patch\n", events[0].Content)
 		}
 	})
 }

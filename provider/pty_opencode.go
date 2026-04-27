@@ -31,6 +31,9 @@ func NewOpencodeAdapter() *OpencodeAdapter { return &OpencodeAdapter{} }
 func (a *OpencodeAdapter) Name() string { return "opencode" }
 
 func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	// Keep --agent in the argv even when Agent is empty so opencode itself
+	// reports the configuration error. This matches the adapter contract used
+	// by the upstreaming handoff for uniform spawn/runtime error handling.
 	args := []string{"run", "--agent", a.Agent}
 	if a.Model != "" {
 		args = append(args, "--model", a.Model)
@@ -51,7 +54,7 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
-	return []StreamEvent{{Type: EventDelta, Content: text}}, nil
+	return []StreamEvent{{Type: EventDelta, Content: text + "\n"}}, nil
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {
