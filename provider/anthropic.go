@@ -449,9 +449,13 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	reasoningCfg := ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
 	body := anthropicRequest{
 		Model:     model,
-		MaxTokens: 16384,
+		MaxTokens: maxTokens,
 		System:    a.buildSystemFromRequest(in),
 		Messages:  a.marshalMessages(in.Messages),
 		Stream:    true,
@@ -920,9 +924,18 @@ func (a *Anthropic) CompleteWithUsage(ctx context.Context, in ChatRequest) (Comp
 		model = "claude-sonnet-4-20250514"
 	}
 
+	// Historically MaxTokens was hardcoded to 128 here, which silently truncated
+	// non-streaming completions for any caller that emitted more than ~512 bytes
+	// of output. Caller-supplied MaxTokens now wins; default mirrors the
+	// streaming path (16384) so the two code paths agree on what "no cap given"
+	// means.
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
 	body := anthropicRequest{
 		Model:     model,
-		MaxTokens: 128,
+		MaxTokens: maxTokens,
 		System:    a.buildSystemFromRequest(in),
 		Messages:  a.marshalMessages(in.Messages),
 		Stream:    false,
