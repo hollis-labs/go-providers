@@ -198,6 +198,13 @@ type ChatRequest struct {
 	SlotBlocks   []SlotBlock
 	Messages     []ChatMessage
 	Tools        []ToolDefinition
+	// MaxTokens caps the model's output tokens for this request. When 0, the
+	// adapter applies its model-class default (e.g. Anthropic streaming uses
+	// 16384, non-streaming uses 16384 as well — historically 128 in non-
+	// streaming, which was a bug). Callers that emit short structured outputs
+	// (e.g. nanite's recover.Repair LLM) should set this explicitly to balance
+	// truncation risk against cost.
+	MaxTokens int
 }
 
 // EffectiveSystemPrompt returns SystemPrompt when no slots are set, otherwise
