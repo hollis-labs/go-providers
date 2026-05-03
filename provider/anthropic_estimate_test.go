@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"strings"
 	"testing"
 )
 
@@ -100,5 +102,64 @@ func TestRateBudgetEstimate_CacheHintsReduceEstimate(t *testing.T) {
 	// of the uncached estimate.
 	if cachedEst > uncachedEst/4 {
 		t.Errorf("cached estimate %d should be markedly smaller (< 1/4) of uncached %d", cachedEst, uncachedEst)
+	}
+}
+
+func TestEstimateCacheablePrefix_NoHints(t *testing.T) {
+	a := &Anthropic{}
+	in := ChatRequest{
+		Model:        "claude-sonnet-4-20250514",
+		SystemPrompt: "you are a helpful assistant",
+		Messages:     []ChatMessage{{Role: "user", Content: "hi"}},
+	}
+	if got := a.EstimateCacheablePrefix(context.Background(), in); got != 0 {
+		t.Errorf("expected 0 with no cache hints, got %d", got)
+	}
+}
+
+func TestEstimateCacheablePrefix_WithHintsReturnsPositiveTokens(t *testing.T) {
+	a := &Anthropic{}
+	a.SetCacheHints(DefaultCacheStrategy())
+	in := ChatRequest{
+		Model:        "claude-sonnet-4-20250514",
+		SystemPrompt: strings.Repeat("system context ", 200),
+		Messages: []ChatMessage{
+			{Role: "user", Content: "first turn"},
+			{Role: "assistant", Content: "first response"},
+			{Role: "user", Content: "second turn"},
+		},
+	}
+	got := a.EstimateCacheablePrefix(context.Background(), in)
+	if got <= 0 {
+		t.Errorf("expected positive estimate with cache hints + system prompt, got %d", got)
+	}
+	// Sanity: estimate should be approximately bytes/4. With ~3KB of system text
+	// the prefix should be in the high-hundreds-of-tokens range.
+	if got < 100 {
+		t.Errorf("estimate %d is implausibly small for a 200-repetition system prompt", got)
+	}
+}
+
+func TestEstimateCacheablePrefix_TokensApproximateBytesOverFour(t *testing.T) {
+	a := &Anthropic{}
+	a.SetCacheHints(DefaultCacheStrategy())
+	in := ChatRequest{
+		Model:        "claude-sonnet-4-20250514",
+		SystemPrompt: strings.Repeat("x", 4000),
+		Messages:     []ChatMessage{{Role: "user", Content: "hi"}},
+	}
+	tokens := a.EstimateCacheablePrefix(context.Background(), in)
+	if tokens <= 0 {
+		t.Fatalf("expected positive estimate, got %d", tokens)
+	}
+	// Implementation contract: tokens = bytes/4 of the same payload
+	// computeCacheablePrefixBytes would see. We don't recompute here, but we
+	// guard the rough magnitude — for ~4KB of system content the estimate
+	// should be O(1000) tokens, not single-digit and not way past the input.
+	if tokens > 4096 {
+		t.Errorf("estimate %d larger than input system bytes — heuristic broken", tokens)
+	}
+	if tokens < 500 {
+		t.Errorf("estimate %d too small for 4000-byte system prompt", tokens)
 	}
 }
