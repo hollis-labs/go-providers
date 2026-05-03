@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/go-providers/internal/otel"
@@ -117,6 +118,12 @@ type Anthropic struct {
 	OnCircuitOpen  func() // called when the circuit breaker trips
 	RateTracker    *TokenRateTracker
 	cacheHints     []CacheHint // set via SetCacheHints before each request
+	// calibrated reports whether at least one provider response has supplied
+	// an x-ratelimit-limit-input-tokens header. Set inside calibrateRateTracker
+	// once the limit is read from a header. RateLimitTPM consults this so it
+	// can honor the RateLimited contract: return 0 when the limit is unknown
+	// (i.e. before the first calibrated response), not the seeded default.
+	calibrated atomic.Bool
 }
 
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
@@ -706,6 +713,9 @@ func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
 	if err != nil || newLimit <= 0 {
 		return
 	}
+	// Mark calibrated on first successful header read. Re-setting on every
+	// calibration is fine — atomic.Bool.Store is cheap and idempotent.
+	a.calibrated.Store(true)
 	_, oldLimit := a.RateTracker.Remaining()
 	if oldLimit == newLimit {
 		return
@@ -727,12 +737,21 @@ func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
 	)
 }
 
-// RateLimitTPM returns the live input-tokens-per-minute limit from the rate
-// tracker, or 0 when no tracker is configured. Implements provider.RateLimited
-// so callers can read the calibrated limit for telemetry without depending on
-// the concrete *Anthropic type.
+// RateLimitTPM returns the live input-tokens-per-minute limit observed from
+// the most recent provider response, or 0 when no calibration has happened
+// yet. Implements provider.RateLimited so callers can read the calibrated
+// limit for telemetry without depending on the concrete *Anthropic type.
+//
+// Returning 0 pre-calibration is deliberate: NewAnthropic seeds the tracker
+// with a conservative default so internal rate-budget pre-flight has a value
+// to work with, but that seed is a guess, not an observation. The interface
+// contract asks callers to treat 0 as "unknown"; surfacing the seed would
+// claim certainty we don't have.
 func (a *Anthropic) RateLimitTPM() int {
 	if a.RateTracker == nil {
+		return 0
+	}
+	if !a.calibrated.Load() {
 		return 0
 	}
 	_, limit := a.RateTracker.Remaining()
