@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v0.7.0
+
+- Added `Cacheable` optional interface (`EstimateCacheablePrefix(ctx, req) int`) for pre-flight cacheable-prefix observability. Implemented by `*Anthropic` via a shared `buildRequestBody` helper that marshals the same payload the wire request would carry, divided by 4 for the token approximation. Callers type-assert; providers without prompt caching do not implement it.
+- Added `RateLimited` optional interface (`RateLimitTPM() int`) for input-tokens-per-minute observability. Implemented by `*Anthropic`. Returns `0` when no calibration has happened yet — the contract requires implementations to treat the seeded default as "unknown" rather than surfacing it as an observed value.
+- Flipped `ToolDefinition.Strict` default. Previously `nil` meant strict-on by default on the Anthropic adapter; now `nil` is non-strict and callers must explicitly set `Strict` to a pointer to `true` to opt in. Rationale: strict was being applied blanket-fashion across all tools, conflating input-shape validation (where strict adds value) with high-blast-radius permission concerns (which belong at project/session/agent-profile scope).
+- Anthropic non-streaming `Complete`/`CompleteWithUsage` now honor `ChatRequest.MaxTokens`. Historical hardcoded cap was 128 tokens, which silently truncated longer completions; the default now mirrors streaming at 16384 when callers leave `MaxTokens` unset.
+- Anthropic rate-budget pre-flight is now cache-aware: estimates subtract the cacheable-prefix bytes so requests with healthy cache hits don't trip `ErrRequestExceedsRateBudget` unnecessarily. Default rate-tracker seed raised from 30,000 to 50,000 TPM. The seed is overridable via the `ANTHROPIC_RATE_LIMIT_TPM` env var for callers on higher tiers.
+- Tightened the cache-marker heuristic to match `"cache_control":{` (key + colon + opening brace) rather than the bare `"cache_control"` token. Prevents false positives from user content or tool-schema strings that contain the literal substring `cache_control` and would otherwise produce a spurious cacheable-prefix offset.
+- Added structured `slog` logging on rate-limit calibration. Logs only on first calibration or real tier transitions; same-value re-calibrations are silent so the signal stays meaningful.
+- Added regression tests: cache-marker false-positive guard, `RateLimitTPM` returns 0 pre-calibration and the header value post-calibration, `CompleteWithUsage` default `max_tokens=16384` and caller-supplied `MaxTokens` forwarding.
+- Doc updates: `ChatRequest.MaxTokens` flagged as Anthropic-only today (OpenAI/Azure/Gemini/Mistral/Ollama/OpenRouter/OpenZen/PTY adapters silently ignore it pending future passthrough work); `ToolDefinition.Strict` documents the breaking-default change with rationale; `RateLimited.RateLimitTPM` doc tightened to require pre-calibration `0`.
+
+### Compatibility
+
+- `ToolDefinition.Strict` default change is the only behavior-breaking item. Callers that relied on `nil`-as-strict-on must set `Strict: &true` per tool where Anthropic's server-side schema enforcement is wanted.
+- `Cacheable` and `RateLimited` are additive optional interfaces. Existing `Provider` callers are unaffected; new callers type-assert when they want the observability hooks.
+- `RateLimitTPM` returning `0` pre-calibration is a new contract — telemetry callers should treat `0` as "unknown" and skip emitting the limit field rather than reporting a guess.
+
 ## v0.5.1
 
 - Added Anthropic interleaved-thinking-2025-05-14 support: new `ReasoningConfig` (with `Enabled`, `BudgetTokens`, `BetasHeader`) plumbed via `WithReasoningConfig` / `ReasoningConfigFromContext`. The Anthropic adapter sends the `interleaved-thinking-2025-05-14` beta header and `thinking_config` request parameter as a pair, gated on `BudgetTokens > 0` AND a supported model.
