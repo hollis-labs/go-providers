@@ -42,13 +42,10 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
-	// Strict controls whether the provider enforces strict schema validation on
-	// tool inputs. When nil (the default), strict mode is enabled. Set to a
-	// pointer to false to opt out on a per-tool basis.
-	//
-	// Strict mode causes Anthropic to guarantee that tool call inputs conform to
-	// the declared InputSchema, catching malformed calls early instead of
-	// wasting retry turns.
+	// Strict is emitted as strict: true only when the caller explicitly sets
+	// Strict to a pointer to true. Default (nil) is non-strict — handler-level
+	// validation is preferred over Anthropic's server-side input-schema
+	// enforcement.
 	//
 	// Not all providers honour this flag (e.g. OpenAI tool calling is not
 	// implemented). Providers that do not support strict mode silently ignore it.
