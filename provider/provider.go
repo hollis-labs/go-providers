@@ -42,10 +42,20 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
-	// Strict is emitted as strict: true only when the caller explicitly sets
-	// Strict to a pointer to true. Default (nil) is non-strict — handler-level
-	// validation is preferred over Anthropic's server-side input-schema
-	// enforcement.
+	// Strict controls whether the provider asks Anthropic to enforce strict
+	// JSON-schema validation on tool inputs. Set to a pointer to true to
+	// opt in; nil (the default) is non-strict.
+	//
+	// Behavior change (2026-05-03): previously, nil meant strict-on by
+	// default. The default flipped to off because strict was being applied
+	// blanket-fashion to all tools, conflating input-shape validation
+	// (where strict adds value) with high-blast-radius permissions (which
+	// belong at project/session/agent-profile scope). The new default
+	// reserves strict for tools where Anthropic's server-side schema
+	// enforcement adds value the handler doesn't already provide. Existing
+	// callers that relied on nil-as-strict must explicitly set Strict to
+	// a pointer to true. See decisions.nanite.tools.strict_default_off in
+	// the agent-workspaces Vanta capture for full context.
 	//
 	// Not all providers honour this flag (e.g. OpenAI tool calling is not
 	// implemented). Providers that do not support strict mode silently ignore it.
@@ -195,11 +205,25 @@ type ChatRequest struct {
 	SlotBlocks   []SlotBlock
 	Messages     []ChatMessage
 	Tools        []ToolDefinition
-	// MaxTokens caps the model's output tokens for this request. When 0, the
-	// adapter applies its model-class default (e.g. Anthropic streaming uses
-	// 16384, non-streaming uses 16384 as well — historically 128 in non-
-	// streaming, which was a bug). Callers that emit short structured outputs
-	// (e.g. nanite's recover.Repair LLM) should set this explicitly to balance
+	// MaxTokens caps the maximum number of output tokens the provider may
+	// generate for this request. When 0 (the default), each provider applies
+	// its own default cap.
+	//
+	// Implementation status (2026-05-03): currently only the Anthropic
+	// adapter honors this field. OpenAI, Azure, Gemini, Mistral, Ollama,
+	// OpenRouter, OpenZen, and PTY adapters silently ignore it and apply
+	// their own provider-side defaults. Callers that need a guaranteed cap
+	// across providers should set per-provider config in addition to this
+	// field, or check provider-level documentation.
+	//
+	// Future work: implement passthrough on every provider so the field
+	// becomes provider-agnostic as the type implies.
+	//
+	// Anthropic-specific notes: streaming and non-streaming both default to
+	// 16384 when this field is 0. (Historically the non-streaming path was
+	// hardcoded to 128, which silently truncated longer completions; that
+	// was fixed in f6a0a8e.) Callers emitting short structured outputs (e.g.
+	// nanite's recover.Repair LLM) should set this explicitly to balance
 	// truncation risk against cost.
 	MaxTokens int
 }
