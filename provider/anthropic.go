@@ -668,6 +668,12 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 // The hints argument gates the computation: with no hints, the marshalers
 // emit no markers and the heuristic returns 0.
 //
+// The pattern is `"cache_control":{` (key + colon + opening brace) rather
+// than the bare `"cache_control"` token. Real markers always serialize as
+// `"cache_control":{"type":"ephemeral"}`; tightening the heuristic this
+// way prevents false positives from user-supplied text or tool-schema
+// strings that happen to contain the literal substring `cache_control`.
+//
 // Heuristic: anthropicRequest serializes "tools" after "messages", so the
 // last marker often sits inside tools and over-counts the cached prefix
 // by the trailing user message bytes. Acceptable here because the result
@@ -677,7 +683,7 @@ func computeCacheablePrefixBytes(payload []byte, hints []CacheHint) int {
 	if len(hints) == 0 {
 		return 0
 	}
-	idx := bytes.LastIndex(payload, []byte(`"cache_control"`))
+	idx := bytes.LastIndex(payload, []byte(`"cache_control":{`))
 	if idx < 0 {
 		return 0
 	}

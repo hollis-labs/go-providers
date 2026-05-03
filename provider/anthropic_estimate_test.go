@@ -50,6 +50,20 @@ func TestComputeCacheablePrefixBytes_ReturnsLastMarkerOffset(t *testing.T) {
 	}
 }
 
+func TestComputeCacheablePrefixBytes_IgnoresLiteralUserText(t *testing.T) {
+	// User content contains the literal substring "cache_control" (e.g. a
+	// JSON-shaped message echoing the field name) but the payload has no real
+	// cache_control marker. The tightened "cache_control":{ pattern must not
+	// match the bare token so the helper returns 0 instead of a false-positive
+	// offset that would shrink the rate-budget estimate incorrectly.
+	payload := []byte(`{"messages":[{"role":"user","content":"docs say cache_control is the field name to use, no marker here"}]}`)
+	hints := DefaultCacheStrategy()
+	got := computeCacheablePrefixBytes(payload, hints)
+	if got != 0 {
+		t.Errorf("expected 0 for payload with literal cache_control text but no real marker, got %d", got)
+	}
+}
+
 func TestComputeCacheablePrefixBytes_PicksLastMarker(t *testing.T) {
 	first := `{"a":1,"cache_control":{"type":"ephemeral"},`
 	middle := `"b":2,`
