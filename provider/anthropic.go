@@ -125,7 +125,7 @@ func NewAnthropic() *Anthropic {
 		client:         &http.Client{},
 		Retry:          DefaultRetryConfig(),
 		CircuitBreaker: NewCircuitBreaker(3),
-		RateTracker:    NewTokenRateTracker(30000),
+		RateTracker:    NewTokenRateTracker(50000),
 	}
 }
 
@@ -492,6 +492,17 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	// Rate-limit pacing: estimate request tokens and wait if necessary.
 	if a.RateTracker != nil {
 		estimatedTokens := len(payload) / 4
+		// Cache-aware: subtract bytes covered by the cacheable prefix so a
+		// pre-cache-hit second turn doesn't trigger ErrRequestExceedsRateBudget
+		// from local pessimism. RateTracker.Record from response usage is
+		// authoritative; this only affects the pre-flight estimate.
+		if len(a.cacheHints) > 0 {
+			cacheableBytes := computeCacheablePrefixBytes(payload, a.cacheHints)
+			estimatedTokens -= cacheableBytes / 4
+			if estimatedTokens < 0 {
+				estimatedTokens = 0
+			}
+		}
 		avail, limit := a.RateTracker.Remaining()
 		// If the request alone is larger than the per-minute window, no
 		// amount of waiting can fit it — signal the caller to compact
@@ -602,6 +613,27 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	ch := make(chan StreamEvent, 64)
 	go a.readSSEWithTracking(ctx, resp.Body, ch, span, interleavedThinking)
 	return ch, nil
+}
+
+// computeCacheablePrefixBytes approximates the byte size of the cached
+// prefix in payload as the offset of the last "cache_control" marker.
+// The hints argument gates the computation: with no hints, the marshalers
+// emit no markers and the heuristic returns 0.
+//
+// Heuristic: anthropicRequest serializes "tools" after "messages", so the
+// last marker often sits inside tools and over-counts the cached prefix
+// by the trailing user message bytes. Acceptable here because the result
+// only feeds the pre-flight rate-budget estimate; runtime usage is
+// recorded from the API response by readSSEWithTracking → Record.
+func computeCacheablePrefixBytes(payload []byte, hints []CacheHint) int {
+	if len(hints) == 0 {
+		return 0
+	}
+	idx := bytes.LastIndex(payload, []byte(`"cache_control"`))
+	if idx < 0 {
+		return 0
+	}
+	return idx
 }
 
 // calibrateRateTracker reads Anthropic rate-limit headers and updates the tracker.
