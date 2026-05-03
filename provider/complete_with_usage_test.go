@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -109,6 +111,77 @@ func TestAnthropicCompleteWithUsage(t *testing.T) {
 	}
 	if result.Usage.StopReason != "end_turn" {
 		t.Fatalf("unexpected stop reason: %+v", result.Usage)
+	}
+}
+
+// TestAnthropicCompleteWithUsage_DefaultMaxTokens pins the no-cap default the
+// f6a0a8e commit established (16384, replacing the historical 128 that
+// silently truncated longer completions). Regression-prone because the
+// constant only appears in two places (StreamChat, CompleteWithUsage) and
+// drifting one without the other re-introduces the truncation bug.
+func TestAnthropicCompleteWithUsage_DefaultMaxTokens(t *testing.T) {
+	var captured struct {
+		MaxTokens int `json:"max_tokens"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		fmt.Fprintln(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1},"stop_reason":"end_turn"}`)
+	}))
+	defer srv.Close()
+
+	a := NewAnthropic()
+	a.apiKey = "test-key"
+	a.client = testHTTPClientForServer(srv)
+	a.Retry.MaxRetries = 0
+
+	if _, err := a.CompleteWithUsage(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("CompleteWithUsage failed: %v", err)
+	}
+	if captured.MaxTokens != 16384 {
+		t.Errorf("expected default max_tokens=16384, got %d", captured.MaxTokens)
+	}
+}
+
+// TestAnthropicCompleteWithUsage_HonorsCallerMaxTokens verifies that a
+// caller-supplied ChatRequest.MaxTokens is forwarded to the provider rather
+// than overridden by the adapter default.
+func TestAnthropicCompleteWithUsage_HonorsCallerMaxTokens(t *testing.T) {
+	var captured struct {
+		MaxTokens int `json:"max_tokens"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		fmt.Fprintln(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1},"stop_reason":"end_turn"}`)
+	}))
+	defer srv.Close()
+
+	a := NewAnthropic()
+	a.apiKey = "test-key"
+	a.client = testHTTPClientForServer(srv)
+	a.Retry.MaxRetries = 0
+
+	if _, err := a.CompleteWithUsage(context.Background(), ChatRequest{
+		Messages:  []ChatMessage{{Role: "user", Content: "hi"}},
+		MaxTokens: 256,
+	}); err != nil {
+		t.Fatalf("CompleteWithUsage failed: %v", err)
+	}
+	if captured.MaxTokens != 256 {
+		t.Errorf("expected caller-supplied max_tokens=256, got %d", captured.MaxTokens)
 	}
 }
 
