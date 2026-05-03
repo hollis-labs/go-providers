@@ -247,6 +247,16 @@ type ProviderWithUsage interface {
 	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
 }
 
+// RateLimited is implemented by providers that track an input-tokens-per-minute
+// rate limit (e.g. Anthropic). Callers use this for observability — surfacing
+// the live calibrated limit in telemetry. Providers without a rate tracker do
+// not implement this interface; callers type-assert.
+type RateLimited interface {
+	// RateLimitTPM returns the current input-tokens-per-minute limit. Returns
+	// 0 when the limit is unknown (e.g. before the first response calibration).
+	RateLimitTPM() int
+}
+
 // ReasoningConfig carries per-turn reasoning/thinking configuration for
 // providers that support it (e.g. Anthropic interleaved thinking).
 // Callers inject this via WithReasoningConfig before calling StreamChat.

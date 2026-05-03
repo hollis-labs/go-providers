@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -493,18 +494,29 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	// Rate-limit pacing: estimate request tokens and wait if necessary.
 	if a.RateTracker != nil {
 		estimatedTokens := len(payload) / 4
+		cacheableBytes := 0
+		markerOffset := -1
 		// Cache-aware: subtract bytes covered by the cacheable prefix so a
 		// pre-cache-hit second turn doesn't trigger ErrRequestExceedsRateBudget
 		// from local pessimism. RateTracker.Record from response usage is
 		// authoritative; this only affects the pre-flight estimate.
 		if len(a.cacheHints) > 0 {
-			cacheableBytes := computeCacheablePrefixBytes(payload, a.cacheHints)
+			cacheableBytes = computeCacheablePrefixBytes(payload, a.cacheHints)
+			markerOffset = bytes.LastIndex(payload, []byte(`"cache_control"`))
 			estimatedTokens -= cacheableBytes / 4
 			if estimatedTokens < 0 {
 				estimatedTokens = 0
 			}
 		}
 		avail, limit := a.RateTracker.Remaining()
+		slog.Debug("provider: rate budget preflight",
+			"provider", "anthropic",
+			"estimated_tokens", estimatedTokens,
+			"cacheable_bytes", cacheableBytes,
+			"marker_offset", markerOffset,
+			"payload_bytes", len(payload),
+			"available_tpm", avail,
+		)
 		// If the request alone is larger than the per-minute window, no
 		// amount of waiting can fit it — signal the caller to compact
 		// history instead of repeating 58s waits until the outer context
@@ -638,22 +650,52 @@ func computeCacheablePrefixBytes(payload []byte, hints []CacheHint) int {
 }
 
 // calibrateRateTracker reads Anthropic rate-limit headers and updates the tracker.
+// Logs only when the calibrated limit actually changes (first calibration or a
+// real tier transition); same-value re-calibrations are silent so the log
+// signal stays meaningful instead of firing on every response.
 func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
 	if a.RateTracker == nil {
 		return
 	}
-	if limitStr := resp.Header.Get("x-ratelimit-limit-input-tokens"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
-			a.RateTracker.UpdateLimit(limit)
-			log.Printf("provider: rate limit calibrated to %d input tokens/min", limit)
-		}
+	limitStr := resp.Header.Get("x-ratelimit-limit-input-tokens")
+	if limitStr == "" {
+		return
 	}
-	if remainStr := resp.Header.Get("x-ratelimit-remaining-input-tokens"); remainStr != "" {
-		log.Printf("provider: rate limit remaining: %s input tokens", remainStr)
+	newLimit, err := strconv.Atoi(limitStr)
+	if err != nil || newLimit <= 0 {
+		return
 	}
-	if resetStr := resp.Header.Get("x-ratelimit-reset-input-tokens"); resetStr != "" {
-		log.Printf("provider: rate limit resets at: %s", resetStr)
+	_, oldLimit := a.RateTracker.Remaining()
+	if oldLimit == newLimit {
+		return
 	}
+	a.RateTracker.UpdateLimit(newLimit)
+
+	remainingTPM := 0
+	if v, err := strconv.Atoi(resp.Header.Get("x-ratelimit-remaining-input-tokens")); err == nil {
+		remainingTPM = v
+	}
+	resetAt := resp.Header.Get("x-ratelimit-reset-input-tokens")
+
+	slog.Info("provider: rate limit calibrated",
+		"provider", "anthropic",
+		"old_limit_tpm", oldLimit,
+		"new_limit_tpm", newLimit,
+		"remaining_tpm", remainingTPM,
+		"reset_at", resetAt,
+	)
+}
+
+// RateLimitTPM returns the live input-tokens-per-minute limit from the rate
+// tracker, or 0 when no tracker is configured. Implements provider.RateLimited
+// so callers can read the calibrated limit for telemetry without depending on
+// the concrete *Anthropic type.
+func (a *Anthropic) RateLimitTPM() int {
+	if a.RateTracker == nil {
+		return 0
+	}
+	_, limit := a.RateTracker.Remaining()
+	return limit
 }
 
 // readSSEWithTracking wraps readSSE to record input tokens via the rate tracker
