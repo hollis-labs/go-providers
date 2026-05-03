@@ -423,6 +423,63 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 	return result
 }
 
+// buildRequestBody assembles the anthropicRequest for the given ChatRequest.
+// Shared between StreamChat (stream=true) and EstimateCacheablePrefix
+// (stream=false, payload is marshalled but not sent) so the two stay in sync.
+func (a *Anthropic) buildRequestBody(in ChatRequest, model string, interleavedThinking bool, reasoningCfg ReasoningConfig, stream bool) anthropicRequest {
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
+	body := anthropicRequest{
+		Model:     model,
+		MaxTokens: maxTokens,
+		System:    a.buildSystemFromRequest(in),
+		Messages:  a.marshalMessages(in.Messages),
+		Stream:    stream,
+	}
+	if len(in.Tools) > 0 {
+		body.Tools = a.buildToolsWithCacheControl(in.Tools)
+	}
+	// F3: attach thinking_config whenever the interleavedThinking gate is open.
+	// The gate already requires BudgetTokens > 0, so the pair (header + config)
+	// is always sent together.
+	if interleavedThinking {
+		body.ThinkingConfig = &anthropicThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: reasoningCfg.BudgetTokens,
+		}
+	}
+	return body
+}
+
+// EstimateCacheablePrefix implements provider.Cacheable. It builds the same
+// anthropicRequest payload StreamChat would send, then returns the byte offset
+// of the last cache_control marker divided by 4 (token approximation). Returns
+// 0 when no cache hints are configured or no marker would be emitted.
+//
+// Stays in lock-step with the rate-budget pre-flight in StreamChat (see
+// computeCacheablePrefixBytes call site): both consume the same payload bytes
+// and the same heuristic, just expressed in different units. Future readers
+// changing one should change the other together.
+func (a *Anthropic) EstimateCacheablePrefix(ctx context.Context, in ChatRequest) int {
+	if len(a.cacheHints) == 0 {
+		return 0
+	}
+	model := in.Model
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+	reasoningCfg := ReasoningConfigFromContext(ctx)
+	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
+	body := a.buildRequestBody(in, model, interleavedThinking, reasoningCfg, true)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0
+	}
+	return computeCacheablePrefixBytes(payload, a.cacheHints) / 4
+}
+
 // StreamChat implements Provider.StreamChat using Anthropic's streaming SSE API.
 func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.stream")
@@ -451,29 +508,7 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	reasoningCfg := ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 
-	maxTokens := in.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 16384
-	}
-	body := anthropicRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    a.buildSystemFromRequest(in),
-		Messages:  a.marshalMessages(in.Messages),
-		Stream:    true,
-	}
-	if len(in.Tools) > 0 {
-		body.Tools = a.buildToolsWithCacheControl(in.Tools)
-	}
-	// F3: attach thinking_config whenever the interleavedThinking gate is open.
-	// The gate already requires BudgetTokens > 0, so the pair (header + config)
-	// is always sent together.
-	if interleavedThinking {
-		body.ThinkingConfig = &anthropicThinkingConfig{
-			Type:         "enabled",
-			BudgetTokens: reasoningCfg.BudgetTokens,
-		}
-	}
+	body := a.buildRequestBody(in, model, interleavedThinking, reasoningCfg, true)
 
 	// anthropicRequest is fully built; remainder of function constructs the
 	// HTTP call and spawns the SSE reader.
