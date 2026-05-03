@@ -431,8 +431,11 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 }
 
 // buildRequestBody assembles the anthropicRequest for the given ChatRequest.
-// Shared between StreamChat (stream=true) and EstimateCacheablePrefix
-// (stream=false, payload is marshalled but not sent) so the two stay in sync.
+// Shared between StreamChat and EstimateCacheablePrefix (both call with
+// stream=true so the marshalled payload matches what the wire request
+// would carry) so the two stay in sync. The stream parameter is forwarded
+// to the request body's Stream field; EstimateCacheablePrefix marshals but
+// does not send the payload.
 func (a *Anthropic) buildRequestBody(in ChatRequest, model string, interleavedThinking bool, reasoningCfg ReasoningConfig, stream bool) anthropicRequest {
 	maxTokens := in.MaxTokens
 	if maxTokens <= 0 {
