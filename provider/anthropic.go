@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/go-providers/internal/otel"
@@ -116,6 +118,12 @@ type Anthropic struct {
 	OnCircuitOpen  func() // called when the circuit breaker trips
 	RateTracker    *TokenRateTracker
 	cacheHints     []CacheHint // set via SetCacheHints before each request
+	// calibrated reports whether at least one provider response has supplied
+	// an x-ratelimit-limit-input-tokens header. Set inside calibrateRateTracker
+	// once the limit is read from a header. RateLimitTPM consults this so it
+	// can honor the RateLimited contract: return 0 when the limit is unknown
+	// (i.e. before the first calibrated response), not the seeded default.
+	calibrated atomic.Bool
 }
 
 // NewAnthropic creates a new Anthropic provider. It reads ANTHROPIC_API_KEY from the environment.
@@ -125,7 +133,7 @@ func NewAnthropic() *Anthropic {
 		client:         &http.Client{},
 		Retry:          DefaultRetryConfig(),
 		CircuitBreaker: NewCircuitBreaker(3),
-		RateTracker:    NewTokenRateTracker(30000),
+		RateTracker:    NewTokenRateTracker(50000),
 	}
 }
 
@@ -245,7 +253,9 @@ func buildSystemBlocks(systemPrompt string) []map[string]any {
 
 // buildToolsWithCacheControl converts tool definitions to []any.
 // If the provider has a "tools" cache hint, the last tool gets cache_control ephemeral.
-// Strict mode is emitted as "strict": true by default; set Strict to a pointer to false to opt out.
+// Strict is emitted as strict: true only when the caller explicitly sets Strict to a pointer to true.
+// Default (nil) is non-strict — handler-level validation is preferred over Anthropic's server-side
+// input-schema enforcement.
 func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
@@ -258,9 +268,7 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 			"description":  t.Description,
 			"input_schema": t.InputSchema,
 		}
-		// Emit strict:true by default. Callers opt out by setting Strict to a
-		// pointer to false. nil means "use default" which is true.
-		if t.Strict == nil || *t.Strict {
+		if t.Strict != nil && *t.Strict {
 			entry["strict"] = true
 		}
 		if shouldCache && i == len(tools)-1 {
@@ -273,7 +281,9 @@ func (a *Anthropic) buildToolsWithCacheControl(tools []ToolDefinition) []any {
 
 // buildToolsWithCacheControl is the package-level (static) version for tests.
 // It always marks the last tool with cache_control.
-// Strict mode is emitted as "strict": true by default; set Strict to a pointer to false to opt out.
+// Strict is emitted as strict: true only when the caller explicitly sets Strict to a pointer to true.
+// Default (nil) is non-strict — handler-level validation is preferred over Anthropic's server-side
+// input-schema enforcement.
 func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 	if len(tools) == 0 {
 		return nil
@@ -285,8 +295,7 @@ func buildToolsWithCacheControl(tools []ToolDefinition) []any {
 			"description":  t.Description,
 			"input_schema": t.InputSchema,
 		}
-		// Emit strict:true by default; nil Strict means opt-in.
-		if t.Strict == nil || *t.Strict {
+		if t.Strict != nil && *t.Strict {
 			entry["strict"] = true
 		}
 		if i == len(tools)-1 {
@@ -421,6 +430,66 @@ func marshalMessagesWithCacheCount(messages []ChatMessage, cacheCount int) []any
 	return result
 }
 
+// buildRequestBody assembles the anthropicRequest for the given ChatRequest.
+// Shared between StreamChat and EstimateCacheablePrefix (both call with
+// stream=true so the marshalled payload matches what the wire request
+// would carry) so the two stay in sync. The stream parameter is forwarded
+// to the request body's Stream field; EstimateCacheablePrefix marshals but
+// does not send the payload.
+func (a *Anthropic) buildRequestBody(in ChatRequest, model string, interleavedThinking bool, reasoningCfg ReasoningConfig, stream bool) anthropicRequest {
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
+	body := anthropicRequest{
+		Model:     model,
+		MaxTokens: maxTokens,
+		System:    a.buildSystemFromRequest(in),
+		Messages:  a.marshalMessages(in.Messages),
+		Stream:    stream,
+	}
+	if len(in.Tools) > 0 {
+		body.Tools = a.buildToolsWithCacheControl(in.Tools)
+	}
+	// F3: attach thinking_config whenever the interleavedThinking gate is open.
+	// The gate already requires BudgetTokens > 0, so the pair (header + config)
+	// is always sent together.
+	if interleavedThinking {
+		body.ThinkingConfig = &anthropicThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: reasoningCfg.BudgetTokens,
+		}
+	}
+	return body
+}
+
+// EstimateCacheablePrefix implements provider.Cacheable. It builds the same
+// anthropicRequest payload StreamChat would send, then returns the byte offset
+// of the last cache_control marker divided by 4 (token approximation). Returns
+// 0 when no cache hints are configured or no marker would be emitted.
+//
+// Stays in lock-step with the rate-budget pre-flight in StreamChat (see
+// computeCacheablePrefixBytes call site): both consume the same payload bytes
+// and the same heuristic, just expressed in different units. Future readers
+// changing one should change the other together.
+func (a *Anthropic) EstimateCacheablePrefix(ctx context.Context, in ChatRequest) int {
+	if len(a.cacheHints) == 0 {
+		return 0
+	}
+	model := in.Model
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+	reasoningCfg := ReasoningConfigFromContext(ctx)
+	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
+	body := a.buildRequestBody(in, model, interleavedThinking, reasoningCfg, true)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0
+	}
+	return computeCacheablePrefixBytes(payload, a.cacheHints) / 4
+}
+
 // StreamChat implements Provider.StreamChat using Anthropic's streaming SSE API.
 func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
 	ctx, span := otel.StartSpan(ctx, "nanite.provider.anthropic.stream")
@@ -449,25 +518,7 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	reasoningCfg := ReasoningConfigFromContext(ctx)
 	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
 
-	body := anthropicRequest{
-		Model:     model,
-		MaxTokens: 16384,
-		System:    a.buildSystemFromRequest(in),
-		Messages:  a.marshalMessages(in.Messages),
-		Stream:    true,
-	}
-	if len(in.Tools) > 0 {
-		body.Tools = a.buildToolsWithCacheControl(in.Tools)
-	}
-	// F3: attach thinking_config whenever the interleavedThinking gate is open.
-	// The gate already requires BudgetTokens > 0, so the pair (header + config)
-	// is always sent together.
-	if interleavedThinking {
-		body.ThinkingConfig = &anthropicThinkingConfig{
-			Type:         "enabled",
-			BudgetTokens: reasoningCfg.BudgetTokens,
-		}
-	}
+	body := a.buildRequestBody(in, model, interleavedThinking, reasoningCfg, true)
 
 	// anthropicRequest is fully built; remainder of function constructs the
 	// HTTP call and spawns the SSE reader.
@@ -488,7 +539,29 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	// Rate-limit pacing: estimate request tokens and wait if necessary.
 	if a.RateTracker != nil {
 		estimatedTokens := len(payload) / 4
+		cacheableBytes := 0
+		markerOffset := -1
+		// Cache-aware: subtract bytes covered by the cacheable prefix so a
+		// pre-cache-hit second turn doesn't trigger ErrRequestExceedsRateBudget
+		// from local pessimism. RateTracker.Record from response usage is
+		// authoritative; this only affects the pre-flight estimate.
+		if len(a.cacheHints) > 0 {
+			cacheableBytes = computeCacheablePrefixBytes(payload, a.cacheHints)
+			markerOffset = bytes.LastIndex(payload, []byte(`"cache_control"`))
+			estimatedTokens -= cacheableBytes / 4
+			if estimatedTokens < 0 {
+				estimatedTokens = 0
+			}
+		}
 		avail, limit := a.RateTracker.Remaining()
+		slog.Debug("provider: rate budget preflight",
+			"provider", "anthropic",
+			"estimated_tokens", estimatedTokens,
+			"cacheable_bytes", cacheableBytes,
+			"marker_offset", markerOffset,
+			"payload_bytes", len(payload),
+			"available_tpm", avail,
+		)
 		// If the request alone is larger than the per-minute window, no
 		// amount of waiting can fit it — signal the caller to compact
 		// history instead of repeating 58s waits until the outer context
@@ -600,23 +673,92 @@ func (a *Anthropic) StreamChat(ctx context.Context, in ChatRequest) (<-chan Stre
 	return ch, nil
 }
 
+// computeCacheablePrefixBytes approximates the byte size of the cached
+// prefix in payload as the offset of the last "cache_control" marker.
+// The hints argument gates the computation: with no hints, the marshalers
+// emit no markers and the heuristic returns 0.
+//
+// The pattern is `"cache_control":{` (key + colon + opening brace) rather
+// than the bare `"cache_control"` token. Real markers always serialize as
+// `"cache_control":{"type":"ephemeral"}`; tightening the heuristic this
+// way prevents false positives from user-supplied text or tool-schema
+// strings that happen to contain the literal substring `cache_control`.
+//
+// Heuristic: anthropicRequest serializes "tools" after "messages", so the
+// last marker often sits inside tools and over-counts the cached prefix
+// by the trailing user message bytes. Acceptable here because the result
+// only feeds the pre-flight rate-budget estimate; runtime usage is
+// recorded from the API response by readSSEWithTracking → Record.
+func computeCacheablePrefixBytes(payload []byte, hints []CacheHint) int {
+	if len(hints) == 0 {
+		return 0
+	}
+	idx := bytes.LastIndex(payload, []byte(`"cache_control":{`))
+	if idx < 0 {
+		return 0
+	}
+	return idx
+}
+
 // calibrateRateTracker reads Anthropic rate-limit headers and updates the tracker.
+// Logs only when the calibrated limit actually changes (first calibration or a
+// real tier transition); same-value re-calibrations are silent so the log
+// signal stays meaningful instead of firing on every response.
 func (a *Anthropic) calibrateRateTracker(resp *http.Response) {
 	if a.RateTracker == nil {
 		return
 	}
-	if limitStr := resp.Header.Get("x-ratelimit-limit-input-tokens"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
-			a.RateTracker.UpdateLimit(limit)
-			log.Printf("provider: rate limit calibrated to %d input tokens/min", limit)
-		}
+	limitStr := resp.Header.Get("x-ratelimit-limit-input-tokens")
+	if limitStr == "" {
+		return
 	}
-	if remainStr := resp.Header.Get("x-ratelimit-remaining-input-tokens"); remainStr != "" {
-		log.Printf("provider: rate limit remaining: %s input tokens", remainStr)
+	newLimit, err := strconv.Atoi(limitStr)
+	if err != nil || newLimit <= 0 {
+		return
 	}
-	if resetStr := resp.Header.Get("x-ratelimit-reset-input-tokens"); resetStr != "" {
-		log.Printf("provider: rate limit resets at: %s", resetStr)
+	// Mark calibrated on first successful header read. Re-setting on every
+	// calibration is fine — atomic.Bool.Store is cheap and idempotent.
+	a.calibrated.Store(true)
+	_, oldLimit := a.RateTracker.Remaining()
+	if oldLimit == newLimit {
+		return
 	}
+	a.RateTracker.UpdateLimit(newLimit)
+
+	remainingTPM := 0
+	if v, err := strconv.Atoi(resp.Header.Get("x-ratelimit-remaining-input-tokens")); err == nil {
+		remainingTPM = v
+	}
+	resetAt := resp.Header.Get("x-ratelimit-reset-input-tokens")
+
+	slog.Info("provider: rate limit calibrated",
+		"provider", "anthropic",
+		"old_limit_tpm", oldLimit,
+		"new_limit_tpm", newLimit,
+		"remaining_tpm", remainingTPM,
+		"reset_at", resetAt,
+	)
+}
+
+// RateLimitTPM returns the live input-tokens-per-minute limit observed from
+// the most recent provider response, or 0 when no calibration has happened
+// yet. Implements provider.RateLimited so callers can read the calibrated
+// limit for telemetry without depending on the concrete *Anthropic type.
+//
+// Returning 0 pre-calibration is deliberate: NewAnthropic seeds the tracker
+// with a conservative default so internal rate-budget pre-flight has a value
+// to work with, but that seed is a guess, not an observation. The interface
+// contract asks callers to treat 0 as "unknown"; surfacing the seed would
+// claim certainty we don't have.
+func (a *Anthropic) RateLimitTPM() int {
+	if a.RateTracker == nil {
+		return 0
+	}
+	if !a.calibrated.Load() {
+		return 0
+	}
+	_, limit := a.RateTracker.Remaining()
+	return limit
 }
 
 // readSSEWithTracking wraps readSSE to record input tokens via the rate tracker
@@ -920,9 +1062,18 @@ func (a *Anthropic) CompleteWithUsage(ctx context.Context, in ChatRequest) (Comp
 		model = "claude-sonnet-4-20250514"
 	}
 
+	// Historically MaxTokens was hardcoded to 128 here, which silently truncated
+	// non-streaming completions for any caller that emitted more than ~512 bytes
+	// of output. Caller-supplied MaxTokens now wins; default mirrors the
+	// streaming path (16384) so the two code paths agree on what "no cap given"
+	// means.
+	maxTokens := in.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
 	body := anthropicRequest{
 		Model:     model,
-		MaxTokens: 128,
+		MaxTokens: maxTokens,
 		System:    a.buildSystemFromRequest(in),
 		Messages:  a.marshalMessages(in.Messages),
 		Stream:    false,

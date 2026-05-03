@@ -42,13 +42,20 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
-	// Strict controls whether the provider enforces strict schema validation on
-	// tool inputs. When nil (the default), strict mode is enabled. Set to a
-	// pointer to false to opt out on a per-tool basis.
+	// Strict controls whether the provider asks Anthropic to enforce strict
+	// JSON-schema validation on tool inputs. Set to a pointer to true to
+	// opt in; nil (the default) is non-strict.
 	//
-	// Strict mode causes Anthropic to guarantee that tool call inputs conform to
-	// the declared InputSchema, catching malformed calls early instead of
-	// wasting retry turns.
+	// Behavior change (2026-05-03): previously, nil meant strict-on by
+	// default. The default flipped to off because strict was being applied
+	// blanket-fashion to all tools, conflating input-shape validation
+	// (where strict adds value) with high-blast-radius permissions (which
+	// belong at project/session/agent-profile scope). The new default
+	// reserves strict for tools where Anthropic's server-side schema
+	// enforcement adds value the handler doesn't already provide. Existing
+	// callers that relied on nil-as-strict must explicitly set Strict to
+	// a pointer to true. See decisions.nanite.tools.strict_default_off in
+	// the agent-workspaces Vanta capture for full context.
 	//
 	// Not all providers honour this flag (e.g. OpenAI tool calling is not
 	// implemented). Providers that do not support strict mode silently ignore it.
@@ -198,6 +205,27 @@ type ChatRequest struct {
 	SlotBlocks   []SlotBlock
 	Messages     []ChatMessage
 	Tools        []ToolDefinition
+	// MaxTokens caps the maximum number of output tokens the provider may
+	// generate for this request. When 0 (the default), each provider applies
+	// its own default cap.
+	//
+	// Implementation status (2026-05-03): currently only the Anthropic
+	// adapter honors this field. OpenAI, Azure, Gemini, Mistral, Ollama,
+	// OpenRouter, OpenZen, and PTY adapters silently ignore it and apply
+	// their own provider-side defaults. Callers that need a guaranteed cap
+	// across providers should set per-provider config in addition to this
+	// field, or check provider-level documentation.
+	//
+	// Future work: implement passthrough on every provider so the field
+	// becomes provider-agnostic as the type implies.
+	//
+	// Anthropic-specific notes: streaming and non-streaming both default to
+	// 16384 when this field is 0. (Historically the non-streaming path was
+	// hardcoded to 128, which silently truncated longer completions; that
+	// was fixed in f6a0a8e.) Callers emitting short structured outputs (e.g.
+	// nanite's recover.Repair LLM) should set this explicitly to balance
+	// truncation risk against cost.
+	MaxTokens int
 }
 
 // EffectiveSystemPrompt returns SystemPrompt when no slots are set, otherwise
@@ -241,6 +269,40 @@ type ProviderWithUsage interface {
 	// CompleteWithUsage makes a non-streaming completion call and returns
 	// any token usage the underlying provider surfaces.
 	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
+}
+
+// RateLimited is implemented by providers that track an input-tokens-per-minute
+// rate limit (e.g. Anthropic). Callers use this for observability — surfacing
+// the live calibrated limit in telemetry. Providers without a rate tracker do
+// not implement this interface; callers type-assert.
+type RateLimited interface {
+	// RateLimitTPM returns the current input-tokens-per-minute limit observed
+	// from the most recent provider response, or 0 when no calibration has
+	// happened yet. Implementations must not return seeded/default values
+	// before the first real response — 0 means "unknown", and callers may
+	// use it to skip emitting limit telemetry rather than mislabel a guess.
+	RateLimitTPM() int
+}
+
+// Cacheable is implemented by providers that can estimate the cacheable prefix
+// length of a request before sending it. Callers use this for observability —
+// surfacing the prefix size in request_build telemetry alongside per-slot token
+// estimates. Providers without prompt caching do not implement this interface;
+// callers type-assert.
+//
+// The estimate is approximate: it reflects the same heuristic the provider
+// uses internally for the rate-budget pre-flight (offset of the last
+// cache_control marker after JSON marshalling, divided by 4 for tokens). It
+// over-counts when markers land inside trailing tools or messages, but it is
+// directionally correct and matches what the provider actually treats as
+// cacheable. Authoritative cache hit/miss data comes from the provider's
+// usage response; this is for pre-flight observability only.
+type Cacheable interface {
+	// EstimateCacheablePrefix returns the approximate token count of the
+	// cacheable prefix for the given request, using the provider's current
+	// cache hints. Returns 0 when no cache hints are configured or the
+	// request would emit no cache_control markers.
+	EstimateCacheablePrefix(ctx context.Context, req ChatRequest) int
 }
 
 // ReasoningConfig carries per-turn reasoning/thinking configuration for

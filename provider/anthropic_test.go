@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -180,18 +181,14 @@ func TestBuildToolsWithCacheControl(t *testing.T) {
 		}
 	})
 
-	t.Run("strict true by default when Strict is nil", func(t *testing.T) {
+	t.Run("strict absent by default when Strict is nil", func(t *testing.T) {
 		tools := []ToolDefinition{
 			{Name: "tool_a", Description: "Tool with nil Strict", InputSchema: map[string]any{"type": "object"}},
 		}
 		result := buildToolsWithCacheControl(tools)
 		entry := result[0].(map[string]any)
-		v, ok := entry["strict"]
-		if !ok {
-			t.Fatal("expected strict key present when Strict is nil (default-on)")
-		}
-		if v != true {
-			t.Errorf("expected strict=true, got %v", v)
+		if v, ok := entry["strict"]; ok {
+			t.Errorf("expected strict absent when Strict is nil (default-off), got %v", v)
 		}
 	})
 
@@ -210,14 +207,14 @@ func TestBuildToolsWithCacheControl(t *testing.T) {
 		}
 	})
 
-	t.Run("strict absent when Strict is explicitly set to false (opt-out)", func(t *testing.T) {
+	t.Run("strict absent when Strict is explicitly set to false", func(t *testing.T) {
 		tools := []ToolDefinition{
-			{Name: "tool_a", Description: "Tool with Strict=false (opt-out)", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(false)},
+			{Name: "tool_a", Description: "Tool with Strict=false", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(false)},
 		}
 		result := buildToolsWithCacheControl(tools)
 		entry := result[0].(map[string]any)
 		if v, ok := entry["strict"]; ok {
-			t.Errorf("expected strict absent for opt-out tool, got %v", v)
+			t.Errorf("expected strict absent when Strict=false, got %v", v)
 		}
 	})
 }
@@ -775,5 +772,33 @@ func TestAnthropic_StreamChat_ReturnsRequestExceedsBudgetSentinel(t *testing.T) 
 	// block on WaitTime (which would be tens of seconds).
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("expected immediate return, took %s", elapsed)
+	}
+}
+
+// TestAnthropic_RateLimitTPM_UnknownBeforeCalibration verifies that a fresh
+// Anthropic provider returns 0 from RateLimitTPM until calibrateRateTracker
+// has read a real x-ratelimit-limit-input-tokens header. The interface
+// contract on RateLimited.RateLimitTPM says 0 means "unknown"; the
+// constructor seeds the tracker with a conservative default for internal
+// rate-budget pre-flight, but that seed is a guess, not an observation.
+func TestAnthropic_RateLimitTPM_UnknownBeforeCalibration(t *testing.T) {
+	a := NewAnthropic()
+	if got := a.RateLimitTPM(); got != 0 {
+		t.Errorf("fresh NewAnthropic should report 0 (unknown) from RateLimitTPM, got %d", got)
+	}
+}
+
+// TestAnthropic_RateLimitTPM_AfterCalibration verifies that once
+// calibrateRateTracker has run against a response carrying the
+// x-ratelimit-limit-input-tokens header, RateLimitTPM returns the live
+// header value rather than the seeded default.
+func TestAnthropic_RateLimitTPM_AfterCalibration(t *testing.T) {
+	a := NewAnthropic()
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("x-ratelimit-limit-input-tokens", "75000")
+	a.calibrateRateTracker(resp)
+
+	if got := a.RateLimitTPM(); got != 75000 {
+		t.Errorf("after calibration with header=75000, RateLimitTPM = %d, want 75000", got)
 	}
 }
