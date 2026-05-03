@@ -180,18 +180,14 @@ func TestBuildToolsWithCacheControl(t *testing.T) {
 		}
 	})
 
-	t.Run("strict true by default when Strict is nil", func(t *testing.T) {
+	t.Run("strict absent by default when Strict is nil", func(t *testing.T) {
 		tools := []ToolDefinition{
 			{Name: "tool_a", Description: "Tool with nil Strict", InputSchema: map[string]any{"type": "object"}},
 		}
 		result := buildToolsWithCacheControl(tools)
 		entry := result[0].(map[string]any)
-		v, ok := entry["strict"]
-		if !ok {
-			t.Fatal("expected strict key present when Strict is nil (default-on)")
-		}
-		if v != true {
-			t.Errorf("expected strict=true, got %v", v)
+		if v, ok := entry["strict"]; ok {
+			t.Errorf("expected strict absent when Strict is nil (default-off), got %v", v)
 		}
 	})
 
@@ -210,14 +206,14 @@ func TestBuildToolsWithCacheControl(t *testing.T) {
 		}
 	})
 
-	t.Run("strict absent when Strict is explicitly set to false (opt-out)", func(t *testing.T) {
+	t.Run("strict absent when Strict is explicitly set to false", func(t *testing.T) {
 		tools := []ToolDefinition{
-			{Name: "tool_a", Description: "Tool with Strict=false (opt-out)", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(false)},
+			{Name: "tool_a", Description: "Tool with Strict=false", InputSchema: map[string]any{"type": "object"}, Strict: boolPtr(false)},
 		}
 		result := buildToolsWithCacheControl(tools)
 		entry := result[0].(map[string]any)
 		if v, ok := entry["strict"]; ok {
-			t.Errorf("expected strict absent for opt-out tool, got %v", v)
+			t.Errorf("expected strict absent when Strict=false, got %v", v)
 		}
 	})
 }
