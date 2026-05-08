@@ -159,8 +159,18 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 		return fmt.Errorf("read %s: %w", cfgPath, err)
 	}
 
-	projects, _ := cfg["projects"].(map[string]any)
-	if projects == nil {
+	// Distinguish absent vs. wrong-shape: if `projects` is present but is
+	// not a JSON object, refuse rather than silently discard. Same goes
+	// for an existing per-path entry. Mirrors the don't-overwrite-malformed-
+	// config invariant documented above.
+	var projects map[string]any
+	if raw, ok := cfg["projects"]; ok {
+		m, mok := raw.(map[string]any)
+		if !mok {
+			return fmt.Errorf("%s: top-level `projects` is not a JSON object (%T) — refusing to overwrite", cfgPath, raw)
+		}
+		projects = m
+	} else {
 		projects = map[string]any{}
 		cfg["projects"] = projects
 	}
@@ -168,8 +178,14 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 	// If the path already has an entry, preserve any other keys (e.g.
 	// allowedTools, lastSessionId) that may have been written by claude
 	// itself on a prior trusted run. We only assert the trust fields.
-	entry, _ := projects[resolved].(map[string]any)
-	if entry == nil {
+	var entry map[string]any
+	if raw, ok := projects[resolved]; ok {
+		m, mok := raw.(map[string]any)
+		if !mok {
+			return fmt.Errorf("%s: projects[%q] is not a JSON object (%T) — refusing to overwrite", cfgPath, resolved, raw)
+		}
+		entry = m
+	} else {
 		entry = map[string]any{}
 	}
 	entry["hasTrustDialogAccepted"] = true
@@ -192,9 +208,19 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	if _, err := tmp.Write(out); err != nil {
+	// Verify the full payload is persisted before renaming. *os.File.Write
+	// is documented to return a short-write error when n < len(p), but we
+	// double-check explicitly: io.Writer's contract permits short writes
+	// without errors, and a future swap of the temp-file backend (e.g. an
+	// io.Writer wrapper for retry/throttle) shouldn't quietly drop bytes.
+	n, err := tmp.Write(out)
+	if err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write temp %s: %w", tmpName, err)
+	}
+	if n != len(out) {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp %s: short write %d of %d bytes", tmpName, n, len(out))
 	}
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()

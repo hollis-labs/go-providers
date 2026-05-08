@@ -152,6 +152,76 @@ func TestSeedClaudeWorkspaceTrust_PreservesExistingProjectKeys(t *testing.T) {
 	}
 }
 
+// TestSeedClaudeWorkspaceTrust_NonObjectProjectsErrors confirms that when
+// `projects` is present but is not a JSON object (e.g. someone or some
+// future claude version stores it as an array or string), the helper
+// refuses to overwrite rather than silently discarding the field.
+// Mirrors the don't-overwrite-malformed-config invariant for nested shape.
+func TestSeedClaudeWorkspaceTrust_NonObjectProjectsErrors(t *testing.T) {
+	homeDir := t.TempDir()
+	bootDir := t.TempDir()
+	cfgPath := filepath.Join(homeDir, ".claude.json")
+
+	existing := map[string]any{
+		"oauthAccount": "user@example.com",
+		// Deliberately wrong shape — array instead of object.
+		"projects": []any{"/some/path", "/other/path"},
+	}
+	out, _ := json.MarshalIndent(existing, "", "  ")
+	if err := os.WriteFile(cfgPath, out, 0o600); err != nil {
+		t.Fatalf("write existing: %v", err)
+	}
+
+	err := seedClaudeWorkspaceTrust(homeDir, bootDir)
+	if err == nil {
+		t.Fatal("expected error on non-object projects, got nil")
+	}
+
+	raw, _ := os.ReadFile(cfgPath)
+	var rt map[string]any
+	if perr := json.Unmarshal(raw, &rt); perr != nil {
+		t.Fatalf("config corrupted by failed seed: %v", perr)
+	}
+	if rt["oauthAccount"] != "user@example.com" {
+		t.Errorf("oauthAccount lost: %v", rt["oauthAccount"])
+	}
+	arr, _ := rt["projects"].([]any)
+	if len(arr) != 2 {
+		t.Errorf("projects array clobbered: %v", rt["projects"])
+	}
+}
+
+// TestSeedClaudeWorkspaceTrust_NonObjectEntryErrors confirms that when
+// `projects[<resolved>]` is present but not a JSON object (e.g. a string
+// "trusted" or some future shape), the helper refuses to overwrite it.
+func TestSeedClaudeWorkspaceTrust_NonObjectEntryErrors(t *testing.T) {
+	homeDir := t.TempDir()
+	bootDir := t.TempDir()
+	resolved, _ := filepath.EvalSymlinks(bootDir)
+	cfgPath := filepath.Join(homeDir, ".claude.json")
+
+	existing := map[string]any{
+		"projects": map[string]any{
+			resolved: "trusted", // Wrong shape — string instead of object.
+		},
+	}
+	out, _ := json.MarshalIndent(existing, "", "  ")
+	_ = os.WriteFile(cfgPath, out, 0o600)
+
+	err := seedClaudeWorkspaceTrust(homeDir, bootDir)
+	if err == nil {
+		t.Fatal("expected error on non-object entry, got nil")
+	}
+
+	raw, _ := os.ReadFile(cfgPath)
+	var rt map[string]any
+	_ = json.Unmarshal(raw, &rt)
+	projects, _ := rt["projects"].(map[string]any)
+	if projects[resolved] != "trusted" {
+		t.Errorf("non-object entry clobbered: %v", projects[resolved])
+	}
+}
+
 // TestSeedClaudeWorkspaceTrust_MalformedConfigErrors confirms a corrupt
 // existing ~/.claude.json fails the helper rather than overwriting it.
 // Otherwise an unrelated parse failure could nuke the user's config.
@@ -186,6 +256,17 @@ func TestSeedClaudeWorkspaceTrust_RejectsEmpty(t *testing.T) {
 	}
 }
 
+// setHomeForTest redirects os.UserHomeDir() to homeDir across platforms.
+// On unix, $HOME is the source of truth. On Windows, os.UserHomeDir reads
+// %USERPROFILE%. Setting both keeps these tests cross-platform — without
+// the Windows env, the closure under test would write into the real user
+// profile on Windows (or fail unexpectedly).
+func setHomeForTest(t *testing.T, homeDir string) {
+	t.Helper()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+}
+
 // TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWhenBootDirEmpty pins the
 // purity guarantee documented on PlantedFile.Render: when ctx.BootDir is
 // empty (e.g. unit tests rendering for content only), the settings.json
@@ -193,7 +274,7 @@ func TestSeedClaudeWorkspaceTrust_RejectsEmpty(t *testing.T) {
 // from pollution during `go test ./...`.
 func TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWhenBootDirEmpty(t *testing.T) {
 	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	setHomeForTest(t, homeDir)
 	cfgPath := filepath.Join(homeDir, ".claude.json")
 
 	spec := NewClaudeAdapter().BootDirSpec()
@@ -216,7 +297,7 @@ func TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWhenBootDirEmpty(t *testing.
 func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet(t *testing.T) {
 	homeDir := t.TempDir()
 	bootDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	setHomeForTest(t, homeDir)
 
 	spec := NewClaudeAdapter().BootDirSpec()
 	settings, err := spec.PlantedFiles[2].Render(PlantContext{BootDir: bootDir})
