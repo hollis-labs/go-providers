@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	pevents "github.com/hollis-labs/go-providers/provider/events"
 )
 
 // PTYBridge is a provider that wraps CLI tools in pseudo-terminals.
@@ -134,10 +135,20 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 	ch := make(chan StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
+	typedCb, hasTyped := EventsCallbackFromContext(ctx)
+	_, hasEventParser := p.adapter.(EventParser)
+
+	var bridgeState *eventsBridgeState
+	stopHeartbeat := func() {}
+	if hasTyped {
+		bridgeState = newEventsBridgeState()
+		stopHeartbeat = startHeartbeat(ctx, typedCb, bridgeState, HeartbeatIntervalFromContext(ctx))
+	}
 
 	go func() {
 		defer close(ch)
 		defer ptmx.Close()
+		defer stopHeartbeat()
 
 		scanner := bufio.NewScanner(ptmx)
 		// Set 1MB buffer for large tool results.
@@ -150,7 +161,11 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		// Returns true if the guard was emitted on this call.
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
-				ch <- StreamEvent{Type: EventError, Error: "CLI bridge cannot forward tool calls"}
+				const msg = "CLI bridge cannot forward tool calls"
+				ch <- StreamEvent{Type: EventError, Error: msg}
+				if hasTyped {
+					emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Message: msg}})
+				}
 				terminalSent = true
 				return true
 			}
@@ -171,6 +186,19 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 			if len(events) > 0 && hasActivity && cmd.Process != nil {
 				activityCb(cmd.Process.Pid)
+			}
+
+			if hasTyped {
+				var typed []pevents.Event
+				if hasEventParser {
+					if t, perr := p.adapter.(EventParser).ParseLineEvents(line); perr == nil {
+						typed = t
+					}
+				}
+				if typed == nil {
+					typed = translateStreamEvents(events)
+				}
+				emitTyped(ctx, typedCb, bridgeState, typed)
 			}
 
 			for _, ev := range events {
@@ -223,11 +251,22 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		case terminalSent:
 			// Adapter took care of the boundary.
 		case ctx.Err() != nil:
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("context cancelled: %v", ctx.Err())}
+			msg := fmt.Sprintf("context cancelled: %v", ctx.Err())
+			ch <- StreamEvent{Type: EventError, Error: msg}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: ctx.Err(), Message: msg}})
+			}
 		case waitErr != nil:
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("process exited: %v", waitErr)}
+			msg := fmt.Sprintf("process exited: %v", waitErr)
+			ch <- StreamEvent{Type: EventError, Error: msg}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: waitErr, Message: msg}})
+			}
 		default:
 			ch <- StreamEvent{Type: EventDone}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Done{}})
+			}
 		}
 
 		if waitErr != nil && ctx.Err() == nil {
