@@ -16,6 +16,14 @@ type ClaudeAdapter struct {
 	// SkipPermissions adds --dangerously-skip-permissions to CLI args.
 	// Only set when developer_mode is enabled; never set for production.
 	SkipPermissions bool
+
+	// PTY signals the consumer runtime spawns claude as a long-lived PTY
+	// (interactive TUI) rather than a per-turn subprocess. When true,
+	// BuildArgs omits the print-mode flags (-p, --output-format, --verbose,
+	// --system-prompt). Per-turn payloads arrive via PTY stdin (the
+	// go-agent-sessions BootMode=stdin path); system prompts are routed via
+	// BootPrompt rather than --system-prompt.
+	PTY bool
 }
 
 func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
@@ -24,9 +32,37 @@ func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
 // enabled, for developer-mode PTY sessions.
 func NewClaudeAdapterDev() *ClaudeAdapter { return &ClaudeAdapter{SkipPermissions: true} }
 
+// NewClaudeAdapterPTY returns a ClaudeAdapter configured for long-lived PTY
+// (interactive) sessions: BuildArgs emits interactive-shape args without the
+// print-mode flags. Use this when the consumer runtime spawns claude once and
+// streams per-turn payloads over PTY stdin (e.g. go-agent-sessions ptyRuntime).
+func NewClaudeAdapterPTY() *ClaudeAdapter { return &ClaudeAdapter{PTY: true} }
+
+// NewClaudeAdapterDevPTY returns a PTY-mode ClaudeAdapter with
+// --dangerously-skip-permissions enabled, for developer-mode long-lived
+// sessions.
+func NewClaudeAdapterDevPTY() *ClaudeAdapter { return &ClaudeAdapter{PTY: true, SkipPermissions: true} }
+
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	if a.PTY {
+		// Interactive / long-lived spawn. The claude TUI does not accept
+		// `-p` / `--print`; passing them with an empty prompt makes the
+		// process exit immediately on arg validation. The prompt and
+		// systemPrompt parameters are intentionally ignored: per-turn
+		// payloads arrive via PTY stdin, and system prompts are routed
+		// via BootPrompt at the lib layer rather than `--system-prompt`.
+		var args []string
+		if cliSessionID != "" {
+			args = append(args, "--resume", cliSessionID)
+		}
+		if a.SkipPermissions {
+			args = append(args, "--dangerously-skip-permissions")
+		}
+		return args
+	}
+
 	args := []string{
 		"-p", prompt,
 		"--output-format", "stream-json",
