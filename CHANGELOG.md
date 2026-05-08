@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## v0.8.0
+
+- Added per-line typed event taxonomy at `provider/events/` (`events.Event` interface with concrete types `Delta`, `ToolUse`, `ToolResult`, `Thinking`, `Usage`, `Done`, `Error`, `SessionID`, `SubagentSpawn`, `SubprocessStderr`, `Heartbeat`). Apps wire a callback into the spawn context via `WithEvents(ctx, cb)`; the PTYBridge / SubprocessBridge fires typed events alongside the existing `StreamEvent` channel returned by `Provider.StreamChat`. The legacy channel is unchanged; the typed surface is purely additive.
+- Adapters can opt into native typed parsing via the new `EventParser` optional interface (`ParseLineEvents(line []byte) ([]events.Event, error)`). `ClaudeAdapter` and `CodexAdapter` implement it; the claude path additionally captures user-role `tool_result` blocks as `events.ToolResult` (previously dropped at the legacy `StreamEvent` layer) and emits `events.SubagentSpawn` for the `Task` tool. Adapters that don't implement `EventParser` fall back to a best-effort `StreamEvent` → typed translation via `translateStreamEvents`.
+- Added `WithToolArgFingerprint(ctx, true)` opt-in privacy mode. When set, typed `events.ToolUse.Args` (and `events.SubagentSpawn.Args`) values are replaced with `sha256:<hex>` digests of their JSON-marshalled form; argument keys are preserved and `Fingerprint=true` is set on the event. Default off — full args are emitted, matching v0.7.0 behavior. Use this when logs may cross trust boundaries.
+- Added `events.SubprocessStderr` for subprocess-transport stderr capture. SubprocessBridge wires `cmd.StderrPipe()` only when `WithEvents` is set; without a callback, stderr stays at its default destination (Go's exec default of `/dev/null`). PTYBridge does not emit `SubprocessStderr` because PTYs merge stderr into the tty stream at the kernel level.
+- Added `events.Heartbeat` synthesized by the bridge on a configurable interval when no other typed event has fired in that window. Default interval is `DefaultHeartbeatInterval` (5s); apps can adjust via `WithHeartbeatInterval(ctx, d)` (`d <= 0` disables). Useful for "agent is alive but idle" UX indicators.
+- Added `BootDirSpec()` per adapter via the new optional `BootDirProvider` interface. Each adapter exposes its per-task tempdir layout convention as read-only metadata: `PlantedFiles` (relative paths + render closures), `EnvAmendments` (with `{{.BootDir}}` / `{{.ProjectDir}}` placeholders for app-side substitution), `CwdPreference` (boot dir vs. project dir), `ProjectDirArg` (e.g. `--add-dir {{.ProjectDir}}`). Concrete specs landed for claude (`CLAUDE.md` + `boot.md` + `.claude/settings.json` + `.mcp.json`, cwd = bootDir, `--add-dir`), codex (`AGENTS.md` + `boot.md` + `.mcp.json`, cwd = bootDir, `--cd` — verify against installed codex), opencode (`agents/<name>.md` + `agents.json` + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir`). Stub specs (zero-value + non-empty `Notes`) for gemini, copilot, aider, junie, kiro, qwen — the convention probe is filed as a follow-up.
+- Added `AgentsMD(agent AgentInfo, mcpLoopbackURL, extras...)` shared helper that renders an `AGENTS.md` document with frontmatter (name/role/description), an H1 title, the system prompt body, and an optional "## MCP" section. Used by the codex `BootDirSpec.AGENTS.md` `PlantedFile.Render` closure by default; apps that want a custom layout can ignore it and render their own content.
+- Preserved the no-silent-drop guard at `pty.go` / `subprocess.go` (`"CLI bridge cannot forward tool calls"` when only tool_use blocks arrive without text deltas) and mirrored it to the typed-events callback so consumers wired into `WithEvents` see the same sentinel as `events.Error`.
+- Tests: per-adapter `ParseLineEvents` fixtures, every `BootDirSpec` planted-file render, end-to-end PTY spawn of a fake claude shell script with `WithEvents` callback assertion, fingerprint-mode SHA-256 digest verification, backward-compat snapshot showing v0.7.0 semantics preserved when `WithEvents` is not set. `go test -race -count=1 ./...` clean on darwin; `GOOS=linux go build/vet ./...` clean.
+
+### Compatibility
+
+- The four capabilities are entirely additive. Callers that don't import `provider/events` and don't call `WithEvents` / `WithToolArgFingerprint` / `BootDirSpec` see no behavior change vs. v0.7.0. Existing `Provider`, `ProviderWithUsage`, `CLIAdapter`, and `EventReactionPipeline` consumers are unaffected.
+- The new typed-event taxonomy lives at `provider/events/` to avoid colliding with the existing `EventType` string constants (`EventDelta`, `EventToolUse`, …) in `provider/provider.go`. Both surfaces remain valid; consumers picking up typed events import the sub-package.
+- `BootDirProvider` is a runtime type-assertion — apps must check `if bp, ok := adapter.(BootDirProvider); ok` and inspect `Notes` before iterating `PlantedFiles` for stub-spec adapters.
+
+### Out of scope (filed as portfolio follow-ups)
+
+- Probing `BootDirSpec` for gemini / copilot / aider / junie / kiro / qwen against installed CLI versions.
+- Verifying the codex `--cd` flag and MCP config convention against the installed codex revision (Notes flag this).
+- Verifying opencode's MCP config convention.
+- Adding `events.Thinking` emission from the claude PTY adapter — the CLI's stream-json doesn't currently surface thinking blocks at the assistant level; the existing `StreamEvent.EventThinking` is from the Anthropic HTTP adapter. When the claude CLI exposes them, ParseLineEvents will fold them in.
+- Updating consumer apps' `go.mod` to v0.8.0 — separate per-app work in nanite, agent-mux, clockwork-manifold.
+
 ## v0.7.0
 
 - Added `Cacheable` optional interface (`EstimateCacheablePrefix(ctx, req) int`) for pre-flight cacheable-prefix observability. Implemented by `*Anthropic` via a shared `buildRequestBody` helper that marshals the same payload the wire request would carry, divided by 4 for the token approximation. Callers type-assert; providers without prompt caching do not implement it.

@@ -124,6 +124,78 @@ if e, ok := p.(provider.Embedder); ok {
 - `SubprocessBridge` / `NewSubprocessBridge` (`subprocess.go`) — wraps a CLI using plain stdin/stdout pipes (all platforms).
 - Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `AiderAdapter`, `CopilotAdapter`, `JunieAdapter`, `KiroAdapter`, `OpencodeAdapter`, `QwenAdapter`, each with a `New…Adapter()` constructor.
 
+### Per-line typed events (`provider/events/`)
+
+In addition to the legacy `<-chan StreamEvent` returned by `Provider.StreamChat`, CLI/PTY bridges can fire a richer typed-event taxonomy when a callback is wired into the spawn context. The two surfaces are parallel: typed events do not replace `StreamEvent`; they augment it with information the legacy union struct can't carry (per-tool `ToolResult`, sub-agent spawn detection, `SubprocessStderr` lines, `Heartbeat` ticks, signed `Thinking` blocks).
+
+```go
+import "github.com/hollis-labs/go-providers/provider/events"
+
+ctx := provider.WithEvents(ctx, func(ev events.Event) {
+    switch e := ev.(type) {
+    case events.Delta:
+        // streaming text fragment; e.Phase is "narration", "final", or "thinking"
+    case events.ToolUse:
+        // e.Name + e.Args (or sha256-digested keys when WithToolArgFingerprint is on)
+    case events.ToolResult:
+        // result of a previous ToolUse with matching e.ID
+    case events.SubagentSpawn:
+        // claude's "Task" tool emits this in addition to ToolUse
+    case events.SubprocessStderr:
+        // subprocess transport only — PTYs merge stderr into stdout
+    case events.Heartbeat:
+        // synthesized when no other event has fired for the configured interval
+    case events.Done:
+        // turn-terminal success
+    case events.Error:
+        // turn-terminal failure with e.Err (Go error) and/or e.Message
+    }
+})
+stream, _ := bridge.StreamChat(ctx, req) // legacy channel still works
+for ev := range stream { /* ... */ }
+```
+
+`WithToolArgFingerprint(ctx, true)` swaps `events.ToolUse.Args` values for `sha256:<hex>` digests of their JSON-marshalled form (keys preserved). Use this when logs may cross trust boundaries; default is off.
+
+`WithHeartbeatInterval(ctx, d)` adjusts the heartbeat cadence (`DefaultHeartbeatInterval` is 5s; non-positive disables).
+
+Adapters can implement the optional `EventParser` interface (`ParseLineEvents(line []byte) ([]events.Event, error)`) to produce typed events natively from the wire format. `ClaudeAdapter` and `CodexAdapter` do; the claude path additionally surfaces user-role `tool_result` blocks and `Task` sub-agent spawns. Adapters without `EventParser` get a best-effort `StreamEvent` → typed translation.
+
+### Boot dir specs (`BootDirProvider` / `BootDirSpec`)
+
+Each CLI adapter can expose its per-task tempdir layout convention as read-only metadata. Apps loop over the spec instead of writing per-provider switch statements.
+
+```go
+if bp, ok := adapter.(provider.BootDirProvider); ok {
+    spec := bp.BootDirSpec()
+    if spec.Notes != "" {
+        // stub spec — verify or fall back to bespoke planting
+    }
+    pctx := provider.PlantContext{
+        SystemPrompt:   "...",
+        BootContent:    "Read @./instructions.md and start.",
+        AgentName:      "orchestrator",
+        MCPLoopbackURL: "http://localhost:9999/mcp",
+        ProjectDir:     "/work/project",
+    }
+    for _, pf := range spec.PlantedFiles {
+        content, err := pf.Render(pctx)
+        // apps materialize: filepath.Join(bootDir, pf.RelPath), content
+    }
+    // apps substitute {{.BootDir}} / {{.ProjectDir}} in spec.EnvAmendments + spec.ProjectDirArg
+    cwd := spec.SpawnWorkdir(bootDir, projectDir) // honors CwdPreference
+}
+```
+
+| Adapter | Status | Layout |
+|---|---|---|
+| claude | concrete | `CLAUDE.md` + `boot.md` + `.claude/settings.json` + `.mcp.json`, cwd = bootDir, `--add-dir {{.ProjectDir}}` |
+| codex | concrete | `AGENTS.md` + `boot.md` + `.mcp.json`, cwd = bootDir, `--cd {{.ProjectDir}}` (verify per Notes) |
+| opencode | concrete | `agents/<name>.md` + `agents.json` + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir {{.ProjectDir}}` |
+| gemini, copilot, aider, junie, kiro, qwen | stub | zero-value spec; `Notes` describes the probe needed |
+
+`AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
+
 ### Prompt caching (`provider/cache.go`)
 
 - `CacheHint`, `CacheableProvider` interface, `DefaultCacheStrategy()`.
