@@ -2,23 +2,6 @@
 
 ## Unreleased
 
-## v0.8.1
-
-- Added PTY-mode awareness to `ClaudeAdapter`. New `PTY bool` field plus `NewClaudeAdapterPTY()` and `NewClaudeAdapterDevPTY()` constructors. When `PTY=true`, `BuildArgs` emits interactive-shape args: it omits `-p`, `--print`, `--output-format`, `--verbose`, and `--system-prompt`, and ignores both the `prompt` and `systemPrompt` parameters. Optional `--resume <id>` is included when `cliSessionID != ""`, and `--dangerously-skip-permissions` is included when `SkipPermissions` is set. Subprocess-per-turn callers (`NewClaudeAdapter()` / `NewClaudeAdapterDev()`) see byte-for-byte unchanged behavior.
-- Surfaced by clockwork-manifold S2.5 plan-execute smoke retry on 2026-05-08: `go-agent-sessions/agentsessions/pty_session.go` calls `BuildArgs("", systemPrompt, sessionIDPreset)` for the initial PTY spawn, so the previous always-print-mode args caused claude to exit immediately with `Error: Input must be provided either through stdin or as a prompt argument when using --print`. Per-turn payloads in PTY mode arrive via PTY stdin (the lib's `BootMode=stdin` mechanism), and system prompts route via `BootPrompt` rather than `--system-prompt`.
-- Tests: PTY-mode arg-shape unit tests cover empty, skip-permissions, resume, resume+skip-permissions, and prompt/systemPrompt-ignored cases, plus a negative check that none of `-p` / `--print` / `--system-prompt` / `--output-format` / `--verbose` appear in PTY-mode argv. Pre-existing print-mode tests pass unchanged. A real-spawn smoke test (`TestClaudeAdapter_PTYSpawn_Smoke`, `provider/pty_claude_smoke_test.go`) is gated on `CLAUDE_PTY_SMOKE=1` and asserts the process survives 1s without dying on arg validation; it skips when the `claude` binary is not on PATH so CI doesn't auto-run it. `go test -race -count=1 ./...` clean on darwin; `GOOS=linux go build/vet ./...` clean.
-
-### Compatibility
-
-- Additive only. Existing callers of `NewClaudeAdapter()` / `NewClaudeAdapterDev()` are unaffected — they remain print-mode and produce identical args.
-- The `CLIAdapter.BuildArgs` interface signature is unchanged.
-
-### Consumer follow-ups (not landing here)
-
-- `clockwork-manifold` (CW-20260508-0005): branch the adapter factory in `internal/runtime/agent/factory.go` on PTY caps to call the new `*PTY` constructors; revert the `pty: false` workaround on the 5 claude profiles in `profiles.yaml`.
-- `agent-mux`: future migration from internal `claudecode` runtime to this adapter (tracked separately).
-- PTY adapters for `codex` / `opencode` / `gemini` / `copilot` / `aider` / `junie` / `kiro` / `qwen`: each has its own interactive-mode question; not in scope here.
-
 ## v0.8.0
 
 - Added per-line typed event taxonomy at `provider/events/` (`events.Event` interface with concrete types `Delta`, `ToolUse`, `ToolResult`, `Thinking`, `Usage`, `Done`, `Error`, `SessionID`, `SubagentSpawn`, `SubprocessStderr`, `Heartbeat`). Apps wire a callback into the spawn context via `WithEvents(ctx, cb)`; the PTYBridge / SubprocessBridge fires typed events alongside the existing `StreamEvent` channel returned by `Provider.StreamChat`. The legacy channel is unchanged; the typed surface is purely additive.
