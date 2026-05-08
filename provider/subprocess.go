@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	pevents "github.com/hollis-labs/go-providers/provider/events"
 )
 
 // SubprocessBridge is a provider that wraps CLI tools using standard pipes
@@ -112,6 +115,20 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
+	typedCb, hasTyped := EventsCallbackFromContext(ctx)
+	_, hasEventParser := s.adapter.(EventParser)
+
+	// When a typed-events callback is configured, capture stderr so the
+	// bridge can emit events.SubprocessStderr per line. Otherwise leave
+	// stderr at its default (os.DevNull) for backward compatibility.
+	var stderr io.ReadCloser
+	if hasTyped {
+		stderr, err = cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("stderr pipe: %w", err)
+		}
+	}
+
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start subprocess: %w", err)
 	}
@@ -124,9 +141,33 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 	ch := make(chan StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
+	var bridgeState *eventsBridgeState
+	stopHeartbeat := func() {}
+	if hasTyped {
+		bridgeState = newEventsBridgeState()
+		stopHeartbeat = startHeartbeat(ctx, typedCb, bridgeState, HeartbeatIntervalFromContext(ctx))
+	}
+
+	stderrDone := make(chan struct{})
+	if hasTyped && stderr != nil {
+		go func() {
+			defer close(stderrDone)
+			defer stderr.Close()
+			scanner := bufio.NewScanner(stderr)
+			scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+			for scanner.Scan() {
+				line := scanner.Text()
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.SubprocessStderr{Line: line}})
+			}
+		}()
+	} else {
+		close(stderrDone)
+	}
+
 	go func() {
 		defer close(ch)
 		defer stdout.Close()
+		defer stopHeartbeat()
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -138,7 +179,11 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// Returns true if the guard was emitted on this call.
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
-				ch <- StreamEvent{Type: EventError, Error: "CLI bridge cannot forward tool calls"}
+				const msg = "CLI bridge cannot forward tool calls"
+				ch <- StreamEvent{Type: EventError, Error: msg}
+				if hasTyped {
+					emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Message: msg}})
+				}
 				terminalSent = true
 				return true
 			}
@@ -159,6 +204,19 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 			if len(events) > 0 && hasActivity && cmd.Process != nil {
 				activityCb(cmd.Process.Pid)
+			}
+
+			if hasTyped {
+				var typed []pevents.Event
+				if hasEventParser {
+					if t, perr := s.adapter.(EventParser).ParseLineEvents(line); perr == nil {
+						typed = t
+					}
+				}
+				if typed == nil {
+					typed = translateStreamEvents(events)
+				}
+				emitTyped(ctx, typedCb, bridgeState, typed)
 			}
 
 			for _, ev := range events {
@@ -197,6 +255,15 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// SIGTERM-then-SIGKILL on context cancellation.
 		waitErr := cmd.Wait()
 
+		// Drain stderr BEFORE emitting any terminal event so consumers
+		// don't observe SubprocessStderr typed events arriving after a
+		// turn-terminal Done/Error. The legacy StreamEvent channel is
+		// not coupled to stderr, but the typed surface is — and the
+		// terminal contract says no further typed events fire after
+		// Done/Error. (No-op when stderr capture isn't active —
+		// stderrDone is closed at start in that path.)
+		<-stderrDone
+
 		// Always emit a terminal event so consumers see an explicit boundary
 		// before the channel closes. See PTYBridge.streamCLI for the same
 		// protocol; both bridges guarantee one of EventDone or EventError.
@@ -204,11 +271,22 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		case terminalSent:
 			// Adapter took care of the boundary.
 		case ctx.Err() != nil:
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("context cancelled: %v", ctx.Err())}
+			msg := fmt.Sprintf("context cancelled: %v", ctx.Err())
+			ch <- StreamEvent{Type: EventError, Error: msg}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: ctx.Err(), Message: msg}})
+			}
 		case waitErr != nil:
-			ch <- StreamEvent{Type: EventError, Error: fmt.Sprintf("process exited: %v", waitErr)}
+			msg := fmt.Sprintf("process exited: %v", waitErr)
+			ch <- StreamEvent{Type: EventError, Error: msg}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: waitErr, Message: msg}})
+			}
 		default:
 			ch <- StreamEvent{Type: EventDone}
+			if hasTyped {
+				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Done{}})
+			}
 		}
 
 		if waitErr != nil && ctx.Err() == nil {
