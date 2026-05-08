@@ -25,8 +25,11 @@ import (
 //   - no `remoteControl` operator-config sentinel in output
 //
 // Gated on CLAUDE_BARE_SMOKE=1 so CI doesn't auto-run it. Skips when the
-// claude binary is not on PATH or ANTHROPIC_API_KEY is not set (bare mode
-// strictly requires it — OAuth/keychain are never read).
+// claude binary is not on PATH or ANTHROPIC_API_KEY is not set. Bare auth
+// can also flow via an apiKeyHelper passed through --settings, but this
+// smoke test does not plant SettingsPath, so it requires the env-var path.
+// (OAuth and keychain are never read in bare mode regardless of which auth
+// route is used.)
 //
 // Note: this is a real network-egress test against the Anthropic API.
 // Token cost is one short turn ("respond TEST_OK_BARE").
@@ -35,7 +38,7 @@ func TestClaudeAdapter_BareSpawn_Smoke(t *testing.T) {
 		t.Skip("set CLAUDE_BARE_SMOKE=1 to run this real-spawn smoke test")
 	}
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set; bare mode requires it (OAuth/keychain are never read)")
+		t.Skip("ANTHROPIC_API_KEY not set; this smoke test takes the env-var auth path (apiKeyHelper via --settings is also valid for bare mode but isn't planted here)")
 	}
 
 	a := NewClaudeAdapterDevBare()

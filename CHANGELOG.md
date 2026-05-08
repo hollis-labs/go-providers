@@ -15,8 +15,9 @@
 
 ### Compatibility
 
-- Additive only. Existing callers of `NewClaudeAdapter()` / `NewClaudeAdapterDev()` / `NewClaudeAdapterPTY()` / `NewClaudeAdapterDevPTY()` produce byte-for-byte identical args (sentinel test pins this). The `CLIAdapter.BuildArgs` interface signature is unchanged.
+- Behavior-additive. Existing callers of `NewClaudeAdapter()` / `NewClaudeAdapterDev()` / `NewClaudeAdapterPTY()` / `NewClaudeAdapterDevPTY()` produce byte-for-byte identical args (sentinel test pins this). The `CLIAdapter.BuildArgs` interface signature is unchanged.
 - The `ClaudeAdapter` struct gains five additive fields (`Bare`, `MCPConfigPath`, `AppendSystemPromptFile`, `SettingsPath`, `ProjectDir`). All zero-value to off; non-bare callers that don't populate them see no behavior change.
+- Source-compatibility caveat for unkeyed composite literals: any downstream code that constructs `ClaudeAdapter` positionally (e.g. `ClaudeAdapter{true, false}`) continues to compile because the new fields are appended after the existing two and default to their zero values, but consumers should prefer keyed literals (`ClaudeAdapter{SkipPermissions: true}`) or the constructor functions to remain robust against future field additions. The constructors and keyed-literal call sites in this repo are unaffected.
 - `BootDirSpec()` is unchanged (same planted files, same `CwdPreference: CwdBootDir`, same trust-dialog seeding via `.claude/settings.json` `Render` closure). The new affordance is a method on `*ClaudeAdapter`, not a spec mutation.
 - `renderMCPJSON("")` content change: `{}` → `{"mcpServers":{}}`. The schema is strictly more correct and accepted by both auto-discovery and `--mcp-config` paths. Callers asserting on the empty-loopback content directly need to update; the only such assertion in this repo (`TestClaudeBootDirSpec_EmptyMCP`) is updated. Codex and opencode adapters share `renderMCPJSON` and inherit the same fix transparently.
 
