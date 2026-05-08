@@ -68,8 +68,12 @@ func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 	a := NewClaudeAdapter()
 	spec := a.BootDirSpec()
 	mcpJSON, _ := spec.PlantedFiles[3].Render(PlantContext{})
-	if strings.TrimSpace(mcpJSON) != "{}" {
-		t.Errorf("empty MCP loopback should produce {}, got %q", mcpJSON)
+	// Pre-v0.9.0 emitted bare `{}`. That works for auto-discovery (non-
+	// bare callers) but fails claude's MCP schema validation when the
+	// file is referenced via --mcp-config (bare mode), which requires
+	// `mcpServers` to be a record. `{"mcpServers":{}}` is valid for both.
+	if strings.TrimSpace(mcpJSON) != `{"mcpServers":{}}` {
+		t.Errorf("empty MCP loopback should produce minimal valid config, got %q", mcpJSON)
 	}
 }
 

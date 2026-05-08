@@ -116,17 +116,270 @@ func TestClaudeBuildArgs_PrintMode_DevSkipPermissions(t *testing.T) {
 }
 
 func TestClaudeAdapterConstructors_Defaults(t *testing.T) {
-	if a := NewClaudeAdapter(); a.PTY || a.SkipPermissions {
+	if a := NewClaudeAdapter(); a.PTY || a.SkipPermissions || a.Bare {
 		t.Errorf("NewClaudeAdapter: expected zero-value, got %+v", *a)
 	}
-	if a := NewClaudeAdapterDev(); a.PTY || !a.SkipPermissions {
+	if a := NewClaudeAdapterDev(); a.PTY || !a.SkipPermissions || a.Bare {
 		t.Errorf("NewClaudeAdapterDev: expected SkipPermissions only, got %+v", *a)
 	}
-	if a := NewClaudeAdapterPTY(); !a.PTY || a.SkipPermissions {
+	if a := NewClaudeAdapterPTY(); !a.PTY || a.SkipPermissions || a.Bare {
 		t.Errorf("NewClaudeAdapterPTY: expected PTY only, got %+v", *a)
 	}
-	if a := NewClaudeAdapterDevPTY(); !a.PTY || !a.SkipPermissions {
-		t.Errorf("NewClaudeAdapterDevPTY: expected both, got %+v", *a)
+	if a := NewClaudeAdapterDevPTY(); !a.PTY || !a.SkipPermissions || a.Bare {
+		t.Errorf("NewClaudeAdapterDevPTY: expected PTY+SkipPermissions, got %+v", *a)
+	}
+	if a := NewClaudeAdapterBare(); a.PTY || a.SkipPermissions || !a.Bare {
+		t.Errorf("NewClaudeAdapterBare: expected Bare only, got %+v", *a)
+	}
+	if a := NewClaudeAdapterDevBare(); a.PTY || !a.SkipPermissions || !a.Bare {
+		t.Errorf("NewClaudeAdapterDevBare: expected Bare+SkipPermissions, got %+v", *a)
+	}
+}
+
+// TestClaudeBuildArgs_NonBare_ByteForByteIdentical pins that introducing the
+// bare branch in BuildArgs has not changed any non-bare arg shape. If this
+// test fails after touching BuildArgs, the bare addition leaked into a
+// non-bare path.
+func TestClaudeBuildArgs_NonBare_ByteForByteIdentical(t *testing.T) {
+	cases := []struct {
+		name     string
+		adapter  *ClaudeAdapter
+		prompt   string
+		sysPrmpt string
+		session  string
+		want     []string
+	}{
+		{
+			name:    "Dev print, no system, no resume",
+			adapter: NewClaudeAdapterDev(),
+			prompt:  "hello",
+			want:    []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"},
+		},
+		{
+			name:     "Print with system prompt",
+			adapter:  NewClaudeAdapter(),
+			prompt:   "hello",
+			sysPrmpt: "sys",
+			want:     []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--system-prompt", "sys"},
+		},
+		{
+			name:    "Print with resume ignores system",
+			adapter: NewClaudeAdapter(),
+			prompt:  "hello", sysPrmpt: "sys", session: "sess-x",
+			want: []string{"--resume", "sess-x", "-p", "hello", "--output-format", "stream-json", "--verbose"},
+		},
+		{
+			name:    "PTY empty",
+			adapter: NewClaudeAdapterPTY(),
+			want:    nil,
+		},
+		{
+			name:    "DevPTY with resume",
+			adapter: NewClaudeAdapterDevPTY(),
+			session: "sess-abc",
+			want:    []string{"--resume", "sess-abc", "--dangerously-skip-permissions"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.adapter.BuildArgs(tc.prompt, tc.sysPrmpt, tc.session)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("BuildArgs = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// slicesEqual treats nil and empty as equal; reflect.DeepEqual distinguishes.
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestClaudeBuildArgs_Bare_NoPaths(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_MCPConfig(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true, MCPConfigPath: "/boot/.mcp.json"}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--mcp-config", "/boot/.mcp.json"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_AppendSystemPromptFile(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true, AppendSystemPromptFile: "/boot/CLAUDE.md"}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--append-system-prompt-file", "/boot/CLAUDE.md"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_Settings(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true, SettingsPath: "/boot/.claude/settings.json"}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--settings", "/boot/.claude/settings.json"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_ProjectDir(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true, ProjectDir: "/work/project"}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--add-dir", "/work/project"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_AllPaths(t *testing.T) {
+	a := &ClaudeAdapter{
+		Bare:                   true,
+		MCPConfigPath:          "/boot/.mcp.json",
+		AppendSystemPromptFile: "/boot/CLAUDE.md",
+		SettingsPath:           "/boot/.claude/settings.json",
+		ProjectDir:             "/work/project",
+	}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{
+		"-p", "hello",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--bare",
+		"--mcp-config", "/boot/.mcp.json",
+		"--append-system-prompt-file", "/boot/CLAUDE.md",
+		"--settings", "/boot/.claude/settings.json",
+		"--add-dir", "/work/project",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_SkipPermissions(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true, SkipPermissions: true}
+	args := a.BuildArgs("hello", "", "")
+	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--dangerously-skip-permissions"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_Resume(t *testing.T) {
+	a := &ClaudeAdapter{Bare: true}
+	args := a.BuildArgs("hello", "", "sess-abc")
+	want := []string{"--resume", "sess-abc", "-p", "hello", "--output-format", "stream-json", "--verbose", "--bare"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_ResumeWithAllPaths(t *testing.T) {
+	a := &ClaudeAdapter{
+		Bare:                   true,
+		SkipPermissions:        true,
+		MCPConfigPath:          "/boot/.mcp.json",
+		AppendSystemPromptFile: "/boot/CLAUDE.md",
+		SettingsPath:           "/boot/.claude/settings.json",
+		ProjectDir:             "/work/project",
+	}
+	args := a.BuildArgs("hello", "", "sess-x")
+	want := []string{
+		"--resume", "sess-x",
+		"-p", "hello",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--bare",
+		"--mcp-config", "/boot/.mcp.json",
+		"--append-system-prompt-file", "/boot/CLAUDE.md",
+		"--settings", "/boot/.claude/settings.json",
+		"--add-dir", "/work/project",
+		"--dangerously-skip-permissions",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_Bare_IgnoresSystemPromptParam(t *testing.T) {
+	// Bare mode: systemPrompt parameter must not leak into argv. System
+	// context flows via AppendSystemPromptFile (planted CLAUDE.md).
+	a := &ClaudeAdapter{Bare: true}
+	args := a.BuildArgs("hello", "you are a helpful assistant", "")
+	for _, arg := range args {
+		if arg == "--system-prompt" {
+			t.Errorf("bare mode must not emit --system-prompt; got %v", args)
+		}
+		if arg == "you are a helpful assistant" {
+			t.Errorf("bare mode must not leak systemPrompt content; got %v", args)
+		}
+	}
+}
+
+func TestClaudeBuildArgs_BareWinsOverPTY(t *testing.T) {
+	// When both Bare and PTY are set, Bare wins. Bare mode is print-mode-
+	// focused per Anthropic's docs.
+	a := &ClaudeAdapter{Bare: true, PTY: true}
+	args := a.BuildArgs("hello", "", "")
+	if !slices.Contains(args, "-p") {
+		t.Errorf("expected -p in bare+PTY args (bare should win); got %v", args)
+	}
+	if !slices.Contains(args, "--bare") {
+		t.Errorf("expected --bare in bare+PTY args; got %v", args)
+	}
+}
+
+func TestClaudeBareInjectionPaths(t *testing.T) {
+	a := &ClaudeAdapter{}
+	got := a.BareInjectionPaths("/boot", "/work/project")
+	want := ClaudeBareInjection{
+		MCPConfigPath:          "/boot/.mcp.json",
+		AppendSystemPromptFile: "/boot/CLAUDE.md",
+		SettingsPath:           "/boot/.claude/settings.json",
+		ProjectDir:             "/work/project",
+	}
+	if got != want {
+		t.Errorf("BareInjectionPaths(/boot, /work/project) = %+v, want %+v", got, want)
+	}
+
+	// Empty bootDir → empty path fields, ProjectDir passes through.
+	got = a.BareInjectionPaths("", "/work/project")
+	want = ClaudeBareInjection{ProjectDir: "/work/project"}
+	if got != want {
+		t.Errorf("BareInjectionPaths(\"\", /work/project) = %+v, want %+v", got, want)
+	}
+
+	// Empty projectDir → ProjectDir empty, others derived from bootDir.
+	got = a.BareInjectionPaths("/boot", "")
+	want = ClaudeBareInjection{
+		MCPConfigPath:          "/boot/.mcp.json",
+		AppendSystemPromptFile: "/boot/CLAUDE.md",
+		SettingsPath:           "/boot/.claude/settings.json",
+	}
+	if got != want {
+		t.Errorf("BareInjectionPaths(/boot, \"\") = %+v, want %+v", got, want)
+	}
+
+	// Both empty → zero value.
+	got = a.BareInjectionPaths("", "")
+	if got != (ClaudeBareInjection{}) {
+		t.Errorf("BareInjectionPaths(\"\", \"\") = %+v, want zero value", got)
 	}
 }
 

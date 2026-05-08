@@ -69,6 +69,49 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 	}
 }
 
+// ClaudeBareInjection bundles the four CLI flag values for bare-mode
+// invocation, derived from the planted-file layout in BootDirSpec.
+type ClaudeBareInjection struct {
+	// MCPConfigPath is the value for --mcp-config (the planted .mcp.json).
+	MCPConfigPath string
+	// AppendSystemPromptFile is the value for --append-system-prompt-file
+	// (the planted CLAUDE.md), replacing the auto-discovered CLAUDE.md
+	// auto-load that bare mode disables.
+	AppendSystemPromptFile string
+	// SettingsPath is the value for --settings (the planted
+	// .claude/settings.json).
+	SettingsPath string
+	// ProjectDir is the value for --add-dir (the project root the agent
+	// should have tool access to).
+	ProjectDir string
+}
+
+// BareInjectionPaths derives the bare-mode CLI flag values from the
+// claude BootDirSpec layout. Empty bootDir or projectDir produce the
+// corresponding empty fields (no-op for that flag).
+//
+// Consumer flow:
+//
+//	adapter := provider.NewClaudeAdapterDevBare()
+//	spec := adapter.BootDirSpec()
+//	// app plants files from spec ...
+//	inj := adapter.BareInjectionPaths(bootDir, projectDir)
+//	adapter.MCPConfigPath          = inj.MCPConfigPath
+//	adapter.AppendSystemPromptFile = inj.AppendSystemPromptFile
+//	adapter.SettingsPath           = inj.SettingsPath
+//	adapter.ProjectDir             = inj.ProjectDir
+//	args := adapter.BuildArgs(prompt, "", sessionID)
+func (a *ClaudeAdapter) BareInjectionPaths(bootDir, projectDir string) ClaudeBareInjection {
+	var inj ClaudeBareInjection
+	if bootDir != "" {
+		inj.MCPConfigPath = filepath.Join(bootDir, ".mcp.json")
+		inj.AppendSystemPromptFile = filepath.Join(bootDir, "CLAUDE.md")
+		inj.SettingsPath = filepath.Join(bootDir, ".claude", "settings.json")
+	}
+	inj.ProjectDir = projectDir
+	return inj
+}
+
 func renderClaudeMD(ctx PlantContext) string {
 	var b strings.Builder
 	if ctx.SystemPrompt != "" {
@@ -238,9 +281,12 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 
 func renderMCPJSON(loopbackURL string) string {
 	if loopbackURL == "" {
-		// Empty loopback — emit an empty object so the file exists
-		// but no MCP servers are configured.
-		return "{}\n"
+		// Empty loopback — emit a minimal valid MCP config (empty
+		// servers map). `{}` works for auto-discovery (non-bare) but
+		// fails claude's schema validation when referenced via
+		// --mcp-config (bare mode), which requires `mcpServers` to be
+		// a record. Emitting `{"mcpServers":{}}` is valid for both.
+		return `{"mcpServers":{}}` + "\n"
 	}
 	cfg := map[string]any{
 		"mcpServers": map[string]any{

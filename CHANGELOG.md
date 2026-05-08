@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## v0.9.0
+
+- Added `--bare` mode support to `ClaudeAdapter`. New `Bare bool` field plus four explicit-injection path fields (`MCPConfigPath`, `AppendSystemPromptFile`, `SettingsPath`, `ProjectDir`) and constructors `NewClaudeAdapterBare()` / `NewClaudeAdapterDevBare()`. When `Bare=true`, `BuildArgs` emits `--bare` plus `--mcp-config`, `--append-system-prompt-file`, `--settings`, `--add-dir` for each non-empty path field, on top of the existing print-mode shape (`-p`, `--output-format stream-json`, `--verbose`). Per Anthropic's claude 2.1.133+ docs, bare mode is "the recommended mode for scripted and SDK calls, and will become the default for `-p` in a future release"; it skips auto-discovery of hooks, skills, plugins, MCP servers, auto-memory, CLAUDE.md, OAuth, keychain reads, and operator config — only flags passed explicitly take effect. Adopting it now positions consumers correctly for the future-default shift and eliminates an entire class of operator-config bleed-through (`remoteControlAtStartup`, workspace-trust dialog, etc.) for scripted spawns.
+- Added `ClaudeBareInjection` struct + `(*ClaudeAdapter).BareInjectionPaths(bootDir, projectDir)` helper that derives the four flag values from the planted-file layout in `BootDirSpec`. Consumer flow: `inj := adapter.BareInjectionPaths(bootDir, projectDir)`, copy the four fields onto the adapter, then `BuildArgs(prompt, "", sessionID)`. Empty `bootDir` or `projectDir` produce empty corresponding fields (no flag emitted — bare mode then has zero of that context category, which is the documented behavior).
+- `BuildArgs` branch precedence is now `Bare` > `PTY` > default print-mode. If both `Bare=true` and `PTY=true` are set, bare wins because bare mode is print-mode-focused per the docs. The `systemPrompt` parameter to `BuildArgs` is ignored in bare mode — system context flows via the planted CLAUDE.md referenced through `AppendSystemPromptFile`. Stream-json subprocess-per-turn semantics (`--resume <id>` chaining included) work identically in bare mode; `--resume` is positioned first as in non-bare print mode.
+- Surfaced by clockwork-manifold S2.5 plan-execute smoke 2026-05-08 (post-v0.8.2): `remoteControlAtStartup: true` in `~/.claude.json` repeatedly forced programmatic spawns into remote-control mode (local stdin inert), filed as low-pri CW-20260508-0019. Bare mode obsoletes that issue and the broader operator-config bleed surface for bare consumers in one shot. Workspace-trust dialog seeding from v0.8.2 stays — non-bare callers still need it; bare bypasses the dialog (no projects-map read).
+- Auth requirement: bare mode strictly requires `ANTHROPIC_API_KEY` env var or `apiKeyHelper` via `--settings` (OAuth and keychain are never read). Documented in field comments + the bare smoke test gate. Clockwork already provides `ANTHROPIC_API_KEY` via env so consumer pickup needs no auth changes.
+- Tests: 12 new bare-mode unit tests in `provider/pty_claude_test.go` (`TestClaudeBuildArgs_Bare_*` covering no-paths, each individual flag, all-paths in stable order, skip-permissions, resume positioning, bare>PTY precedence, ignored systemPrompt parameter, plus `TestClaudeBareInjectionPaths` covering populated/empty bootDir+projectDir combinations). New `TestClaudeBuildArgs_NonBare_ByteForByteIdentical` sentinel pins five non-bare arg shapes (Dev print, with/without system prompt, with resume, PTY empty, DevPTY+resume) to guard against accidental leakage of bare additions into non-bare branches. Constructor-defaults test extended for the two new bare constructors. Pre-existing PTY-mode + print-mode tests pass byte-for-byte unchanged. New gated real-spawn smoke in `provider/bare_claude_smoke_test.go` (`TestClaudeAdapter_BareSpawn_Smoke`, gated on `CLAUDE_BARE_SMOKE=1`) plants a minimal CLAUDE.md + valid `.mcp.json` into a tempdir, spawns `claude --bare` with the full bare arg shape via `BareInjectionPaths`, and asserts exit 0 inside 30s, stream-json `system` event present, response contains `TEST_OK_BARE`, no `Quicksafetycheck`/`trust this folder`/`Quick safety check` trust-dialog markers, and no `remoteControl`/`remote-control` operator-config markers. Skips when the claude binary is absent or `ANTHROPIC_API_KEY` is unset (bare requires env-var auth). Existing `CLAUDE_PTY_SMOKE=1` regression continues to pass.
+- `renderMCPJSON("")` now emits `{"mcpServers":{}}` instead of bare `{}`. Bare-mode `--mcp-config` references `.mcp.json` directly and triggers strict schema validation that requires `mcpServers` to be a record (probed empirically against claude 2.1.136: bare `{}` fails with `mcpServers: Invalid input: expected record, received undefined`). Auto-discovery (the non-bare path) accepts both shapes, so this change is harmless for existing callers and prevents a footgun for bare consumers planting via `BootDirSpec`. The pinned `TestClaudeBootDirSpec_EmptyMCP` test is updated to match.
+- `go test -race -count=1 ./...` clean on darwin (33.7s). `GOOS=linux go build/vet ./...` clean. Both `CLAUDE_PTY_SMOKE=1` and the unit-level bare suite verified locally. The gated `CLAUDE_BARE_SMOKE=1` real-spawn test was hand-validated against `claude --bare` (claude 2.1.136) with a planted bootdir; the spawn produced stream-json output and the only blocker was authentication (no env-var key), which matches the documented bare-mode auth contract.
+
+### Compatibility
+
+- Additive only. Existing callers of `NewClaudeAdapter()` / `NewClaudeAdapterDev()` / `NewClaudeAdapterPTY()` / `NewClaudeAdapterDevPTY()` produce byte-for-byte identical args (sentinel test pins this). The `CLIAdapter.BuildArgs` interface signature is unchanged.
+- The `ClaudeAdapter` struct gains five additive fields (`Bare`, `MCPConfigPath`, `AppendSystemPromptFile`, `SettingsPath`, `ProjectDir`). All zero-value to off; non-bare callers that don't populate them see no behavior change.
+- `BootDirSpec()` is unchanged (same planted files, same `CwdPreference: CwdBootDir`, same trust-dialog seeding via `.claude/settings.json` `Render` closure). The new affordance is a method on `*ClaudeAdapter`, not a spec mutation.
+- `renderMCPJSON("")` content change: `{}` → `{"mcpServers":{}}`. The schema is strictly more correct and accepted by both auto-discovery and `--mcp-config` paths. Callers asserting on the empty-loopback content directly need to update; the only such assertion in this repo (`TestClaudeBootDirSpec_EmptyMCP`) is updated. Codex and opencode adapters share `renderMCPJSON` and inherit the same fix transparently.
+
+### Why v0.9.0 (not v0.8.3)
+
+Bare mode is a meaningful capability addition: new constructors, new `BuildArgs` branch, new helper, new field surface. v0.8.x has been incremental fixes (PTY arg shape in v0.8.1, trust dialog in v0.8.2). Clean minor-version bump.
+
+### Consumer pickup
+
+- `clockwork-manifold` (CW-20260508-0019 et al will be obsoleted for bare consumers): bump go-providers to `v0.9.0`, swap the adapter constructor in `internal/runtime/agent/factory.go` to `NewClaudeAdapterDevBare()` for scripted/subprocess-per-turn paths, and after planting via `BootDirSpec` populate the four bare fields:
+  ```go
+  inj := claude.BareInjectionPaths(bootDir, projectDir)
+  claude.MCPConfigPath          = inj.MCPConfigPath
+  claude.AppendSystemPromptFile = inj.AppendSystemPromptFile
+  claude.SettingsPath           = inj.SettingsPath
+  claude.ProjectDir             = inj.ProjectDir
+  ```
+  PTY-spawned long-lived sessions stay on `NewClaudeAdapterDevPTY()` — bare mode is print-mode-focused.
+- Mux migration to bare mode: separate decision, not on this work.
+- Other PTY adapters (codex / opencode / gemini / copilot / aider / junie / kiro / qwen): each has its own scripted-call shape; file follow-ups if discovered.
+
 ## v0.8.2
 
 - `BootDirSpec` for the claude adapter now pre-accepts the workspace trust dialog for the per-task bootdir. The `.claude/settings.json` planted-file `Render` closure side-effects on `~/.claude.json`'s `projects` map when `PlantContext.BootDir` is set, writing `projects[<realpath(bootDir)>] = {hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true}` via an atomic temp-file rename. Side effect is gated on a non-empty `BootDir` so existing callers that invoke `Render` for content-only purposes (unit tests, dry runs) don't pollute global state.
