@@ -104,8 +104,8 @@ func TestCodexBootDirSpec(t *testing.T) {
 	if !strings.Contains(agentsMD, "you are codex") {
 		t.Error("AGENTS.md should contain SystemPrompt")
 	}
-	if !strings.Contains(agentsMD, "name: codex-exec") {
-		t.Error("AGENTS.md frontmatter should contain name")
+	if !strings.Contains(agentsMD, `name: "codex-exec"`) {
+		t.Error("AGENTS.md frontmatter should contain JSON-quoted name")
 	}
 }
 

@@ -1,6 +1,9 @@
 package provider
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // AgentInfo describes the agent identity used to render an AGENTS.md
 // file. Fields beyond Name and SystemPrompt are optional; renderers
@@ -33,19 +36,13 @@ func AgentsMD(agent AgentInfo, mcpLoopbackURL string, extras ...string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	if agent.Name != "" {
-		b.WriteString("name: ")
-		b.WriteString(agent.Name)
-		b.WriteString("\n")
+		writeFrontmatterScalar(&b, "name", agent.Name)
 	}
 	if agent.Role != "" {
-		b.WriteString("role: ")
-		b.WriteString(agent.Role)
-		b.WriteString("\n")
+		writeFrontmatterScalar(&b, "role", agent.Role)
 	}
 	if agent.Description != "" {
-		b.WriteString("description: ")
-		b.WriteString(strings.ReplaceAll(agent.Description, "\n", " "))
-		b.WriteString("\n")
+		writeFrontmatterScalar(&b, "description", strings.ReplaceAll(agent.Description, "\n", " "))
 	}
 	b.WriteString("---\n\n")
 
@@ -81,4 +78,23 @@ func AgentsMD(agent AgentInfo, mcpLoopbackURL string, extras ...string) string {
 		}
 	}
 	return b.String()
+}
+
+// writeFrontmatterScalar emits a YAML key/value where the value is a
+// JSON-marshalled string. JSON's flow-scalar form is valid YAML
+// (YAML is a JSON superset), and json.Marshal handles all the
+// escaping we'd otherwise need to write by hand: embedded ':', '#',
+// quotes, leading/trailing whitespace, control characters, etc.
+func writeFrontmatterScalar(b *strings.Builder, key, value string) {
+	b.WriteString(key)
+	b.WriteString(": ")
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		// Marshalling a string never fails for any in-memory string;
+		// fall back to a quoted empty value so the YAML stays valid.
+		b.WriteString(`""`)
+	} else {
+		b.Write(encoded)
+	}
+	b.WriteString("\n")
 }

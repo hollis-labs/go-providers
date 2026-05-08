@@ -255,6 +255,15 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// SIGTERM-then-SIGKILL on context cancellation.
 		waitErr := cmd.Wait()
 
+		// Drain stderr BEFORE emitting any terminal event so consumers
+		// don't observe SubprocessStderr typed events arriving after a
+		// turn-terminal Done/Error. The legacy StreamEvent channel is
+		// not coupled to stderr, but the typed surface is — and the
+		// terminal contract says no further typed events fire after
+		// Done/Error. (No-op when stderr capture isn't active —
+		// stderrDone is closed at start in that path.)
+		<-stderrDone
+
 		// Always emit a terminal event so consumers see an explicit boundary
 		// before the channel closes. See PTYBridge.streamCLI for the same
 		// protocol; both bridges guarantee one of EventDone or EventError.
@@ -279,9 +288,6 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Done{}})
 			}
 		}
-
-		// Wait for stderr drain (no-op if no stderr capture is active).
-		<-stderrDone
 
 		if waitErr != nil && ctx.Err() == nil {
 			log.Printf("subprocess[%s]: process exited: %v", s.adapter.Name(), waitErr)

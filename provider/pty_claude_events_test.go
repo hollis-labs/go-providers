@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/go-providers/provider/events"
@@ -240,6 +241,56 @@ func TestCodexParseLineEvents_FinalContent(t *testing.T) {
 	if d.Phase != "final" {
 		t.Errorf("Phase=final expected, got %q", d.Phase)
 	}
+}
+
+// TestTruncate_UTF8Boundary verifies that truncate cuts at a rune
+// boundary so multi-byte UTF-8 runes are never split in the preview.
+// Regression: PR #9 review (Copilot) flagged byte-slice truncation
+// as producing invalid text in ToolResult previews.
+func TestTruncate_UTF8Boundary(t *testing.T) {
+	// "héllo" — é is two bytes (0xC3 0xA9) at offsets 1-2.
+	// Truncate at byte 2 would split é. truncate(s, 2) should walk
+	// back to byte 1 (the "h") so the result is valid UTF-8.
+	s := "héllo"
+	got := truncate(s, 2)
+	for i, r := range got {
+		if r == '�' {
+			t.Errorf("truncate(%q, 2) produced replacement char at byte %d: %q", s, i, got)
+		}
+	}
+	// Should end with the ellipsis the function appends.
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncate should append ellipsis when truncating, got %q", got)
+	}
+
+	// 4-byte rune (👍 = 0xF0 0x9F 0x91 0x8D). Truncate at any byte
+	// inside it should walk back to the "h" before it.
+	emoji := "h👍i"
+	for cut := 1; cut <= 4; cut++ {
+		out := truncate(emoji, cut)
+		if !validUTF8(out) {
+			t.Errorf("truncate(%q, %d) produced invalid UTF-8: %q", emoji, cut, out)
+		}
+	}
+
+	// No-op when within budget.
+	if truncate("hi", 100) != "hi" {
+		t.Error("truncate within budget should return s unchanged")
+	}
+
+	// Empty string within any budget.
+	if truncate("", 0) != "" {
+		t.Error("truncate empty string should return empty")
+	}
+}
+
+func validUTF8(s string) bool {
+	for _, r := range s {
+		if r == '�' {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCodexParseLineEvents_TurnFailed(t *testing.T) {

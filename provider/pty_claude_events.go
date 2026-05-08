@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/hollis-labs/go-providers/provider/events"
 )
@@ -148,11 +149,21 @@ func claudeContentPreview(content any) string {
 	}
 }
 
+// truncate returns s clamped to at most n bytes, with an ellipsis
+// appended when truncation occurred. The cut point is walked back to
+// the nearest UTF-8 rune boundary so multi-byte runes are never split,
+// keeping the preview valid for log/UI surfaces. The byte budget is
+// the cap, not the post-walkback length — if the n-th byte lands
+// mid-rune the preview comes back slightly shorter than n bytes.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func parseClaudeResultTyped(line []byte) ([]events.Event, error) {
