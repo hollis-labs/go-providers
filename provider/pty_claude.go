@@ -23,7 +23,48 @@ type ClaudeAdapter struct {
 	// --system-prompt). Per-turn payloads arrive via PTY stdin (the
 	// go-agent-sessions BootMode=stdin path); system prompts are routed via
 	// BootPrompt rather than --system-prompt.
+	//
+	// When Bare is also true, Bare wins: bare mode is print-mode-focused
+	// per Anthropic's docs ("recommended mode for scripted and SDK calls").
 	PTY bool
+
+	// Bare emits --bare and the explicit-injection flags listed below. In
+	// bare mode the claude CLI skips auto-discovery of hooks, skills,
+	// plugins, MCP servers, auto-memory, CLAUDE.md, OAuth, keychain reads,
+	// and operator config: only flags passed explicitly take effect. This
+	// is Anthropic's recommended mode for scripted/SDK calls and will
+	// become the default for `-p` in a future claude release. Auth in bare
+	// mode is strictly via ANTHROPIC_API_KEY env var or apiKeyHelper via
+	// --settings (OAuth and keychain are never read).
+	//
+	// In bare mode the systemPrompt parameter to BuildArgs is ignored —
+	// system context flows via the planted CLAUDE.md referenced through
+	// AppendSystemPromptFile (see BootDirSpec / BareInjectionPaths).
+	Bare bool
+
+	// MCPConfigPath emits --mcp-config <path> when Bare is true and the
+	// field is non-empty. Empty value emits no flag — bare mode then has
+	// zero MCP servers, which is the documented behavior. Ignored when
+	// Bare is false.
+	MCPConfigPath string
+
+	// AppendSystemPromptFile emits --append-system-prompt-file <path>
+	// when Bare is true and the field is non-empty. Replaces the
+	// auto-discovered CLAUDE.md auto-load that bare mode disables.
+	// Ignored when Bare is false.
+	AppendSystemPromptFile string
+
+	// SettingsPath emits --settings <path> when Bare is true and the
+	// field is non-empty. Use to flow per-task settings (apiKeyHelper,
+	// approvedTools, etc.) without depending on the user's global
+	// ~/.claude/settings.json. Ignored when Bare is false.
+	SettingsPath string
+
+	// ProjectDir emits --add-dir <path> when Bare is true and the field
+	// is non-empty. Grants tool access to the project root when claude
+	// runs with cwd = bootDir. Ignored when Bare is false. (Non-bare
+	// consumers continue to add --add-dir from BootDirSpec.ProjectDirArg.)
+	ProjectDir string
 }
 
 func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
@@ -45,9 +86,56 @@ func NewClaudeAdapterPTY() *ClaudeAdapter { return &ClaudeAdapter{PTY: true} }
 // sessions.
 func NewClaudeAdapterDevPTY() *ClaudeAdapter { return &ClaudeAdapter{PTY: true, SkipPermissions: true} }
 
+// NewClaudeAdapterBare returns a print-mode ClaudeAdapter with --bare
+// enabled. Consumers populate MCPConfigPath / AppendSystemPromptFile /
+// SettingsPath / ProjectDir on the returned adapter (typically via
+// BareInjectionPaths against a planted BootDirSpec) before calling
+// BuildArgs. Auth requires ANTHROPIC_API_KEY in env (or apiKeyHelper via
+// SettingsPath).
+func NewClaudeAdapterBare() *ClaudeAdapter { return &ClaudeAdapter{Bare: true} }
+
+// NewClaudeAdapterDevBare returns a bare-mode ClaudeAdapter with
+// --dangerously-skip-permissions enabled, for developer-mode scripted
+// sessions.
+func NewClaudeAdapterDevBare() *ClaudeAdapter {
+	return &ClaudeAdapter{Bare: true, SkipPermissions: true}
+}
+
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	if a.Bare {
+		// Bare mode: print-mode shape (-p / --output-format / --verbose)
+		// plus --bare and the explicit-injection flags. The systemPrompt
+		// parameter is ignored — system context flows via the planted
+		// CLAUDE.md referenced through AppendSystemPromptFile.
+		args := []string{
+			"-p", prompt,
+			"--output-format", "stream-json",
+			"--verbose",
+			"--bare",
+		}
+		if a.MCPConfigPath != "" {
+			args = append(args, "--mcp-config", a.MCPConfigPath)
+		}
+		if a.AppendSystemPromptFile != "" {
+			args = append(args, "--append-system-prompt-file", a.AppendSystemPromptFile)
+		}
+		if a.SettingsPath != "" {
+			args = append(args, "--settings", a.SettingsPath)
+		}
+		if a.ProjectDir != "" {
+			args = append(args, "--add-dir", a.ProjectDir)
+		}
+		if a.SkipPermissions {
+			args = append(args, "--dangerously-skip-permissions")
+		}
+		if cliSessionID != "" {
+			args = append([]string{"--resume", cliSessionID}, args...)
+		}
+		return args
+	}
+
 	if a.PTY {
 		// Interactive / long-lived spawn. The claude TUI does not accept
 		// `-p` / `--print`; passing them with an empty prompt makes the
