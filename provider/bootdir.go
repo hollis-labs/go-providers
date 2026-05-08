@@ -60,6 +60,14 @@ type PlantedFile struct {
 	// Returning an error aborts boot dir setup (the app should fail
 	// the spawn). A nil Render is permitted — apps may skip the file
 	// or render their own content.
+	//
+	// Render is normally pure, but adapters MAY perform environment
+	// setup keyed on PlantContext.BootDir (e.g. seeding user-global
+	// CLI state so the spawned process doesn't prompt on first run).
+	// Such side effects MUST be gated on `ctx.BootDir != ""` so callers
+	// that invoke Render for content-only purposes (unit tests, dry
+	// runs) don't pollute global state. The content return value
+	// remains the file payload either way.
 	Render func(ctx PlantContext) (string, error)
 }
 
@@ -81,6 +89,13 @@ type PlantContext struct {
 	// ProjectDir is the absolute path to the project the agent
 	// should operate against. Empty when no project access is granted.
 	ProjectDir string
+	// BootDir is the absolute path to the per-task tempdir the app is
+	// materializing. Apps populate it from their bootdir factory.
+	// Empty during pure render-only paths (e.g. unit tests of file
+	// content) — adapter Render closures that key environment seeding
+	// on the bootdir (see PlantedFile.Render) MUST gate the side effect
+	// on `BootDir != ""` so render stays pure when the field is unset.
+	BootDir string
 }
 
 // CwdPreference declares the spawned process's working directory.
