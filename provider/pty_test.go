@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 func TestNewPTYBridge_NilWhenMissing(t *testing.T) {
@@ -49,7 +51,7 @@ func TestPTYBridge_Capabilities(t *testing.T) {
 
 func TestPTYBridge_StreamChat_NoUserMessage(t *testing.T) {
 	bridge := &PTYBridge{adapter: NewClaudeAdapter(), cliPath: "/usr/bin/echo"}
-	_, err := bridge.StreamChat(context.Background(), ChatRequest{})
+	_, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error for empty messages")
 	}
@@ -70,7 +72,7 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 	// For a proper integration test, we'd need the real CLI.
 
 	// Test that the provider correctly returns an error for missing user message.
-	_, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	_, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "system", Content: "test"},
 	}})
 	if err == nil {
@@ -86,9 +88,9 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 
 // TestPTYBridge_NoSilentDrop_ToolUseOnly verifies that when the CLI emits
 // only tool_use blocks (no text deltas), the PTY bridge replaces the
-// adapter's terminal EventDone with an explicit "CLI bridge cannot forward
-// tool calls" EventError so consumers see the failure as the SOLE terminal
-// event (mutually exclusive with EventDone per the IsTurnComplete contract).
+// adapter's terminal llmtypes.EventDone with an explicit "CLI bridge cannot forward
+// tool calls" llmtypes.EventError so consumers see the failure as the SOLE terminal
+// event (mutually exclusive with llmtypes.EventDone per the llmtypes.IsTurnComplete contract).
 func TestPTYBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "tool-only-cli.sh")
@@ -100,14 +102,14 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 	for ev := range ch {
 		events = append(events, ev)
 	}
@@ -115,10 +117,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	const guardMsg = "CLI bridge cannot forward tool calls"
 	guardCount, terminalCount := 0, 0
 	for _, ev := range events {
-		if ev.Type == EventError && ev.Error == guardMsg {
+		if ev.Type == llmtypes.EventError && ev.Error == guardMsg {
 			guardCount++
 		}
-		if IsTurnComplete(ev) {
+		if llmtypes.IsTurnComplete(ev) {
 			terminalCount++
 		}
 	}
@@ -127,13 +129,13 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
 	}
 	if terminalCount != 1 {
-		t.Errorf("expected exactly one terminal event (guard error replaces adapter's EventDone), got %d (events: %+v)", terminalCount, events)
+		t.Errorf("expected exactly one terminal event (guard error replaces adapter's llmtypes.EventDone), got %d (events: %+v)", terminalCount, events)
 	}
-	if len(events) == 0 || !IsTurnComplete(events[len(events)-1]) {
+	if len(events) == 0 || !llmtypes.IsTurnComplete(events[len(events)-1]) {
 		t.Fatalf("expected last event to be turn-terminal; got: %+v", events)
 	}
-	if last := events[len(events)-1]; last.Type != EventError || last.Error != guardMsg {
-		t.Errorf("expected the terminal event to be the guard EventError; got %+v", last)
+	if last := events[len(events)-1]; last.Type != llmtypes.EventError || last.Error != guardMsg {
+		t.Errorf("expected the terminal event to be the guard llmtypes.EventError; got %+v", last)
 	}
 }
 

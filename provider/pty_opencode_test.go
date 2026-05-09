@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"testing"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
+)
 
 func TestOpencodeAdapter_Name(t *testing.T) {
 	a := NewOpencodeAdapter()
@@ -77,7 +81,7 @@ func TestOpencodeAdapter_ParseLine(t *testing.T) {
 		if len(events) != 1 {
 			t.Fatalf("expected 1 event, got %d", len(events))
 		}
-		if events[0].Type != EventDelta {
+		if events[0].Type != llmtypes.EventDelta {
 			t.Errorf("expected delta, got %s", events[0].Type)
 		}
 		if events[0].Content != "Applied the patch\n" {

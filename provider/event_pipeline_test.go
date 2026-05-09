@@ -5,13 +5,15 @@ import (
 	"regexp"
 	"testing"
 	"time"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // TestEventReactionPipelineBasic tests the basic functionality of the event reaction pipeline.
 func TestEventReactionPipelineBasic(t *testing.T) {
 	// Create a mock provider
 	mockProvider := &mockStreamingProvider{
-		capabilities: ProviderCapabilities{
+		capabilities: llmtypes.ProviderCapabilities{
 			SupportsStreamJSON: true,
 			MaxTokens:          1000,
 		},
@@ -29,15 +31,15 @@ func TestEventReactionPipelineBasic(t *testing.T) {
 
 	// Test streaming
 	ctx := context.Background()
-	messages := []ChatMessage{{Role: "user", Content: "Hello"}}
+	messages := []llmtypes.ChatMessage{{Role: "user", Content: "Hello"}}
 
-	stream, err := pipeline.StreamChat(ctx, ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
+	stream, err := pipeline.StreamChat(ctx, llmtypes.ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
 	if err != nil {
 		t.Fatalf("StreamChat failed: %v", err)
 	}
 
 	// Read from stream
-	events := make([]StreamEvent, 0)
+	events := make([]llmtypes.StreamEvent, 0)
 	for event := range stream {
 		events = append(events, event)
 	}
@@ -51,7 +53,7 @@ func TestEventReactionPipelineBasic(t *testing.T) {
 func TestEventReactionPipelineNonStreaming(t *testing.T) {
 	// Create a mock non-streaming provider
 	mockProvider := &mockNonStreamingProvider{
-		capabilities: ProviderCapabilities{
+		capabilities: llmtypes.ProviderCapabilities{
 			SupportsStreamJSON: false,
 			MaxTokens:          1000,
 		},
@@ -64,15 +66,15 @@ func TestEventReactionPipelineNonStreaming(t *testing.T) {
 
 	// Test streaming with fallback
 	ctx := context.Background()
-	messages := []ChatMessage{{Role: "user", Content: "Hello"}}
+	messages := []llmtypes.ChatMessage{{Role: "user", Content: "Hello"}}
 
-	stream, err := pipeline.StreamChat(ctx, ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
+	stream, err := pipeline.StreamChat(ctx, llmtypes.ChatRequest{SystemPrompt: "system", Messages: messages, Model: "test-model"})
 	if err != nil {
 		t.Fatalf("StreamChat failed: %v", err)
 	}
 
 	// Read from stream
-	events := make([]StreamEvent, 0)
+	events := make([]llmtypes.StreamEvent, 0)
 	for event := range stream {
 		events = append(events, event)
 	}
@@ -99,9 +101,9 @@ func TestScopeGuardViolations(t *testing.T) {
 	guard := NewScopeGuard(patterns, "log")
 
 	// Test allowed file access
-	allowedEvent := StreamEvent{
-		Type: EventToolUse,
-		ToolUse: &ToolUseBlock{
+	allowedEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventToolUse,
+		ToolUse: &llmtypes.ToolUseBlock{
 			Name:  "read_file",
 			Input: map[string]any{"file_path": "/allowed/test.txt"},
 		},
@@ -112,9 +114,9 @@ func TestScopeGuardViolations(t *testing.T) {
 	}
 
 	// Test disallowed file access
-	disallowedEvent := StreamEvent{
-		Type: EventToolUse,
-		ToolUse: &ToolUseBlock{
+	disallowedEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventToolUse,
+		ToolUse: &llmtypes.ToolUseBlock{
 			Name:  "read_file",
 			Input: map[string]any{"file_path": "/etc/passwd"},
 		},
@@ -125,9 +127,9 @@ func TestScopeGuardViolations(t *testing.T) {
 	}
 
 	// Test dangerous tool usage
-	dangerousEvent := StreamEvent{
-		Type: EventToolUse,
-		ToolUse: &ToolUseBlock{
+	dangerousEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventToolUse,
+		ToolUse: &llmtypes.ToolUseBlock{
 			Name:  "rm_command",
 			Input: map[string]any{"args": "-rf /"},
 		},
@@ -150,7 +152,7 @@ func TestProgressTrackerLoops(t *testing.T) {
 	tracker := NewProgressTracker(3, time.Minute, "log")
 
 	// Test content loop detection
-	contentEvent := StreamEvent{
+	contentEvent := llmtypes.StreamEvent{
 		Type:    "delta",
 		Content: "Repeated content",
 	}
@@ -171,9 +173,9 @@ func TestProgressTrackerLoops(t *testing.T) {
 
 	// Test tool loop detection
 	tracker2 := NewProgressTracker(2, time.Minute, "log")
-	toolEvent := StreamEvent{
-		Type: EventToolUse,
-		ToolUse: &ToolUseBlock{
+	toolEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventToolUse,
+		ToolUse: &llmtypes.ToolUseBlock{
 			Name:  "test_tool",
 			Input: map[string]any{"param": "value"},
 		},
@@ -196,9 +198,9 @@ func TestCostMonitorBudgets(t *testing.T) {
 	monitor := NewCostMonitor(100, 1.0, "log")
 
 	// Test within budget
-	usageEvent := StreamEvent{
-		Type: EventUsage,
-		Usage: &Usage{
+	usageEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventUsage,
+		Usage: &llmtypes.Usage{
 			InputTokens:  30,
 			OutputTokens: 20,
 		},
@@ -209,9 +211,9 @@ func TestCostMonitorBudgets(t *testing.T) {
 	}
 
 	// Test exceeding token budget
-	largeUsageEvent := StreamEvent{
-		Type: EventUsage,
-		Usage: &Usage{
+	largeUsageEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventUsage,
+		Usage: &llmtypes.Usage{
 			InputTokens:  60,
 			OutputTokens: 50,
 		},
@@ -226,9 +228,9 @@ func TestCostMonitorBudgets(t *testing.T) {
 
 	// Test cost monitoring
 	monitor2 := NewCostMonitor(10000, 0.01, "log") // Very low cost budget
-	highCostEvent := StreamEvent{
-		Type: EventUsage,
-		Usage: &Usage{
+	highCostEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventUsage,
+		Usage: &llmtypes.Usage{
 			InputTokens:  1000,
 			OutputTokens: 1000,
 		},
@@ -244,9 +246,9 @@ func TestUsageSummary(t *testing.T) {
 	monitor := NewCostMonitor(1000, 10.0, "log")
 
 	// Add some usage
-	usageEvent := StreamEvent{
-		Type: EventUsage,
-		Usage: &Usage{
+	usageEvent := llmtypes.StreamEvent{
+		Type: llmtypes.EventUsage,
+		Usage: &llmtypes.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
 		},
@@ -271,45 +273,45 @@ func TestUsageSummary(t *testing.T) {
 // Mock providers for testing
 
 type mockStreamingProvider struct {
-	capabilities ProviderCapabilities
-	events       []StreamEvent
+	capabilities llmtypes.ProviderCapabilities
+	events       []llmtypes.StreamEvent
 }
 
-func (m *mockStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
-	ch := make(chan StreamEvent, 10)
+func (m *mockStreamingProvider) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	ch := make(chan llmtypes.StreamEvent, 10)
 	go func() {
 		defer close(ch)
-		ch <- StreamEvent{Type: EventDelta, Content: "Hello"}
-		ch <- StreamEvent{Type: EventDelta, Content: " world"}
-		ch <- StreamEvent{Type: EventUsage, Usage: &Usage{InputTokens: 10, OutputTokens: 5}}
-		ch <- StreamEvent{Type: EventDone}
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "Hello"}
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: " world"}
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 10, OutputTokens: 5}}
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 	}()
 	return ch, nil
 }
 
-func (m *mockStreamingProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (m *mockStreamingProvider) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	return "Hello world", nil
 }
 
-func (m *mockStreamingProvider) Capabilities() ProviderCapabilities {
+func (m *mockStreamingProvider) Capabilities() llmtypes.ProviderCapabilities {
 	return m.capabilities
 }
 
 type mockNonStreamingProvider struct {
-	capabilities ProviderCapabilities
+	capabilities llmtypes.ProviderCapabilities
 	response     string
 }
 
-func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (m *mockNonStreamingProvider) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	// Should not be called for non-streaming providers
 	return nil, nil
 }
 
-func (m *mockNonStreamingProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (m *mockNonStreamingProvider) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	return m.response, nil
 }
 
-func (m *mockNonStreamingProvider) Capabilities() ProviderCapabilities {
+func (m *mockNonStreamingProvider) Capabilities() llmtypes.ProviderCapabilities {
 	return m.capabilities
 }
 

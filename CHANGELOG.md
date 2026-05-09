@@ -2,6 +2,72 @@
 
 ## Unreleased
 
+## v0.12.0 — 2026-05-09
+
+### BREAKING — Removed (transitional aliases dropped per Path B)
+
+- Type aliases in `provider/provider.go` for migrated types:
+  `ProviderCapabilities`, `ToolDefinition`, `ToolUseBlock`, `ContentBlock`,
+  `EventType`, `ThinkingBlock`, `StreamEvent`, `Usage`, `CompleteResult`,
+  `ChatMessage`, `SlotBlock`, `ChatRequest`, `Provider`.
+- Constant aliases for `EventDelta`, `EventToolUse`, `EventUsage`,
+  `EventError`, `EventDone`, `EventSessionID`, `EventThinking`.
+- The `IsTurnComplete` re-export shim function (canonical implementation
+  lives in `go-llm-types`).
+
+### BREAKING — Removed (unused PTY adapters)
+
+- `pty_aider.go`, `pty_copilot.go`, `pty_gemini.go`, `pty_junie.go`,
+  `pty_kiro.go`, `pty_qwen.go` and their `_test.go` siblings.
+- Their constructors (`provider.NewAiderAdapter`, `NewCopilotAdapter`,
+  `NewGeminiAdapter`, `NewJunieAdapter`, `NewKiroAdapter`,
+  `NewQwenAdapter`) and adapter types.
+- The companion `bootdir_stubs.go` (TBD `BootDirSpec` methods on the
+  deleted adapter types).
+
+### Why
+
+The aliases were introduced in `c18dd6d` (v0.11.0) to ease the
+consumer-side migration to `go-llm-contracts` + `go-llm-types`. Per Path B
+(user 2026-05-09: "do the clean break now so we don't have to come back
+and remove aliases"), all in-scope consumers (nanite Wave-2 + Path-B sweep
+at nanite `00f0f9e`; vanta-conduit; stack-explorer) migrated their imports
+directly to the canonical homes during SP-20260508-0001.
+
+The six PTY adapters survived CW-20260508-0010 (option B was selected at
+the time because agent-mux + clockwork-manifold consumed them). Per the
+same 2026-05-09 directive — those apps are migrating in parallel and not
+in scope for this sprint — the gating rationale is dropped and the
+adapters go away cleanly. Cutting v0.12.0 may temporarily break those
+apps' `main`; that is acceptable.
+
+### Migration
+
+Consumers must import:
+- Data types (`ChatRequest`, `StreamEvent`, `ChatMessage`, `ContentBlock`,
+  `ToolDefinition`, `ToolUseBlock`, `ThinkingBlock`, `SlotBlock`,
+  `CompleteResult`, `Usage`, `EventType`, `ProviderCapabilities`) and
+  event constants (`EventDelta`, `EventToolUse`, `EventUsage`,
+  `EventError`, `EventDone`, `EventSessionID`, `EventThinking`) from
+  `github.com/hollis-labs/go-llm-types`.
+- The `Provider` interface (and `IsTurnComplete` predicate) from
+  `github.com/hollis-labs/go-llm-contracts` (and `go-llm-types`
+  respectively).
+- The `Embedder` interface from
+  `github.com/hollis-labs/go-embed-contracts`.
+
+go-providers retains a tight CLI/PTY/subprocess surface — `Registry`,
+`CLIAdapter`, claude/codex/opencode adapter constructors
+(`NewClaudeAdapter`, `NewCodexAdapter`, `NewOpencodeAdapter`), context
+helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`,
+`WithActivityCallback`, `WithWaitDelay`), `EventsCallback`, `AgentInfo`,
+`AgentsMD`, `CostMonitor`, `ProgressTracker`, `ScopeGuard`,
+`EventReactionPipeline`, and the `BootDirSpec` plumbing for the three
+production adapters.
+
+Sprint: SP-20260508-0001
+Companion modules: go-llm-contracts, go-llm-types, go-embed-contracts
+
 ## v0.11.0
 
 ### Breaking — relocated rate-budget primitives; shared model types extracted

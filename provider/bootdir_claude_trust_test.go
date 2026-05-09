@@ -62,9 +62,9 @@ func TestSeedClaudeWorkspaceTrust_PreservesExistingKeys(t *testing.T) {
 	cfgPath := filepath.Join(homeDir, ".claude.json")
 
 	existing := map[string]any{
-		"oauthAccount":  "user@example.com",
-		"anonymousId":   "abc-123",
-		"someOtherKey":  []any{"a", "b"},
+		"oauthAccount": "user@example.com",
+		"anonymousId":  "abc-123",
+		"someOtherKey": []any{"a", "b"},
 		"projects": map[string]any{
 			"/Users/me/repoA": map[string]any{
 				"hasTrustDialogAccepted": true,

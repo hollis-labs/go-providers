@@ -3,6 +3,8 @@ package provider
 import (
 	"os"
 	"strings"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // OpencodeAdapter implements CLIAdapter for the opencode CLI
@@ -11,9 +13,9 @@ import (
 // Command shape: opencode run --agent <Agent> [--model <Model>] [--dir <Dir>] "<prompt>"
 //
 // Turn boundary: opencode emits plain text on stdout with no structured
-// completion event. ParseLine emits EventDelta per non-empty line and never
-// emits EventDone/EventError directly; the bridge synthesizes EventDone on
-// clean process exit (same pattern as AiderAdapter).
+// completion event. ParseLine emits llmtypes.EventDelta per non-empty line and never
+// emits llmtypes.EventDone/llmtypes.EventError directly; the bridge synthesizes llmtypes.EventDone on
+// clean process exit.
 type OpencodeAdapter struct {
 	// Agent is the opencode agent profile name passed via --agent.
 	// Required: opencode run aborts without it.
@@ -46,7 +48,7 @@ func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) [
 	return args
 }
 
-func (a *OpencodeAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
+func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	if len(line) == 0 {
 		return nil, nil
 	}
@@ -54,7 +56,7 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
-	return []StreamEvent{{Type: EventDelta, Content: text + "\n"}}, nil
+	return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text + "\n"}}, nil
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {

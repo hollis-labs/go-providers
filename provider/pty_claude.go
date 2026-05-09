@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // ClaudeAdapter implements CLIAdapter for the Claude Code CLI.
 //
-// Turn boundary: emits EventDone when ParseLine sees a stream-json `result`
-// event with `subtype: "success"`, and EventError when `is_error: true` or
-// `subtype: "error"`. EventUsage is emitted alongside EventDone when token
+// Turn boundary: emits llmtypes.EventDone when ParseLine sees a stream-json `result`
+// event with `subtype: "success"`, and llmtypes.EventError when `is_error: true` or
+// `subtype: "error"`. llmtypes.EventUsage is emitted alongside llmtypes.EventDone when token
 // usage is available on the `result` event.
 type ClaudeAdapter struct {
 	// SkipPermissions adds --dangerously-skip-permissions to CLI args.
@@ -169,7 +171,7 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 	return args
 }
 
-func (a *ClaudeAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
+func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	return parseClaudeStreamLine(line)
 }
 
@@ -195,8 +197,8 @@ type claudeEvent struct {
 
 // claudeAssistantEvent is an "assistant" event wrapping a message object.
 type claudeAssistantEvent struct {
-	Type    string              `json:"type"`
-	Message claudeAssistantMsg  `json:"message"`
+	Type    string             `json:"type"`
+	Message claudeAssistantMsg `json:"message"`
 }
 
 type claudeAssistantMsg struct {
@@ -249,7 +251,7 @@ type claudeErrorEvent struct {
 
 // parseClaudeStreamLine parses a single line of Claude Code stream-json output
 // and returns zero or more StreamEvents. Unrecognized event types are silently skipped.
-func parseClaudeStreamLine(line []byte) ([]StreamEvent, error) {
+func parseClaudeStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	if len(line) == 0 {
 		return nil, nil
 	}
@@ -278,18 +280,18 @@ func parseClaudeStreamLine(line []byte) ([]StreamEvent, error) {
 	}
 }
 
-func parseClaudeAssistant(line []byte) ([]StreamEvent, error) {
+func parseClaudeAssistant(line []byte) ([]llmtypes.StreamEvent, error) {
 	var ev claudeAssistantEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("parse assistant event: %w", err)
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 	for _, block := range ev.Message.Content {
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				events = append(events, StreamEvent{
+				events = append(events, llmtypes.StreamEvent{
 					Type:    "delta",
 					Content: block.Text,
 				})
@@ -299,34 +301,34 @@ func parseClaudeAssistant(line []byte) ([]StreamEvent, error) {
 			if len(block.Input) > 0 {
 				_ = json.Unmarshal(block.Input, &input)
 			}
-			events = append(events, StreamEvent{
-				Type: EventToolUse,
-				ToolUse: &ToolUseBlock{
+			events = append(events, llmtypes.StreamEvent{
+				Type: llmtypes.EventToolUse,
+				ToolUse: &llmtypes.ToolUseBlock{
 					ID:    block.ID,
 					Name:  block.Name,
 					Input: input,
 				},
 			})
-		// tool_result blocks are internal to Claude CLI's tool loop — skip.
+			// tool_result blocks are internal to Claude CLI's tool loop — skip.
 		}
 	}
 
 	return events, nil
 }
 
-func parseClaudeResult(line []byte) ([]StreamEvent, error) {
+func parseClaudeResult(line []byte) ([]llmtypes.StreamEvent, error) {
 	var ev claudeResultEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("parse result event: %w", err)
 	}
 
 	if ev.IsError || ev.Subtype == "error" {
-		return []StreamEvent{
-			{Type: EventError, Error: ev.Result},
+		return []llmtypes.StreamEvent{
+			{Type: llmtypes.EventError, Error: ev.Result},
 		}, nil
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 
 	// Emit usage if available.
 	if ev.Usage != nil {
@@ -334,9 +336,9 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 		if stopReason == "" {
 			stopReason = "end_turn"
 		}
-		events = append(events, StreamEvent{
-			Type: EventUsage,
-			Usage: &Usage{
+		events = append(events, llmtypes.StreamEvent{
+			Type: llmtypes.EventUsage,
+			Usage: &llmtypes.Usage{
 				InputTokens:         ev.Usage.InputTokens,
 				OutputTokens:        ev.Usage.OutputTokens,
 				CacheCreationTokens: ev.Usage.CacheCreationInputTokens,
@@ -346,29 +348,29 @@ func parseClaudeResult(line []byte) ([]StreamEvent, error) {
 		})
 	}
 
-	events = append(events, StreamEvent{Type: EventDone})
+	events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 	return events, nil
 }
 
-func parseClaudeSystem(line []byte) ([]StreamEvent, error) {
+func parseClaudeSystem(line []byte) ([]llmtypes.StreamEvent, error) {
 	var ev claudeSystemEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("parse system event: %w", err)
 	}
 	if ev.Subtype == "init" && ev.SessionID != "" {
-		return []StreamEvent{
-			{Type: EventSessionID, SessionID: ev.SessionID},
+		return []llmtypes.StreamEvent{
+			{Type: llmtypes.EventSessionID, SessionID: ev.SessionID},
 		}, nil
 	}
 	return nil, nil
 }
 
-func parseClaudeError(line []byte) ([]StreamEvent, error) {
+func parseClaudeError(line []byte) ([]llmtypes.StreamEvent, error) {
 	var ev claudeErrorEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("parse error event: %w", err)
 	}
-	return []StreamEvent{
-		{Type: EventError, Error: ev.Error.Message},
+	return []llmtypes.StreamEvent{
+		{Type: llmtypes.EventError, Error: ev.Error.Message},
 	}, nil
 }

@@ -6,15 +6,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // ProgressLoop represents a detected processing loop.
 type ProgressLoop struct {
-	Type        string        // "content_loop", "tool_loop", "state_loop"
+	Type        string // "content_loop", "tool_loop", "state_loop"
 	Description string
 	Iterations  int
 	Duration    time.Duration
-	Event       StreamEvent
+	Event       llmtypes.StreamEvent
 }
 
 func (pl *ProgressLoop) Error() string {
@@ -26,16 +28,16 @@ func (pl *ProgressLoop) Error() string {
 // It detects when the same content, tool usage, or state patterns repeat
 // beyond reasonable thresholds.
 type ProgressTracker struct {
-	maxIterations    int
-	detectionWindow  time.Duration
-	detectionMode    string // "log" or "kill"
+	maxIterations   int
+	detectionWindow time.Duration
+	detectionMode   string // "log" or "kill"
 
 	// Tracking state
-	mu                sync.RWMutex
-	contentHistory    []contentRecord
-	toolHistory       []toolRecord
-	stateHistory      []stateRecord
-	windowStart       time.Time
+	mu             sync.RWMutex
+	contentHistory []contentRecord
+	toolHistory    []toolRecord
+	stateHistory   []stateRecord
+	windowStart    time.Time
 }
 
 type contentRecord struct {
@@ -72,7 +74,7 @@ func NewProgressTracker(maxIterations int, detectionWindow time.Duration, detect
 }
 
 // CheckEvent examines a stream event for progress loop patterns.
-func (pt *ProgressTracker) CheckEvent(event StreamEvent) *ProgressLoop {
+func (pt *ProgressTracker) CheckEvent(event llmtypes.StreamEvent) *ProgressLoop {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -82,9 +84,9 @@ func (pt *ProgressTracker) CheckEvent(event StreamEvent) *ProgressLoop {
 	pt.cleanOldRecords(now)
 
 	switch event.Type {
-	case EventDelta:
+	case llmtypes.EventDelta:
 		return pt.checkContentLoop(event, now)
-	case EventToolUse:
+	case llmtypes.EventToolUse:
 		return pt.checkToolLoop(event, now)
 	default:
 		// For other events, check general state patterns
@@ -93,7 +95,7 @@ func (pt *ProgressTracker) CheckEvent(event StreamEvent) *ProgressLoop {
 }
 
 // checkContentLoop detects loops in content generation.
-func (pt *ProgressTracker) checkContentLoop(event StreamEvent, now time.Time) *ProgressLoop {
+func (pt *ProgressTracker) checkContentLoop(event llmtypes.StreamEvent, now time.Time) *ProgressLoop {
 	content := strings.TrimSpace(event.Content)
 	if len(content) == 0 {
 		return nil
@@ -135,7 +137,7 @@ func (pt *ProgressTracker) checkContentLoop(event StreamEvent, now time.Time) *P
 }
 
 // checkToolLoop detects loops in tool usage.
-func (pt *ProgressTracker) checkToolLoop(event StreamEvent, now time.Time) *ProgressLoop {
+func (pt *ProgressTracker) checkToolLoop(event llmtypes.StreamEvent, now time.Time) *ProgressLoop {
 	if event.ToolUse == nil {
 		return nil
 	}
@@ -176,7 +178,7 @@ func (pt *ProgressTracker) checkToolLoop(event StreamEvent, now time.Time) *Prog
 }
 
 // checkStateLoop detects loops in general state patterns.
-func (pt *ProgressTracker) checkStateLoop(event StreamEvent, now time.Time) *ProgressLoop {
+func (pt *ProgressTracker) checkStateLoop(event llmtypes.StreamEvent, now time.Time) *ProgressLoop {
 	// Create a state hash based on the event type and content
 	stateHash := hashState(event)
 
@@ -280,7 +282,7 @@ func hashInput(input map[string]any) string {
 }
 
 // hashState creates a hash of the general event state.
-func hashState(event StreamEvent) string {
+func hashState(event llmtypes.StreamEvent) string {
 	state := fmt.Sprintf("%s:%s", event.Type, event.Content)
 	if event.ToolUse != nil {
 		state += fmt.Sprintf(":tool:%s", event.ToolUse.Name)

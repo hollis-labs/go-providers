@@ -1,22 +1,26 @@
 package provider
 
-import "sync"
+import (
+	"sync"
+
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+)
 
 // Registry holds named Provider implementations. It is safe for concurrent use.
 type Registry struct {
 	mu        sync.RWMutex
-	providers map[string]Provider
+	providers map[string]llmcontracts.Provider
 }
 
 // NewRegistry creates a new empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		providers: make(map[string]Provider),
+		providers: make(map[string]llmcontracts.Provider),
 	}
 }
 
 // Register adds a provider under the given name.
-func (r *Registry) Register(name string, p Provider) {
+func (r *Registry) Register(name string, p llmcontracts.Provider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers[name] = p
@@ -34,7 +38,7 @@ func (r *Registry) Unregister(name string) bool {
 }
 
 // Get returns the provider for the given name, or false if not found.
-func (r *Registry) Get(name string) (Provider, bool) {
+func (r *Registry) Get(name string) (llmcontracts.Provider, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.providers[name]

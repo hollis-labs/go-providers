@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // CodexAdapter implements CLIAdapter for the OpenAI Codex CLI.
 //
-// Turn boundary: emits EventDone on the `turn.completed` event, EventError on
+// Turn boundary: emits llmtypes.EventDone on the `turn.completed` event, llmtypes.EventError on
 // `turn.failed` or top-level `error` events. Codex always runs single-turn via
 // `codex exec`, so each invocation produces exactly one turn boundary.
 type CodexAdapter struct{}
@@ -24,7 +26,7 @@ func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []st
 	return []string{"exec", prompt, "--json"}
 }
 
-func (a *CodexAdapter) ParseLine(line []byte) ([]StreamEvent, error) {
+func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	return parseCodexStreamLine(line)
 }
 
@@ -62,7 +64,7 @@ type codexError struct {
 }
 
 // parseCodexStreamLine parses a single line of Codex --json output.
-func parseCodexStreamLine(line []byte) ([]StreamEvent, error) {
+func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	if len(line) == 0 {
 		return nil, nil
 	}
@@ -84,20 +86,20 @@ func parseCodexStreamLine(line []byte) ([]StreamEvent, error) {
 				text = msg.Content
 			}
 			if text != "" {
-				return []StreamEvent{{Type: EventDelta, Content: text}}, nil
+				return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text}}, nil
 			}
 		}
 		return nil, nil
 
 	case "turn.completed":
-		return []StreamEvent{{Type: EventDone}}, nil
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}, nil
 
 	case "turn.failed", "error":
 		var errEvt codexError
 		if err := json.Unmarshal(line, &errEvt); err == nil && errEvt.Message != "" {
-			return []StreamEvent{{Type: EventError, Error: errEvt.Message}}, nil
+			return []llmtypes.StreamEvent{{Type: llmtypes.EventError, Error: errEvt.Message}}, nil
 		}
-		return []StreamEvent{{Type: EventError, Error: "codex error"}}, nil
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventError, Error: "codex error"}}, nil
 
 	case "thread.started", "turn.started":
 		// Informational — skip.

@@ -6,6 +6,10 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 )
 
 // EventReactionConfig configures the behavior of the event reaction pipeline.
@@ -48,7 +52,7 @@ func DefaultEventReactionConfig() EventReactionConfig {
 // EventReactionPipeline wraps a Provider and adds monitoring capabilities for stream events.
 // It implements the decorator pattern, transparently adding monitoring to any Provider.
 type EventReactionPipeline struct {
-	provider Provider
+	provider llmcontracts.Provider
 	config   EventReactionConfig
 
 	// Monitoring components
@@ -61,7 +65,7 @@ type EventReactionPipeline struct {
 }
 
 // NewEventReactionPipeline creates a new event reaction pipeline wrapping the given provider.
-func NewEventReactionPipeline(provider Provider, config EventReactionConfig) *EventReactionPipeline {
+func NewEventReactionPipeline(provider llmcontracts.Provider, config EventReactionConfig) *EventReactionPipeline {
 	pipeline := &EventReactionPipeline{
 		provider: provider,
 		config:   config,
@@ -93,7 +97,7 @@ func NewEventReactionPipeline(provider Provider, config EventReactionConfig) *Ev
 }
 
 // StreamChat implements Provider.StreamChat with event monitoring.
-func (p *EventReactionPipeline) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (p *EventReactionPipeline) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	if !p.provider.Capabilities().SupportsStreamJSON {
 		return p.fallbackToNonStreaming(ctx, in)
 	}
@@ -105,18 +109,18 @@ func (p *EventReactionPipeline) StreamChat(ctx context.Context, in ChatRequest) 
 }
 
 // Complete implements Provider.Complete (no streaming monitoring needed).
-func (p *EventReactionPipeline) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (p *EventReactionPipeline) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	return p.provider.Complete(ctx, in)
 }
 
 // Capabilities implements Provider.Capabilities.
-func (p *EventReactionPipeline) Capabilities() ProviderCapabilities {
+func (p *EventReactionPipeline) Capabilities() llmtypes.ProviderCapabilities {
 	return p.provider.Capabilities()
 }
 
 // monitorStream creates a new channel that monitors events from the original stream.
-func (p *EventReactionPipeline) monitorStream(ctx context.Context, originalStream <-chan StreamEvent) <-chan StreamEvent {
-	monitoredStream := make(chan StreamEvent, 64)
+func (p *EventReactionPipeline) monitorStream(ctx context.Context, originalStream <-chan llmtypes.StreamEvent) <-chan llmtypes.StreamEvent {
+	monitoredStream := make(chan llmtypes.StreamEvent, 64)
 
 	go func() {
 		defer close(monitoredStream)
@@ -133,7 +137,7 @@ func (p *EventReactionPipeline) monitorStream(ctx context.Context, originalStrea
 				// Process event through monitoring pipeline
 				if p.shouldTerminate(ctx, event) {
 					// Send error event and terminate
-					monitoredStream <- StreamEvent{
+					monitoredStream <- llmtypes.StreamEvent{
 						Type:  "error",
 						Error: "Event reaction pipeline terminated due to policy violation",
 					}
@@ -150,7 +154,7 @@ func (p *EventReactionPipeline) monitorStream(ctx context.Context, originalStrea
 }
 
 // shouldTerminate checks all monitoring components to see if processing should be terminated.
-func (p *EventReactionPipeline) shouldTerminate(ctx context.Context, event StreamEvent) bool {
+func (p *EventReactionPipeline) shouldTerminate(ctx context.Context, event llmtypes.StreamEvent) bool {
 	p.mu.RLock()
 	active := p.active
 	p.mu.RUnlock()
@@ -207,29 +211,29 @@ func (p *EventReactionPipeline) terminate(reason string) {
 }
 
 // fallbackToNonStreaming handles providers that don't support streaming.
-func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (p *EventReactionPipeline) fallbackToNonStreaming(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	log.Printf("Provider does not support streaming - using fallback mode")
 
-	stream := make(chan StreamEvent, 1)
+	stream := make(chan llmtypes.StreamEvent, 1)
 
 	go func() {
 		defer close(stream)
 
 		text, err := p.provider.Complete(ctx, in)
 		if err != nil {
-			stream <- StreamEvent{
+			stream <- llmtypes.StreamEvent{
 				Type:  "error",
 				Error: fmt.Sprintf("Non-streaming completion failed: %v", err),
 			}
 			return
 		}
 
-		stream <- StreamEvent{
+		stream <- llmtypes.StreamEvent{
 			Type:    "delta",
 			Content: text,
 		}
-		stream <- StreamEvent{
-			Type: EventDone,
+		stream <- llmtypes.StreamEvent{
+			Type: llmtypes.EventDone,
 		}
 	}()
 

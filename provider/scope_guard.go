@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // ScopeViolation represents a detected scope violation.
 type ScopeViolation struct {
 	Type        string // "file_access", "tool_use", "system_operation"
 	Description string
-	Event       StreamEvent
+	Event       llmtypes.StreamEvent
 }
 
 func (sv *ScopeViolation) Error() string {
@@ -32,8 +34,8 @@ type ScopeGuard struct {
 // NewScopeGuard creates a new scope guard with the given allowed patterns.
 func NewScopeGuard(allowedPatterns []string, violationMode string) *ScopeGuard {
 	sg := &ScopeGuard{
-		allowedPatterns: allowedPatterns,
-		violationMode:   violationMode,
+		allowedPatterns:  allowedPatterns,
+		violationMode:    violationMode,
 		compiledPatterns: make([]*regexp.Regexp, 0, len(allowedPatterns)),
 	}
 
@@ -50,13 +52,13 @@ func NewScopeGuard(allowedPatterns []string, violationMode string) *ScopeGuard {
 }
 
 // CheckEvent examines a stream event for scope violations.
-func (sg *ScopeGuard) CheckEvent(event StreamEvent) *ScopeViolation {
+func (sg *ScopeGuard) CheckEvent(event llmtypes.StreamEvent) *ScopeViolation {
 	switch event.Type {
-	case EventToolUse:
+	case llmtypes.EventToolUse:
 		return sg.checkToolUse(event)
-	case EventDelta:
+	case llmtypes.EventDelta:
 		return sg.checkTextContent(event)
-	case EventError:
+	case llmtypes.EventError:
 		return sg.checkError(event)
 	default:
 		return nil
@@ -64,7 +66,7 @@ func (sg *ScopeGuard) CheckEvent(event StreamEvent) *ScopeViolation {
 }
 
 // checkToolUse examines tool usage for scope violations.
-func (sg *ScopeGuard) checkToolUse(event StreamEvent) *ScopeViolation {
+func (sg *ScopeGuard) checkToolUse(event llmtypes.StreamEvent) *ScopeViolation {
 	if event.ToolUse == nil {
 		return nil
 	}
@@ -107,7 +109,7 @@ func (sg *ScopeGuard) checkToolUse(event StreamEvent) *ScopeViolation {
 }
 
 // checkTextContent examines text deltas for potential scope violations.
-func (sg *ScopeGuard) checkTextContent(event StreamEvent) *ScopeViolation {
+func (sg *ScopeGuard) checkTextContent(event llmtypes.StreamEvent) *ScopeViolation {
 	content := event.Content
 
 	// Look for file paths or system commands in the text
@@ -134,7 +136,7 @@ func (sg *ScopeGuard) checkTextContent(event StreamEvent) *ScopeViolation {
 }
 
 // checkError examines error events for scope-related issues.
-func (sg *ScopeGuard) checkError(event StreamEvent) *ScopeViolation {
+func (sg *ScopeGuard) checkError(event llmtypes.StreamEvent) *ScopeViolation {
 	// For now, we don't consider errors as scope violations
 	// But we could extend this to detect permission errors, etc.
 	return nil

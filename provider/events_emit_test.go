@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-providers/provider/events"
 )
 
@@ -166,14 +168,14 @@ func TestApplyToolArgFingerprint_Idempotent(t *testing.T) {
 }
 
 func TestTranslateStreamEvents_Coverage(t *testing.T) {
-	in := []StreamEvent{
-		{Type: EventDelta, Content: "hi"},
-		{Type: EventToolUse, ToolUse: &ToolUseBlock{ID: "tu_1", Name: "Read", Input: map[string]any{"p": "/x"}}},
-		{Type: EventUsage, Usage: &Usage{InputTokens: 10, OutputTokens: 20, StopReason: "end_turn"}},
-		{Type: EventDone},
-		{Type: EventError, Error: "boom"},
-		{Type: EventSessionID, SessionID: "abc"},
-		{Type: EventThinking, ThinkingBlock: &ThinkingBlock{Thinking: "think", Signature: "sig"}},
+	in := []llmtypes.StreamEvent{
+		{Type: llmtypes.EventDelta, Content: "hi"},
+		{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "tu_1", Name: "Read", Input: map[string]any{"p": "/x"}}},
+		{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 10, OutputTokens: 20, StopReason: "end_turn"}},
+		{Type: llmtypes.EventDone},
+		{Type: llmtypes.EventError, Error: "boom"},
+		{Type: llmtypes.EventSessionID, SessionID: "abc"},
+		{Type: llmtypes.EventThinking, ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: "think", Signature: "sig"}},
 	}
 	out := translateStreamEvents(in)
 	if len(out) != len(in) {
@@ -204,7 +206,7 @@ func TestTranslateStreamEvents_Coverage(t *testing.T) {
 
 func TestTranslateStreamEvents_NilGuards(t *testing.T) {
 	// ToolUse with nil ToolUse pointer should be skipped.
-	in := []StreamEvent{{Type: EventToolUse, ToolUse: nil}}
+	in := []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: nil}}
 	out := translateStreamEvents(in)
 	if len(out) != 0 {
 		t.Errorf("expected 0 events for nil ToolUse, got %d", len(out))

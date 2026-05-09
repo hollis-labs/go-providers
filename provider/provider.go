@@ -4,45 +4,7 @@ import (
 	"context"
 	"os"
 	"time"
-
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
 )
-
-// Transport-agnostic request, response, and stream carrier types now live in
-// go-llm-types. The provider package re-exports them to preserve the existing
-// PTY/CLI adapter surface while narrowing local ownership to adapter-specific
-// helpers and context plumbing.
-type (
-	ProviderCapabilities = llmtypes.ProviderCapabilities
-	ToolDefinition       = llmtypes.ToolDefinition
-	ToolUseBlock         = llmtypes.ToolUseBlock
-	ContentBlock         = llmtypes.ContentBlock
-	EventType            = llmtypes.EventType
-	ThinkingBlock        = llmtypes.ThinkingBlock
-	StreamEvent          = llmtypes.StreamEvent
-	Usage                = llmtypes.Usage
-	CompleteResult       = llmtypes.CompleteResult
-	ChatMessage          = llmtypes.ChatMessage
-	SlotBlock            = llmtypes.SlotBlock
-	ChatRequest          = llmtypes.ChatRequest
-	Provider             = llmcontracts.Provider
-)
-
-const (
-	EventDelta     EventType = llmtypes.EventDelta
-	EventToolUse   EventType = llmtypes.EventToolUse
-	EventUsage     EventType = llmtypes.EventUsage
-	EventError     EventType = llmtypes.EventError
-	EventDone      EventType = llmtypes.EventDone
-	EventSessionID EventType = llmtypes.EventSessionID
-	EventThinking  EventType = llmtypes.EventThinking
-)
-
-// IsTurnComplete reports whether ev is a terminal event marking the end of a turn.
-func IsTurnComplete(ev StreamEvent) bool {
-	return llmtypes.IsTurnComplete(ev)
-}
 
 // ptySessionKeyType is the context key for passing a CLI session ID
 // into the PTY bridge for --resume support.

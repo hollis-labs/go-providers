@@ -1,9 +1,11 @@
 package provider
 
-// CLIAdapter abstracts the differences between CLI tools (Claude, Codex, Gemini)
+import llmtypes "github.com/hollis-labs/go-llm-types"
+
+// CLIAdapter abstracts the differences between CLI tools (Claude, Codex, Opencode)
 // so the PTY bridge and subprocess bridge can spawn and parse any of them generically.
 type CLIAdapter interface {
-	// Name returns the adapter identifier (e.g. "claude", "codex", "gemini").
+	// Name returns the adapter identifier (e.g. "claude", "codex", "opencode").
 	Name() string
 
 	// BuildArgs constructs CLI arguments for a prompt. cliSessionID is empty
@@ -11,7 +13,7 @@ type CLIAdapter interface {
 	BuildArgs(prompt, systemPrompt, cliSessionID string) []string
 
 	// ParseLine parses one line of structured output into StreamEvents.
-	ParseLine(line []byte) ([]StreamEvent, error)
+	ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 
 	// Detect checks if this adapter's CLI binary is available.
 	// Returns the resolved binary path and true if found.

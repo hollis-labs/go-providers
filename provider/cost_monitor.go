@@ -3,15 +3,17 @@ package provider
 import (
 	"fmt"
 	"sync"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // BudgetViolation represents a detected budget violation.
 type BudgetViolation struct {
-	Type        string  // "token_budget", "cost_budget"
+	Type        string // "token_budget", "cost_budget"
 	Description string
 	Current     float64 // Current usage
 	Limit       float64 // Budget limit
-	Event       StreamEvent
+	Event       llmtypes.StreamEvent
 }
 
 func (bv *BudgetViolation) Error() string {
@@ -21,12 +23,12 @@ func (bv *BudgetViolation) Error() string {
 
 // CostMonitor tracks token usage and cost to ensure operations stay within budget.
 type CostMonitor struct {
-	tokenBudget       int     // Maximum tokens allowed
-	costBudgetUSD     float64 // Maximum cost in USD
+	tokenBudget        int     // Maximum tokens allowed
+	costBudgetUSD      float64 // Maximum cost in USD
 	budgetExceededMode string  // "log" or "kill"
 
 	// Tracking state
-	mu               sync.RWMutex
+	mu                sync.RWMutex
 	totalInputTokens  int
 	totalOutputTokens int
 	totalCostUSD      float64
@@ -55,9 +57,9 @@ func NewCostMonitor(tokenBudget int, costBudgetUSD float64, budgetExceededMode s
 
 // getDefaultCostRates returns default cost rates keyed by underlying-model
 // vendor. These are approximate rates as of 2026 and should be updated
-// periodically. Consumers attach a key to the EventUsage stream from any
+// periodically. Consumers attach a key to the llmtypes.EventUsage stream from any
 // adapter (HTTP-shape removed in v0.10.0; PTY/subprocess adapters that emit
-// EventUsage still benefit when the wrapped CLI uses one of these models).
+// llmtypes.EventUsage still benefit when the wrapped CLI uses one of these models).
 func getDefaultCostRates() map[string]CostRate {
 	return map[string]CostRate{
 		"anthropic": {
@@ -79,7 +81,7 @@ func getDefaultCostRates() map[string]CostRate {
 }
 
 // CheckEvent examines a stream event for budget violations.
-func (cm *CostMonitor) CheckEvent(event StreamEvent) *BudgetViolation {
+func (cm *CostMonitor) CheckEvent(event llmtypes.StreamEvent) *BudgetViolation {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -95,7 +97,7 @@ func (cm *CostMonitor) CheckEvent(event StreamEvent) *BudgetViolation {
 }
 
 // updateUsageAndCheck updates usage counters and checks for budget violations.
-func (cm *CostMonitor) updateUsageAndCheck(event StreamEvent) *BudgetViolation {
+func (cm *CostMonitor) updateUsageAndCheck(event llmtypes.StreamEvent) *BudgetViolation {
 	usage := event.Usage
 
 	// Update token counters

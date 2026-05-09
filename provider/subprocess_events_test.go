@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-providers/provider/events"
 )
 
@@ -48,7 +50,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"hi","stop_
 	ctx := WithEvents(context.Background(), cb)
 	ctx = WithHeartbeatInterval(ctx, 0)
 
-	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -123,7 +125,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"","stop_re
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -132,7 +134,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"","stop_re
 
 	terminalCount := 0
 	for ev := range ch {
-		if IsTurnComplete(ev) {
+		if llmtypes.IsTurnComplete(ev) {
 			terminalCount++
 		}
 	}

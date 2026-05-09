@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-providers/provider/events"
 )
 
@@ -24,9 +26,9 @@ type eventsCallbackKeyType struct{}
 
 // WithEvents returns a context carrying a typed-events callback. When
 // the spawned bridge sees this, it emits typed events.Event values
-// alongside the existing StreamEvent channel — both surfaces fire on
+// alongside the existing llmtypes.StreamEvent channel — both surfaces fire on
 // the same parser line. If unset, no typed events are emitted; the
-// existing StreamEvent channel behavior is preserved.
+// existing llmtypes.StreamEvent channel behavior is preserved.
 //
 // The callback fires from the bridge's parser goroutine; treat it as
 // you would an io.Writer's Write — quick, non-blocking work.
@@ -72,10 +74,10 @@ func ToolArgFingerprintFromContext(ctx context.Context) bool {
 // EventParser is an optional CLIAdapter extension. Adapters that
 // implement it produce typed events directly from the wire format,
 // preserving information that would otherwise be lost when translating
-// from StreamEvent (notably tool_result blocks, thinking signatures,
+// from llmtypes.StreamEvent (notably tool_result blocks, thinking signatures,
 // and adapter-specific phase information). Adapters that do not
 // implement it have their typed events translated from the legacy
-// []StreamEvent return by translateStreamEvents.
+// []llmtypes.StreamEvent return by translateStreamEvents.
 type EventParser interface {
 	// ParseLineEvents parses one line of structured output into typed
 	// events. Returning a nil slice with nil error is permissible
@@ -83,19 +85,19 @@ type EventParser interface {
 	ParseLineEvents(line []byte) ([]events.Event, error)
 }
 
-// translateStreamEvents converts a slice of legacy StreamEvent into
+// translateStreamEvents converts a slice of legacy llmtypes.StreamEvent into
 // typed events.Event values for adapters that don't implement
 // EventParser. Lossy by design: tool_result blocks and thinking
 // signatures only flow through if the adapter natively emits them on
-// StreamEvent, which most adapters do not. EventParser is the
+// llmtypes.StreamEvent, which most adapters do not. EventParser is the
 // preferred path for richer events.
-func translateStreamEvents(in []StreamEvent) []events.Event {
+func translateStreamEvents(in []llmtypes.StreamEvent) []events.Event {
 	out := make([]events.Event, 0, len(in))
 	for _, ev := range in {
 		switch ev.Type {
-		case EventDelta:
+		case llmtypes.EventDelta:
 			out = append(out, events.Delta{Text: ev.Content})
-		case EventToolUse:
+		case llmtypes.EventToolUse:
 			if ev.ToolUse != nil {
 				out = append(out, events.ToolUse{
 					ID:   ev.ToolUse.ID,
@@ -103,7 +105,7 @@ func translateStreamEvents(in []StreamEvent) []events.Event {
 					Args: ev.ToolUse.Input,
 				})
 			}
-		case EventUsage:
+		case llmtypes.EventUsage:
 			if ev.Usage != nil {
 				out = append(out, events.Usage{
 					InputTokens:         ev.Usage.InputTokens,
@@ -113,13 +115,13 @@ func translateStreamEvents(in []StreamEvent) []events.Event {
 					StopReason:          ev.Usage.StopReason,
 				})
 			}
-		case EventDone:
+		case llmtypes.EventDone:
 			out = append(out, events.Done{})
-		case EventError:
+		case llmtypes.EventError:
 			out = append(out, events.Error{Message: ev.Error})
-		case EventSessionID:
+		case llmtypes.EventSessionID:
 			out = append(out, events.SessionID{ID: ev.SessionID})
-		case EventThinking:
+		case llmtypes.EventThinking:
 			if ev.ThinkingBlock != nil {
 				out = append(out, events.Thinking{
 					Text:      ev.ThinkingBlock.Thinking,
@@ -179,7 +181,7 @@ func applyToolArgFingerprint(in []events.Event) []events.Event {
 // fingerprinting and tracks LastActivityAt for the heartbeat goroutine.
 //
 // Caller passes either []events.Event (when ParseLineEvents was used)
-// or []StreamEvent (translated). bridgeState is shared with the
+// or []llmtypes.StreamEvent (translated). bridgeState is shared with the
 // heartbeat goroutine; nil bridgeState disables activity tracking.
 func emitTyped(
 	ctx context.Context,

@@ -11,13 +11,15 @@ import (
 	"strings"
 	"syscall"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/creack/pty"
 	pevents "github.com/hollis-labs/go-providers/provider/events"
 )
 
 // PTYBridge is a provider that wraps CLI tools in pseudo-terminals.
 // It spawns the CLI as a child process, reads its structured output,
-// and maps events to Nanite's StreamEvent types.
+// and maps events to Nanite's llmtypes.StreamEvent types.
 type PTYBridge struct {
 	adapter CLIAdapter
 	cliPath string // resolved path to the CLI binary
@@ -39,11 +41,11 @@ func NewPTYBridgeWithAdapter(adapter CLIAdapter, cliPath string) *PTYBridge {
 	return &PTYBridge{adapter: adapter, cliPath: cliPath}
 }
 
-func (p *PTYBridge) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (p *PTYBridge) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return p.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 }
 
-func (p *PTYBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (p *PTYBridge) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	result, err := p.CompleteWithUsage(ctx, in)
 	if err != nil {
 		return "", err
@@ -53,31 +55,31 @@ func (p *PTYBridge) Complete(ctx context.Context, in ChatRequest) (string, error
 
 // CompleteWithUsage returns the concatenated text output from the CLI.
 // Usage may be nil because the wrapped CLI is not required to surface it.
-func (p *PTYBridge) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+func (p *PTYBridge) CompleteWithUsage(ctx context.Context, in llmtypes.ChatRequest) (llmtypes.CompleteResult, error) {
 	// Complete is always single-turn — strip any resume session ID.
 	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
 	ch, err := p.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 	if err != nil {
-		return CompleteResult{}, err
+		return llmtypes.CompleteResult{}, err
 	}
 
 	var sb strings.Builder
-	var usage *Usage
+	var usage *llmtypes.Usage
 	for ev := range ch {
 		switch ev.Type {
-		case EventDelta:
+		case llmtypes.EventDelta:
 			sb.WriteString(ev.Content)
-		case EventUsage:
+		case llmtypes.EventUsage:
 			usage = ev.Usage
-		case EventError:
-			return CompleteResult{}, fmt.Errorf("claude cli error: %s", ev.Error)
+		case llmtypes.EventError:
+			return llmtypes.CompleteResult{}, fmt.Errorf("claude cli error: %s", ev.Error)
 		}
 	}
-	return CompleteResult{Text: sb.String(), Usage: usage}, nil
+	return llmtypes.CompleteResult{Text: sb.String(), Usage: usage}, nil
 }
 
-func (p *PTYBridge) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
+func (p *PTYBridge) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{
 		SupportsStreamJSON:          true,
 		SupportsPreToolHooks:        false,
 		SupportsPostToolHooks:       false,
@@ -90,7 +92,7 @@ func (p *PTYBridge) Capabilities() ProviderCapabilities {
 }
 
 // streamCLI spawns the Claude CLI in a PTY and streams parsed events.
-func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages []ChatMessage) (<-chan StreamEvent, error) {
+func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages []llmtypes.ChatMessage) (<-chan llmtypes.StreamEvent, error) {
 	// Extract the last user message as the prompt.
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -133,7 +135,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		cb(cmd.Process, true)
 	}
 
-	ch := make(chan StreamEvent, 64)
+	ch := make(chan llmtypes.StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 	typedCb, hasTyped := EventsCallbackFromContext(ctx)
 	_, hasEventParser := p.adapter.(EventParser)
@@ -162,7 +164,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
 				const msg = "CLI bridge cannot forward tool calls"
-				ch <- StreamEvent{Type: EventError, Error: msg}
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 				if hasTyped {
 					emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Message: msg}})
 				}
@@ -203,21 +205,21 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 			for _, ev := range events {
 				switch ev.Type {
-				case EventDelta:
+				case llmtypes.EventDelta:
 					seenDelta = true
-				case EventToolUse:
+				case llmtypes.EventToolUse:
 					seenToolUse = true
-				case EventDone:
+				case llmtypes.EventDone:
 					// If the adapter produced only tool_use blocks with no
-					// deltas, replace its EventDone with a terminal EventError
+					// deltas, replace its llmtypes.EventDone with a terminal llmtypes.EventError
 					// so consumers see the failure. The contract on
-					// IsTurnComplete is "exactly one terminal event" — don't
-					// forward the adapter's EventDone after the guard fires.
+					// llmtypes.IsTurnComplete is "exactly one terminal event" — don't
+					// forward the adapter's llmtypes.EventDone after the guard fires.
 					if emitGuardIfNeeded() {
 						continue
 					}
 					terminalSent = true
-				case EventError:
+				case llmtypes.EventError:
 					// Upstream already signalled failure — don't pile on.
 					terminalSent = true
 				}
@@ -243,27 +245,27 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 		// Always emit a terminal event so consumers see an explicit boundary
 		// before the channel closes. Order of preference:
-		//   1. Adapter already emitted EventDone or EventError (terminalSent).
-		//   2. Context was cancelled — surface as EventError.
-		//   3. Process exited non-zero — surface as EventError with exit info.
-		//   4. Clean exit with no adapter terminal — synthesize EventDone.
+		//   1. Adapter already emitted llmtypes.EventDone or llmtypes.EventError (terminalSent).
+		//   2. Context was cancelled — surface as llmtypes.EventError.
+		//   3. Process exited non-zero — surface as llmtypes.EventError with exit info.
+		//   4. Clean exit with no adapter terminal — synthesize llmtypes.EventDone.
 		switch {
 		case terminalSent:
 			// Adapter took care of the boundary.
 		case ctx.Err() != nil:
 			msg := fmt.Sprintf("context cancelled: %v", ctx.Err())
-			ch <- StreamEvent{Type: EventError, Error: msg}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: ctx.Err(), Message: msg}})
 			}
 		case waitErr != nil:
 			msg := fmt.Sprintf("process exited: %v", waitErr)
-			ch <- StreamEvent{Type: EventError, Error: msg}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: waitErr, Message: msg}})
 			}
 		default:
-			ch <- StreamEvent{Type: EventDone}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Done{}})
 			}

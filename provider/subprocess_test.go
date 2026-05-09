@@ -7,7 +7,27 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
+
+// textPassthroughAdapter is a minimal CLIAdapter whose ParseLine returns each
+// raw line as an EventDelta and never emits a terminal event. Used by tests
+// that exercise the bridge's clean-exit synthesis path (the bridge synthesizes
+// EventDone when the wrapped CLI exits 0 with no structured terminal event).
+type textPassthroughAdapter struct{}
+
+func (textPassthroughAdapter) Name() string { return "test-text" }
+func (textPassthroughAdapter) BuildArgs(prompt, _, _ string) []string {
+	return []string{prompt}
+}
+func (textPassthroughAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
+	if len(line) == 0 {
+		return nil, nil
+	}
+	return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: string(line) + "\n"}}, nil
+}
+func (textPassthroughAdapter) Detect() (string, bool) { return "", false }
 
 func TestSubprocessBridge_Capabilities(t *testing.T) {
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), "/usr/bin/echo")
@@ -29,7 +49,7 @@ func TestSubprocessBridge_Capabilities(t *testing.T) {
 
 func TestSubprocessBridge_StreamChat_NoUserMessage(t *testing.T) {
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), "/usr/bin/echo")
-	_, err := bridge.StreamChat(context.Background(), ChatRequest{})
+	_, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error for empty messages")
 	}
@@ -37,7 +57,7 @@ func TestSubprocessBridge_StreamChat_NoUserMessage(t *testing.T) {
 
 func TestSubprocessBridge_StreamChat_SystemOnly(t *testing.T) {
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), "/usr/bin/echo")
-	_, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	_, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "system", Content: "test"},
 	}})
 	if err == nil {
@@ -57,7 +77,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Hello from
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	result, err := bridge.Complete(context.Background(), ChatRequest{Messages: []ChatMessage{
+	result, err := bridge.Complete(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test prompt"},
 	}})
 	if err != nil {
@@ -81,14 +101,14 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 	for ev := range ch {
 		events = append(events, ev)
 	}
@@ -99,11 +119,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	hasDone := false
 	for _, ev := range events {
 		switch ev.Type {
-		case EventSessionID:
+		case llmtypes.EventSessionID:
 			hasSessionID = true
-		case EventDelta:
+		case llmtypes.EventDelta:
 			deltaCount++
-		case EventDone:
+		case llmtypes.EventDone:
 			hasDone = true
 		}
 	}
@@ -134,7 +154,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	ctx := WithSandboxDir(context.Background(), sandboxDir)
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	result, err := bridge.Complete(ctx, ChatRequest{Messages: []ChatMessage{
+	result, err := bridge.Complete(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -149,9 +169,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 // emits only tool_use blocks (no text deltas), the bridge injects an
 // explicit "CLI bridge cannot forward tool calls" error event *before* the
 // terminal "done" event so consumers that stop reading at "done" still see
-// the failure as the SOLE terminal event. Per the IsTurnComplete contract,
-// EventError and EventDone are mutually exclusive — the bridge must NOT
-// forward the adapter's EventDone after the guard fires.
+// the failure as the SOLE terminal event. Per the llmtypes.IsTurnComplete contract,
+// llmtypes.EventError and llmtypes.EventDone are mutually exclusive — the bridge must NOT
+// forward the adapter's llmtypes.EventDone after the guard fires.
 func TestSubprocessBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "tool-only-cli.sh")
@@ -163,14 +183,14 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 	for ev := range ch {
 		events = append(events, ev)
 	}
@@ -178,10 +198,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	const guardMsg = "CLI bridge cannot forward tool calls"
 	guardCount, terminalCount := 0, 0
 	for _, ev := range events {
-		if ev.Type == EventError && ev.Error == guardMsg {
+		if ev.Type == llmtypes.EventError && ev.Error == guardMsg {
 			guardCount++
 		}
-		if IsTurnComplete(ev) {
+		if llmtypes.IsTurnComplete(ev) {
 			terminalCount++
 		}
 	}
@@ -190,13 +210,13 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 		t.Errorf("expected exactly one guard error event, got %d (events: %+v)", guardCount, events)
 	}
 	if terminalCount != 1 {
-		t.Errorf("expected exactly one terminal event (guard error replaces adapter's EventDone), got %d (events: %+v)", terminalCount, events)
+		t.Errorf("expected exactly one terminal event (guard error replaces adapter's llmtypes.EventDone), got %d (events: %+v)", terminalCount, events)
 	}
-	if len(events) == 0 || !IsTurnComplete(events[len(events)-1]) {
+	if len(events) == 0 || !llmtypes.IsTurnComplete(events[len(events)-1]) {
 		t.Fatalf("expected last event to be turn-terminal; got: %+v", events)
 	}
-	if last := events[len(events)-1]; last.Type != EventError || last.Error != guardMsg {
-		t.Errorf("expected the terminal event to be the guard EventError; got %+v", last)
+	if last := events[len(events)-1]; last.Type != llmtypes.EventError || last.Error != guardMsg {
+		t.Errorf("expected the terminal event to be the guard llmtypes.EventError; got %+v", last)
 	}
 }
 
@@ -214,7 +234,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -222,7 +242,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 	}
 
 	for ev := range ch {
-		if ev.Type == EventError && ev.Error == "CLI bridge cannot forward tool calls" {
+		if ev.Type == llmtypes.EventError && ev.Error == "CLI bridge cannot forward tool calls" {
 			t.Errorf("guard fired but a delta was present in the stream")
 		}
 	}
@@ -265,7 +285,7 @@ done
 	const waitDelay = 200 * time.Millisecond
 	ctx, cancel := context.WithCancel(WithWaitDelay(context.Background(), waitDelay))
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -274,7 +294,7 @@ done
 
 	// Read the first event so we know the script is running and has installed its trap.
 	first := <-ch
-	if first.Type != EventDelta {
+	if first.Type != llmtypes.EventDelta {
 		t.Fatalf("expected first event to be delta, got %s", first.Type)
 	}
 
@@ -309,7 +329,7 @@ done
 }
 
 // TestSubprocessBridge_SyntheticDoneOnCleanExit verifies the terminal-event
-// contract: when the adapter doesn't emit EventDone (e.g. unstructured copilot
+// contract: when the adapter doesn't emit llmtypes.EventDone (e.g. unstructured copilot
 // output), the bridge synthesizes one on clean process exit so consumers always
 // see an explicit boundary before the channel closes.
 func TestSubprocessBridge_SyntheticDoneOnCleanExit(t *testing.T) {
@@ -322,28 +342,28 @@ echo "another line"
 		t.Fatal(err)
 	}
 
-	bridge := NewSubprocessBridge(NewCopilotAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	bridge := NewSubprocessBridge(textPassthroughAdapter{}, script)
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var events []StreamEvent
+	var events []llmtypes.StreamEvent
 	for ev := range ch {
 		events = append(events, ev)
 	}
 
 	if len(events) == 0 {
-		t.Fatal("expected at least a synthetic EventDone, got no events")
+		t.Fatal("expected at least a synthetic llmtypes.EventDone, got no events")
 	}
 	last := events[len(events)-1]
-	if !IsTurnComplete(last) {
+	if !llmtypes.IsTurnComplete(last) {
 		t.Errorf("last event must be turn-terminal; got %+v", last)
 	}
-	if last.Type != EventDone {
-		t.Errorf("clean exit must synthesize EventDone, got %q", last.Type)
+	if last.Type != llmtypes.EventDone {
+		t.Errorf("clean exit must synthesize llmtypes.EventDone, got %q", last.Type)
 	}
 }
 
@@ -360,7 +380,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 
 	ctx, cancel := context.WithCancel(context.Background())
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {

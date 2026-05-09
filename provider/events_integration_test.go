@@ -10,13 +10,15 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-providers/provider/events"
 )
 
 // TestPTYBridge_TypedEvents_EndToEnd spawns a fake claude-shaped CLI
 // that emits known stream-json over a PTY and verifies typed events
 // arrive via the WithEvents callback in the expected order, alongside
-// the legacy StreamEvent channel which must continue to work.
+// the legacy llmtypes.StreamEvent channel which must continue to work.
 func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-claude.sh")
@@ -34,8 +36,8 @@ func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 
 	var (
-		mu     sync.Mutex
-		typed  []events.Event
+		mu    sync.Mutex
+		typed []events.Event
 	)
 	cb := func(ev events.Event) {
 		mu.Lock()
@@ -46,14 +48,14 @@ func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 	ctx := WithEvents(context.Background(), cb)
 	ctx = WithHeartbeatInterval(ctx, 0) // disable heartbeat noise for this test
 
-	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("StreamChat: %v", err)
 	}
 
-	var legacy []StreamEvent
+	var legacy []llmtypes.StreamEvent
 	for ev := range ch {
 		legacy = append(legacy, ev)
 	}
@@ -61,7 +63,7 @@ func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 	// Legacy channel must still work — at least one terminal event.
 	terminalCount := 0
 	for _, ev := range legacy {
-		if IsTurnComplete(ev) {
+		if llmtypes.IsTurnComplete(ev) {
 			terminalCount++
 		}
 	}
@@ -143,7 +145,7 @@ func TestPTYBridge_TypedEvents_FingerprintMode(t *testing.T) {
 	ctx = WithToolArgFingerprint(ctx, true)
 	ctx = WithHeartbeatInterval(ctx, 0)
 
-	ch, err := bridge.StreamChat(ctx, ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
@@ -174,7 +176,7 @@ func TestPTYBridge_TypedEvents_FingerprintMode(t *testing.T) {
 
 func TestPTYBridge_TypedEvents_BackwardCompat(t *testing.T) {
 	// When WithEvents is NOT in context, behavior matches v0.7.0 exactly:
-	// StreamEvent channel only, no callback, no stderr capture.
+	// llmtypes.StreamEvent channel only, no callback, no stderr capture.
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-claude.sh")
 	stream := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}
@@ -185,22 +187,22 @@ func TestPTYBridge_TypedEvents_BackwardCompat(t *testing.T) {
 	}
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
-	ch, err := bridge.StreamChat(context.Background(), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {
 		t.Fatalf("StreamChat: %v", err)
 	}
 
-	var legacy []StreamEvent
+	var legacy []llmtypes.StreamEvent
 	for ev := range ch {
 		legacy = append(legacy, ev)
 	}
 
 	if len(legacy) == 0 {
-		t.Fatal("expected at least one StreamEvent on legacy channel")
+		t.Fatal("expected at least one llmtypes.StreamEvent on legacy channel")
 	}
-	if !IsTurnComplete(legacy[len(legacy)-1]) {
+	if !llmtypes.IsTurnComplete(legacy[len(legacy)-1]) {
 		t.Errorf("last legacy event must be turn-terminal: %+v", legacy)
 	}
 }
@@ -233,7 +235,7 @@ func TestPTYBridge_TypedEvents_DoesNotHang(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ch, err := bridge.StreamChat(WithEvents(ctx, func(events.Event) {}), ChatRequest{Messages: []ChatMessage{
+	ch, err := bridge.StreamChat(WithEvents(ctx, func(events.Event) {}), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
 	if err != nil {

@@ -223,45 +223,11 @@ func TestOpencodeBootDirSpec_AgentNameDefault(t *testing.T) {
 	}
 }
 
-func TestStubBootDirSpecs(t *testing.T) {
-	stubs := map[string]CLIAdapter{
-		"gemini":  NewGeminiAdapter(),
-		"copilot": NewCopilotAdapter(),
-		"aider":   NewAiderAdapter(),
-		"junie":   NewJunieAdapter(),
-		"kiro":    NewKiroAdapter(),
-		"qwen":    NewQwenAdapter(),
-	}
-	for name, a := range stubs {
-		bp, ok := a.(BootDirProvider)
-		if !ok {
-			t.Errorf("%s adapter should implement BootDirProvider", name)
-			continue
-		}
-		spec := bp.BootDirSpec()
-		if len(spec.PlantedFiles) != 0 {
-			t.Errorf("%s stub should have no PlantedFiles, got %d", name, len(spec.PlantedFiles))
-		}
-		if spec.Notes == "" {
-			t.Errorf("%s stub Notes should describe TBD probes", name)
-		}
-		if !strings.Contains(strings.ToLower(spec.Notes), "tbd") {
-			t.Errorf("%s stub Notes should signal TBD, got %q", name, spec.Notes)
-		}
-	}
-}
-
 func TestBootDirProvider_AssertedOnAllAdapters(t *testing.T) {
 	adapters := []CLIAdapter{
 		NewClaudeAdapter(),
 		NewCodexAdapter(),
 		NewOpencodeAdapter(),
-		NewGeminiAdapter(),
-		NewCopilotAdapter(),
-		NewAiderAdapter(),
-		NewJunieAdapter(),
-		NewKiroAdapter(),
-		NewQwenAdapter(),
 	}
 	for _, a := range adapters {
 		if _, ok := a.(BootDirProvider); !ok {

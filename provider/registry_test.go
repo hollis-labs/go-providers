@@ -4,21 +4,25 @@ import (
 	"context"
 	"sync"
 	"testing"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
 // stubProvider is a minimal Provider used for registry tests.
 type stubProvider struct{}
 
-func (stubProvider) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (stubProvider) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return nil, nil
 }
-func (stubProvider) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (stubProvider) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	return "", nil
 }
-func (stubProvider) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
-	return CompleteResult{}, nil
+func (stubProvider) CompleteWithUsage(ctx context.Context, in llmtypes.ChatRequest) (llmtypes.CompleteResult, error) {
+	return llmtypes.CompleteResult{}, nil
 }
-func (stubProvider) Capabilities() ProviderCapabilities { return ProviderCapabilities{} }
+func (stubProvider) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{}
+}
 
 func TestRegistryUnregisterRemoves(t *testing.T) {
 	r := NewRegistry()

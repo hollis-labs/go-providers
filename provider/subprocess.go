@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	pevents "github.com/hollis-labs/go-providers/provider/events"
 )
 
@@ -31,11 +33,11 @@ func NewSubprocessBridge(adapter CLIAdapter, cliPath string) *SubprocessBridge {
 	return &SubprocessBridge{adapter: adapter, cliPath: cliPath}
 }
 
-func (s *SubprocessBridge) StreamChat(ctx context.Context, in ChatRequest) (<-chan StreamEvent, error) {
+func (s *SubprocessBridge) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	return s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 }
 
-func (s *SubprocessBridge) Complete(ctx context.Context, in ChatRequest) (string, error) {
+func (s *SubprocessBridge) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	result, err := s.CompleteWithUsage(ctx, in)
 	if err != nil {
 		return "", err
@@ -45,30 +47,30 @@ func (s *SubprocessBridge) Complete(ctx context.Context, in ChatRequest) (string
 
 // CompleteWithUsage returns the concatenated text output from the CLI.
 // Usage may be nil because the wrapped CLI is not required to surface it.
-func (s *SubprocessBridge) CompleteWithUsage(ctx context.Context, in ChatRequest) (CompleteResult, error) {
+func (s *SubprocessBridge) CompleteWithUsage(ctx context.Context, in llmtypes.ChatRequest) (llmtypes.CompleteResult, error) {
 	ctx = context.WithValue(ctx, ptySessionKeyType{}, "")
 	ch, err := s.streamCLI(ctx, in.EffectiveSystemPrompt(), in.Messages)
 	if err != nil {
-		return CompleteResult{}, err
+		return llmtypes.CompleteResult{}, err
 	}
 
 	var sb strings.Builder
-	var usage *Usage
+	var usage *llmtypes.Usage
 	for ev := range ch {
 		switch ev.Type {
-		case EventDelta:
+		case llmtypes.EventDelta:
 			sb.WriteString(ev.Content)
-		case EventUsage:
+		case llmtypes.EventUsage:
 			usage = ev.Usage
-		case EventError:
-			return CompleteResult{}, fmt.Errorf("cli error: %s", ev.Error)
+		case llmtypes.EventError:
+			return llmtypes.CompleteResult{}, fmt.Errorf("cli error: %s", ev.Error)
 		}
 	}
-	return CompleteResult{Text: sb.String(), Usage: usage}, nil
+	return llmtypes.CompleteResult{Text: sb.String(), Usage: usage}, nil
 }
 
-func (s *SubprocessBridge) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
+func (s *SubprocessBridge) Capabilities() llmtypes.ProviderCapabilities {
+	return llmtypes.ProviderCapabilities{
 		SupportsStreamJSON:          true,
 		SupportsPreToolHooks:        false,
 		SupportsPostToolHooks:       false,
@@ -81,7 +83,7 @@ func (s *SubprocessBridge) Capabilities() ProviderCapabilities {
 }
 
 // streamCLI spawns the CLI as a subprocess with piped stdout and streams parsed events.
-func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, messages []ChatMessage) (<-chan StreamEvent, error) {
+func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, messages []llmtypes.ChatMessage) (<-chan llmtypes.StreamEvent, error) {
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "user" && messages[i].Content != "" {
@@ -138,7 +140,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		cb(cmd.Process, true)
 	}
 
-	ch := make(chan StreamEvent, 64)
+	ch := make(chan llmtypes.StreamEvent, 64)
 	activityCb, hasActivity := ActivityCallbackFromContext(ctx)
 
 	var bridgeState *eventsBridgeState
@@ -180,7 +182,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		emitGuardIfNeeded := func() bool {
 			if seenToolUse && !seenDelta && !terminalSent && ctx.Err() == nil {
 				const msg = "CLI bridge cannot forward tool calls"
-				ch <- StreamEvent{Type: EventError, Error: msg}
+				ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 				if hasTyped {
 					emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Message: msg}})
 				}
@@ -221,21 +223,21 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 			for _, ev := range events {
 				switch ev.Type {
-				case EventDelta:
+				case llmtypes.EventDelta:
 					seenDelta = true
-				case EventToolUse:
+				case llmtypes.EventToolUse:
 					seenToolUse = true
-				case EventDone:
+				case llmtypes.EventDone:
 					// If the adapter produced only tool_use blocks with no
-					// deltas, replace its EventDone with a terminal EventError
+					// deltas, replace its llmtypes.EventDone with a terminal llmtypes.EventError
 					// so consumers see the failure. The contract on
-					// IsTurnComplete is "exactly one terminal event" — don't
-					// forward the adapter's EventDone after the guard fires.
+					// llmtypes.IsTurnComplete is "exactly one terminal event" — don't
+					// forward the adapter's llmtypes.EventDone after the guard fires.
 					if emitGuardIfNeeded() {
 						continue
 					}
 					terminalSent = true
-				case EventError:
+				case llmtypes.EventError:
 					// Upstream already signalled failure — don't pile on.
 					terminalSent = true
 				}
@@ -257,7 +259,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 		// Drain stderr BEFORE emitting any terminal event so consumers
 		// don't observe SubprocessStderr typed events arriving after a
-		// turn-terminal Done/Error. The legacy StreamEvent channel is
+		// turn-terminal Done/Error. The legacy llmtypes.StreamEvent channel is
 		// not coupled to stderr, but the typed surface is — and the
 		// terminal contract says no further typed events fire after
 		// Done/Error. (No-op when stderr capture isn't active —
@@ -266,24 +268,24 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 		// Always emit a terminal event so consumers see an explicit boundary
 		// before the channel closes. See PTYBridge.streamCLI for the same
-		// protocol; both bridges guarantee one of EventDone or EventError.
+		// protocol; both bridges guarantee one of llmtypes.EventDone or llmtypes.EventError.
 		switch {
 		case terminalSent:
 			// Adapter took care of the boundary.
 		case ctx.Err() != nil:
 			msg := fmt.Sprintf("context cancelled: %v", ctx.Err())
-			ch <- StreamEvent{Type: EventError, Error: msg}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: ctx.Err(), Message: msg}})
 			}
 		case waitErr != nil:
 			msg := fmt.Sprintf("process exited: %v", waitErr)
-			ch <- StreamEvent{Type: EventError, Error: msg}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Err: waitErr, Message: msg}})
 			}
 		default:
-			ch <- StreamEvent{Type: EventDone}
+			ch <- llmtypes.StreamEvent{Type: llmtypes.EventDone}
 			if hasTyped {
 				emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Done{}})
 			}

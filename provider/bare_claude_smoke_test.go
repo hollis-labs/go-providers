@@ -301,4 +301,3 @@ func TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke(t *testing.T) {
 		t.Errorf("expected TEST_OK_BARE in response; got:\n%s", out)
 	}
 }
-

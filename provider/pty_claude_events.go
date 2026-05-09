@@ -48,8 +48,8 @@ func (a *ClaudeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 // claudeUserEvent wraps a user-role message; in claude stream-json,
 // tool_result blocks are surfaced via these.
 type claudeUserEvent struct {
-	Type    string         `json:"type"`
-	Message claudeUserMsg  `json:"message"`
+	Type    string        `json:"type"`
+	Message claudeUserMsg `json:"message"`
 }
 
 type claudeUserMsg struct {
