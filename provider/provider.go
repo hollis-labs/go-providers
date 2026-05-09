@@ -42,23 +42,12 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
-	// Strict controls whether the provider asks Anthropic to enforce strict
-	// JSON-schema validation on tool inputs. Set to a pointer to true to
-	// opt in; nil (the default) is non-strict.
-	//
-	// Behavior change (2026-05-03): previously, nil meant strict-on by
-	// default. The default flipped to off because strict was being applied
-	// blanket-fashion to all tools, conflating input-shape validation
-	// (where strict adds value) with high-blast-radius permissions (which
-	// belong at project/session/agent-profile scope). The new default
-	// reserves strict for tools where Anthropic's server-side schema
-	// enforcement adds value the handler doesn't already provide. Existing
-	// callers that relied on nil-as-strict must explicitly set Strict to
-	// a pointer to true. See decisions.nanite.tools.strict_default_off in
-	// the agent-workspaces Vanta capture for full context.
-	//
-	// Not all providers honour this flag (e.g. OpenAI tool calling is not
-	// implemented). Providers that do not support strict mode silently ignore it.
+	// Strict requests strict JSON-schema validation of tool inputs by the
+	// underlying provider when supported. Set to a pointer to true to
+	// opt in; nil (the default) is non-strict. The CLI's underlying model
+	// API decides what "strict" means; PTY/subprocess adapters pass the
+	// flag through where the wire format supports it and silently ignore
+	// it otherwise.
 	Strict *bool `json:"strict,omitempty"`
 }
 
@@ -71,7 +60,8 @@ type ToolUseBlock struct {
 
 // ContentBlock represents a content block in a multi-block message.
 // NOTE: Input uses a pointer to distinguish "absent" from "empty object".
-// Anthropic requires the input field on tool_use blocks even when empty.
+// Some providers require the input field on tool_use blocks even when
+// empty (e.g. claude via the PTY adapter).
 type ContentBlock struct {
 	Type      string          `json:"type"`                  // text, tool_use, tool_result, thinking
 	Text      string          `json:"text,omitempty"`        // text block; also thinking text for type="thinking"
@@ -80,10 +70,12 @@ type ContentBlock struct {
 	Input     *map[string]any `json:"input,omitempty"`       // tool_use input (always set for tool_use blocks)
 	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result reference
 	Content   string          `json:"content,omitempty"`     // tool_result text
-	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag (Anthropic API)
-	// Signature is the cryptographic signature Anthropic attaches to thinking
-	// blocks (type="thinking"). Must be preserved verbatim for round-trip
-	// across turn boundaries (F3 / CW-20260420-0023). Empty for non-thinking blocks.
+	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag
+	// Signature is the cryptographic signature attached to thinking blocks
+	// (type="thinking") by the underlying model. Carried by the claude PTY
+	// adapter for interleaved-thinking continuity. Must be preserved
+	// verbatim for round-trip across turn boundaries
+	// (F3 / CW-20260420-0023). Empty for non-thinking blocks.
 	Signature string `json:"signature,omitempty"`
 }
 
@@ -109,22 +101,25 @@ const (
 	// StreamEvent.SessionID, used by adapters that support resume (e.g. Claude's
 	// --resume flag). Emitted as informational metadata, not a turn boundary.
 	EventSessionID EventType = "session_id"
-	// EventThinking carries a completed interleaved thinking block from the
-	// Anthropic interleaved-thinking-2025-05-14 beta (F3 / CW-20260420-0023).
-	// The payload is in StreamEvent.ThinkingBlock. Emitted once per complete
+	// EventThinking carries a completed interleaved thinking block as
+	// surfaced by the claude PTY adapter (F3 / CW-20260420-0023). The
+	// payload is in StreamEvent.ThinkingBlock. Emitted once per complete
 	// thinking block (after content_block_stop), not as incremental deltas.
-	// The signature field is cryptographically signed by Anthropic and must be
-	// preserved verbatim to satisfy the round-trip contract on subsequent turns.
+	// The signature field is cryptographically signed by the underlying
+	// model and must be preserved verbatim to satisfy the round-trip
+	// contract on subsequent turns.
 	EventThinking EventType = "thinking"
 )
 
-// ThinkingBlock carries the content and Anthropic-signed signature of one
-// interleaved thinking block (F3 / CW-20260420-0023).
+// ThinkingBlock carries the content and signed signature of one interleaved
+// thinking block as surfaced by the claude PTY adapter
+// (F3 / CW-20260420-0023).
 type ThinkingBlock struct {
 	// Thinking is the raw thinking text accumulated from thinking_delta events.
 	Thinking string
-	// Signature is the cryptographic signature Anthropic attaches to the block.
-	// Must be preserved verbatim and round-tripped to subsequent turns.
+	// Signature is the cryptographic signature attached to the block by the
+	// underlying model. Must be preserved verbatim and round-tripped to
+	// subsequent turns.
 	Signature string
 }
 
@@ -175,10 +170,10 @@ type ChatMessage struct {
 	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
 }
 
-// SlotBlock is a pre-assembled region of the context window. Providers that
-// support prompt caching (e.g., Anthropic) translate each block into a
-// cache-aware content block; providers that don't concatenate them into the
-// system prompt.
+// SlotBlock is a pre-assembled region of the context window. PTY/subprocess
+// adapters concatenate non-empty blocks into the effective system prompt
+// (see EffectiveSystemPrompt). The shape exists for future adapters that may
+// distinguish slots (e.g. caching boundaries surfaced by a wrapped CLI).
 //
 // Changed == false means the block's content matches the previous turn's
 // cache key; adapters may use this to emit cache markers.
@@ -195,10 +190,9 @@ type SlotBlock struct {
 
 // ChatRequest is the unified input to provider chat methods. Tools are
 // optional; providers that don't support tools ignore the field. SlotBlocks
-// are optional; when non-empty they extend SystemPrompt (appended after it)
-// and give adapters the chance to emit slot-aware payloads (e.g., Anthropic
-// cache_control). To avoid duplication, callers should put system content
-// exclusively in SlotBlocks and leave SystemPrompt empty.
+// are optional; when non-empty they extend SystemPrompt (appended after it).
+// To avoid duplication, callers should put system content exclusively in
+// SlotBlocks and leave SystemPrompt empty, or vice versa.
 type ChatRequest struct {
 	Model        string
 	SystemPrompt string
@@ -209,22 +203,13 @@ type ChatRequest struct {
 	// generate for this request. When 0 (the default), each provider applies
 	// its own default cap.
 	//
-	// Implementation status (2026-05-03): currently only the Anthropic
-	// adapter honors this field. OpenAI, Azure, Gemini, Mistral, Ollama,
-	// OpenRouter, OpenZen, and PTY adapters silently ignore it and apply
-	// their own provider-side defaults. Callers that need a guaranteed cap
-	// across providers should set per-provider config in addition to this
-	// field, or check provider-level documentation.
-	//
-	// Future work: implement passthrough on every provider so the field
-	// becomes provider-agnostic as the type implies.
-	//
-	// Anthropic-specific notes: streaming and non-streaming both default to
-	// 16384 when this field is 0. (Historically the non-streaming path was
-	// hardcoded to 128, which silently truncated longer completions; that
-	// was fixed in f6a0a8e.) Callers emitting short structured outputs (e.g.
-	// nanite's recover.Repair LLM) should set this explicitly to balance
-	// truncation risk against cost.
+	// Implementation status (v0.10.0): PTY/subprocess adapters silently
+	// ignore this field. The wrapped CLI's own model config is the
+	// effective cap; callers that need a hard ceiling must configure it
+	// in the CLI-side settings (e.g. claude's `max_tokens` in
+	// `.claude/settings.json` or via the `--max-tokens` flag where
+	// supported). Future PTY adapters that support a flag-level cap may
+	// honor this field.
 	MaxTokens int
 }
 
@@ -260,82 +245,6 @@ type Provider interface {
 	Complete(ctx context.Context, req ChatRequest) (string, error)
 	// Capabilities returns the capabilities supported by this provider.
 	Capabilities() ProviderCapabilities
-}
-
-// ProviderWithUsage is an optional extension interface for providers that can
-// return token usage for non-streaming completions.
-type ProviderWithUsage interface {
-	Provider
-	// CompleteWithUsage makes a non-streaming completion call and returns
-	// any token usage the underlying provider surfaces.
-	CompleteWithUsage(ctx context.Context, req ChatRequest) (CompleteResult, error)
-}
-
-// RateLimited is implemented by providers that track an input-tokens-per-minute
-// rate limit (e.g. Anthropic). Callers use this for observability — surfacing
-// the live calibrated limit in telemetry. Providers without a rate tracker do
-// not implement this interface; callers type-assert.
-type RateLimited interface {
-	// RateLimitTPM returns the current input-tokens-per-minute limit observed
-	// from the most recent provider response, or 0 when no calibration has
-	// happened yet. Implementations must not return seeded/default values
-	// before the first real response — 0 means "unknown", and callers may
-	// use it to skip emitting limit telemetry rather than mislabel a guess.
-	RateLimitTPM() int
-}
-
-// Cacheable is implemented by providers that can estimate the cacheable prefix
-// length of a request before sending it. Callers use this for observability —
-// surfacing the prefix size in request_build telemetry alongside per-slot token
-// estimates. Providers without prompt caching do not implement this interface;
-// callers type-assert.
-//
-// The estimate is approximate: it reflects the same heuristic the provider
-// uses internally for the rate-budget pre-flight (offset of the last
-// cache_control marker after JSON marshalling, divided by 4 for tokens). It
-// over-counts when markers land inside trailing tools or messages, but it is
-// directionally correct and matches what the provider actually treats as
-// cacheable. Authoritative cache hit/miss data comes from the provider's
-// usage response; this is for pre-flight observability only.
-type Cacheable interface {
-	// EstimateCacheablePrefix returns the approximate token count of the
-	// cacheable prefix for the given request, using the provider's current
-	// cache hints. Returns 0 when no cache hints are configured or the
-	// request would emit no cache_control markers.
-	EstimateCacheablePrefix(ctx context.Context, req ChatRequest) int
-}
-
-// ReasoningConfig carries per-turn reasoning/thinking configuration for
-// providers that support it (e.g. Anthropic interleaved thinking).
-// Callers inject this via WithReasoningConfig before calling StreamChat.
-// F3 / CW-20260420-0023.
-type ReasoningConfig struct {
-	// Enabled reports whether reasoning/thinking blocks should be requested.
-	Enabled bool
-	// BudgetTokens is the token budget for the reasoning pass. Required
-	// (must be > 0) for reasoning to actually be requested. With Enabled=true
-	// and BudgetTokens=0, providers will not send a reasoning request — the
-	// pair must be set explicitly.
-	BudgetTokens int
-	// BetasHeader is an additional beta header value to append (e.g.
-	// "interleaved-thinking-2025-05-14"). Empty means no extra flag.
-	BetasHeader string
-}
-
-type reasoningConfigKeyType struct{}
-
-// WithReasoningConfig returns a context carrying the given ReasoningConfig.
-// The Anthropic adapter reads this to decide whether to send the
-// interleaved-thinking beta header and thinking_config parameter.
-func WithReasoningConfig(ctx context.Context, cfg ReasoningConfig) context.Context {
-	return context.WithValue(ctx, reasoningConfigKeyType{}, cfg)
-}
-
-// ReasoningConfigFromContext extracts the ReasoningConfig from ctx, if set.
-// Returns zero-value ReasoningConfig (Enabled=false) when not set.
-func ReasoningConfigFromContext(ctx context.Context) ReasoningConfig {
-	cfg, _ := ctx.Value(reasoningConfigKeyType{}).(ReasoningConfig)
-	return cfg
 }
 
 // ptySessionKeyType is the context key for passing a CLI session ID
