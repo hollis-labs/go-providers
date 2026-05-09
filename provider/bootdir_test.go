@@ -62,6 +62,14 @@ func TestClaudeBootDirSpec(t *testing.T) {
 	if !strings.Contains(mcpJSON, "http://localhost:9999") {
 		t.Error(".mcp.json should contain loopback URL")
 	}
+	// v0.9.1: populated loopback must declare `"type": "http"` so bare-
+	// mode strict validation accepts the entry (non-bare auto-discovery
+	// also accepts it). Without `type`, the validator defaults to the
+	// stdio shape and rejects with `command: expected string, received
+	// undefined` (CW-20260509-0003).
+	if !strings.Contains(mcpJSON, `"type": "http"`) {
+		t.Errorf(".mcp.json should declare type:\"http\" for the loopback entry, got %q", mcpJSON)
+	}
 }
 
 func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
@@ -74,6 +82,40 @@ func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 	// `mcpServers` to be a record. `{"mcpServers":{}}` is valid for both.
 	if strings.TrimSpace(mcpJSON) != `{"mcpServers":{}}` {
 		t.Errorf("empty MCP loopback should produce minimal valid config, got %q", mcpJSON)
+	}
+}
+
+// TestRenderMCPJSON_PopulatedShape pins the exact byte shape emitted for a
+// non-empty loopback URL. Bare-mode (`--mcp-config <path>`) strict validation
+// in claude 2.1.137 rejects entries without an explicit transport `type`
+// (probed empirically; see CW-20260509-0003 / agent-workspaces probe-results.md).
+// `type: "http"` matches the `claude mcp add --transport http` CLI keyword and
+// is accepted by both bare-mode validation and non-bare auto-discovery, so
+// codex/opencode adapters that share renderMCPJSON inherit the same correct
+// shape transparently.
+func TestRenderMCPJSON_PopulatedShape(t *testing.T) {
+	got := renderMCPJSON("http://127.0.0.1:65535/mcp")
+	want := `{
+  "mcpServers": {
+    "loopback": {
+      "type": "http",
+      "url": "http://127.0.0.1:65535/mcp"
+    }
+  }
+}
+`
+	if got != want {
+		t.Errorf("renderMCPJSON populated shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderMCPJSON_Empty pins the empty-loopback shape (mirrors
+// TestClaudeBootDirSpec_EmptyMCP but at the function level for direct
+// regression coverage of renderMCPJSON's two branches).
+func TestRenderMCPJSON_Empty(t *testing.T) {
+	got := renderMCPJSON("")
+	if strings.TrimSpace(got) != `{"mcpServers":{}}` {
+		t.Errorf("renderMCPJSON(\"\") should emit `{\"mcpServers\":{}}`, got %q", got)
 	}
 }
 
