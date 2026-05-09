@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## v0.10.0
+
+### Breaking — HTTP providers removed; lib is now CLI/PTY/subprocess-only
+
+- Deleted all 8 HTTP-bound chat adapter implementations and their tests: `Anthropic`, `OpenAI`, `Gemini`, `Mistral`, `Ollama`, `OpenRouter`, `OpenZen`, `AzureOpenAI` (constructors `NewAnthropic`, `NewOpenAI`, `NewGemini`, `NewMistral`, `NewOllama`, `NewOpenRouter`, `NewOpenZen`, `NewAzureOpenAI` are gone, along with their structs, methods, and embedder implementations).
+- Deleted `Embedder` interface (no implementations remain) and all `*_embedding_test.go` files.
+- Deleted HTTP-only support code: `api_key.go` (the `APIKeySetter` interface + per-receiver `SetAPIKey` methods), `retry.go` (HTTP-status-code retry/backoff used by HTTP providers), `cache.go` (`CacheHint` / `CacheableProvider` / `DefaultCacheStrategy` — Anthropic-style prompt-caching strategy).
+- Trimmed `provider.Provider` extension interfaces and Anthropic-specific context helpers: `ProviderWithUsage`, `RateLimited`, `Cacheable`, `ReasoningConfig`, `WithReasoningConfig`, `ReasoningConfigFromContext`. `EventReactionPipeline.CompleteWithUsage` removed; the non-streaming fallback now uses `Provider.Complete` and emits `delta` + `done` (no synthesized `usage` event).
+- Kept (despite HTTP-adjacent origin): `Usage` struct + cache-token fields, `EventUsage`, `EventThinking`, `ThinkingBlock` — PTY adapters (`pty_claude`, `pty_gemini`, `pty_junie`, `pty_qwen`) emit these. Also kept: `circuit.go`, `ratelimit.go`, `cost_monitor.go`, `progress_tracker.go`, `scope_guard.go`, `model_ops.go`, `agents_md.go` — generic primitives over `StreamEvent`.
+
+### Why
+
+User decision documented in Vanta as `followups.nanite.subagent_http_api_long_term_strategy` (2026-05-08 → resolved 2026-05-09): pick option-2 ("drop HTTP"), promoted from Nanite-consumer to lib-side. Rationale: portfolio agent flows have moved to CLI/PTY adapters (claude / codex / opencode / gemini-cli / qwen / junie / kiro / copilot / aider). Maintaining HTTP chat adapters duplicates work the CLIs do (auth, retry, model selection, prompt caching) and accretes maintenance debt with no remaining first-party consumer.
+
+### Consumer breakage (informational)
+
+- **Nanite (heaviest consumer):** `cmd/nanite/main.go:483-540` (HTTP provider registry block), `internal/service/embedder_select.go` (full file), `internal/service/chat.go:532` / `chat_generate.go:239,1442` / `chat_rate_budget_pause.go:95` (type-assertions on `*provider.Anthropic` for CircuitBreaker/RateTracker), `internal/service/subagent_runner.go` (the dual-path HTTP fallback retired by this release). Migration handled in parallel under SP-20260508-0001.
+- **agent-mux, clockwork-manifold, sigil, hadron, carrier:** consumer code uses PTY/CLI adapters only — survives unchanged.
+
+### Tests
+
+- `go vet ./...` clean.
+- `go test -race -count=1 ./...` clean (33.5s on darwin).
+- `GOOS=linux go vet ./... && GOOS=linux go build ./...` clean.
+- Deleted: `capabilities_test.go` (HTTP-provider-only capability assertions). Trimmed: `event_pipeline_test.go` (`TestEventReactionPipelineNonStreaming` now expects 2 events instead of 3; `TestEventReactionPipelineCompleteWithUsageFallback` deleted; `mockStreamingProvider`/`mockNonStreamingProvider` lost their `CompleteWithUsage` methods; `stubNoUsageProvider` deleted). Trimmed: `example_test.go` (`ExampleAnthropic_StreamChat` deleted along with `exampleRewriteTransport` and the `net/http`/`net/http/httptest`/`net/url`/`strings` imports; `ExampleRegistry` retained). Surviving smoke tests (`bare_claude_smoke_test.go`, `bootdir_claude_smoke_test.go`, `pty_claude_smoke_test.go`) gated on env vars and exercise the surviving CLI/PTY surface.
+
+### Migration
+
+Replace HTTP provider construction with the corresponding CLI/PTY adapter: e.g. `provider.NewAnthropic()` → `provider.NewClaudeAdapter()` or `provider.NewClaudeAdapterBare()` (depending on whether you want non-bare auto-discovery or bare-mode strict validation); `provider.NewGemini()` → `provider.NewGeminiAdapter()` (PTY); `provider.NewOpenAI()` → no direct successor in this lib (OpenAI doesn't ship a first-party CLI agent). Embedding consumers must migrate to a different lib — go-providers v0.10.0 no longer ships embedding adapters.
+
 ## v0.9.1
 
 - `renderMCPJSON(loopbackURL)` now emits `{"type": "http", "url": "..."}` for the loopback entry instead of `{"url": "..."}`. The bare-mode CLI's `--mcp-config <path>` triggers strict schema validation that requires an explicit transport discriminator on every server entry; without `type`, the validator defaults to the stdio shape and rejects with `Invalid MCP server config for "loopback": command: expected string, received undefined`. Empirical probe against claude 2.1.137 (recorded in `agent-workspaces/execution/go-providers/2026-05-09-bare-mode-mcp-shape/probe-results.md`): of six candidate shapes (`{url}`, `{transport: http, url}`, `{type: http, url}`, `{http: {url}}`, `{type: sse, url}`, `{type: streamable-http, url}`), only the three with a top-level `type:` field pass bare-mode validation. `type: "http"` is also accepted by non-bare auto-discovery (probed against the same binary), so option (b) from the ticket — single shape for all callers — works without branching.
