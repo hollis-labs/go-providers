@@ -53,8 +53,11 @@ func NewCostMonitor(tokenBudget int, costBudgetUSD float64, budgetExceededMode s
 	return cm
 }
 
-// getDefaultCostRates returns default cost rates for common providers.
-// These are approximate rates as of 2026 and should be updated periodically.
+// getDefaultCostRates returns default cost rates keyed by underlying-model
+// vendor. These are approximate rates as of 2026 and should be updated
+// periodically. Consumers attach a key to the EventUsage stream from any
+// adapter (HTTP-shape removed in v0.10.0; PTY/subprocess adapters that emit
+// EventUsage still benefit when the wrapped CLI uses one of these models).
 func getDefaultCostRates() map[string]CostRate {
 	return map[string]CostRate{
 		"anthropic": {

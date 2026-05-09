@@ -66,9 +66,10 @@ type ToolResult struct {
 func (ToolResult) eventTag() {}
 
 // Thinking carries a completed thinking block from a reasoning-capable
-// model. Signature is Anthropic's interleaved-thinking-2025-05-14 signed
-// signature; preserve verbatim if the consumer plans to round-trip the
-// block to a subsequent turn.
+// model. Signature is the underlying model's signed thinking signature
+// (e.g. claude's interleaved-thinking-2025-05-14 signature surfaced via
+// the claude PTY adapter); preserve verbatim if the consumer plans to
+// round-trip the block to a subsequent turn.
 type Thinking struct {
 	Text      string
 	Signature string
