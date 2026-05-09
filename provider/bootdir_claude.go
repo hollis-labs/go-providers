@@ -54,7 +54,12 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 							return "", fmt.Errorf("claude bootdir trust seed: %w", err)
 						}
 					}
-					return claudeSettingsStub(), nil
+					// a.ApiKeyHelperPath threads through into the planted
+					// settings.json so bare-mode claude can resolve auth
+					// via the helper (CW-20260509-0016). Empty path leaves
+					// the field unset — bare mode then requires
+					// ANTHROPIC_API_KEY in env.
+					return claudeSettingsStub(a.ApiKeyHelperPath), nil
 				},
 			},
 			{
@@ -126,14 +131,31 @@ func renderClaudeMD(ctx PlantContext) string {
 	return b.String()
 }
 
-func claudeSettingsStub() string {
-	// Minimal stub that prevents the CLI from reading the user's global
-	// ~/.claude.json or ~/.claude/settings.json. Apps that need a
-	// custom approvedTools list or mcpServers map can post-process
-	// the planted file before spawn.
+// claudeSettingsStub renders the planted .claude/settings.json. The
+// stub prevents the CLI from reading the user's global ~/.claude.json
+// or ~/.claude/settings.json (bare mode disables that auto-discovery
+// already; non-bare consumers benefit from the explicit empty maps).
+//
+// apiKeyHelperPath, when non-empty, threads into the stub as
+// `apiKeyHelper: <path>`. Bare-mode claude invokes the helper per
+// request and consumes its first line of stdout as the bearer token.
+// CW-20260509-0016 added this knob so subscription users (no
+// ANTHROPIC_API_KEY in env, authenticated via `claude` interactive →
+// macOS keychain) can run bare-mode dispatches without manually
+// setting up an API key — the helper reads the keychain entry and
+// emits the OAuth access token (`sk-ant-oat01-...`), which
+// authenticates against the API directly (empirically verified).
+//
+// Apps that need a custom approvedTools list or richer mcpServers map
+// can post-process the planted file before spawn — the stub is the
+// minimum-viable shape; apps own everything beyond.
+func claudeSettingsStub(apiKeyHelperPath string) string {
 	stub := map[string]any{
 		"mcpServers":    map[string]any{},
 		"approvedTools": []string{},
+	}
+	if apiKeyHelperPath != "" {
+		stub["apiKeyHelper"] = apiKeyHelperPath
 	}
 	out, _ := json.MarshalIndent(stub, "", "  ")
 	return string(out) + "\n"

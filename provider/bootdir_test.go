@@ -72,6 +72,76 @@ func TestClaudeBootDirSpec(t *testing.T) {
 	}
 }
 
+// TestClaudeBootDirSpec_ApiKeyHelper_Absent pins that the planted
+// .claude/settings.json omits the apiKeyHelper field when
+// ClaudeAdapter.ApiKeyHelperPath is empty (default zero value). Bare
+// mode then requires ANTHROPIC_API_KEY in env per the prior contract;
+// this test guards against accidentally adding a stub helper path.
+func TestClaudeBootDirSpec_ApiKeyHelper_Absent(t *testing.T) {
+	a := NewClaudeAdapter()
+	if a.ApiKeyHelperPath != "" {
+		t.Fatalf("default ApiKeyHelperPath should be empty, got %q", a.ApiKeyHelperPath)
+	}
+	settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(settings, "apiKeyHelper") {
+		t.Errorf("settings.json should NOT contain apiKeyHelper when ApiKeyHelperPath is empty\ngot:\n%s", settings)
+	}
+}
+
+// TestClaudeBootDirSpec_ApiKeyHelper_Set pins that ApiKeyHelperPath
+// threads into the planted .claude/settings.json as a JSON-encoded
+// `apiKeyHelper` field. Closes CW-20260509-0016: bare-mode subscription
+// users (no ANTHROPIC_API_KEY in env) point apiKeyHelper at a small
+// helper that resolves auth from the macOS keychain or another
+// per-environment source.
+func TestClaudeBootDirSpec_ApiKeyHelper_Set(t *testing.T) {
+	a := NewClaudeAdapter()
+	a.ApiKeyHelperPath = "/usr/local/bin/clockwork-apikey-helper"
+	settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := `"apiKeyHelper": "/usr/local/bin/clockwork-apikey-helper"`
+	if !strings.Contains(settings, want) {
+		t.Errorf("settings.json should contain %s\ngot:\n%s", want, settings)
+	}
+	// Sanity: the existing keys still ride along.
+	if !strings.Contains(settings, `"mcpServers"`) {
+		t.Errorf("settings.json lost mcpServers stub when apiKeyHelper added\ngot:\n%s", settings)
+	}
+	if !strings.Contains(settings, `"approvedTools"`) {
+		t.Errorf("settings.json lost approvedTools stub when apiKeyHelper added\ngot:\n%s", settings)
+	}
+}
+
+// TestClaudeBootDirSpec_ApiKeyHelper_BareAdapterRespects pins that the
+// bare-mode constructors return adapters with the ApiKeyHelperPath
+// field exposed (so consumers can populate it post-construction
+// alongside the four BareInjectionPaths fields). Sanity check on the
+// exposed surface; the field's threading is covered by the _Set test
+// above.
+func TestClaudeBootDirSpec_ApiKeyHelper_BareAdapterRespects(t *testing.T) {
+	bare := NewClaudeAdapterBare()
+	devBare := NewClaudeAdapterDevBare()
+	if bare.ApiKeyHelperPath != "" || devBare.ApiKeyHelperPath != "" {
+		t.Fatal("bare-mode constructors should default ApiKeyHelperPath to empty")
+	}
+	bare.ApiKeyHelperPath = "/tmp/akh"
+	devBare.ApiKeyHelperPath = "/tmp/akh"
+	for name, a := range map[string]*ClaudeAdapter{"bare": bare, "devBare": devBare} {
+		settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+		if err != nil {
+			t.Fatalf("%s render: %v", name, err)
+		}
+		if !strings.Contains(settings, `"apiKeyHelper": "/tmp/akh"`) {
+			t.Errorf("%s adapter: settings.json missing apiKeyHelper\ngot:\n%s", name, settings)
+		}
+	}
+}
+
 func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 	a := NewClaudeAdapter()
 	spec := a.BootDirSpec()
