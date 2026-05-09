@@ -183,6 +183,10 @@ func TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke(t *testing.T) {
 
 	bootDir := t.TempDir()
 	projectDir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(bootDir)
+	if err != nil {
+		resolved = bootDir
+	}
 
 	// Plant the full BootDirSpec layout end-to-end so we exercise
 	// renderMCPJSON's populated branch via PlantedFile.Render rather than
@@ -212,12 +216,15 @@ func TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke(t *testing.T) {
 		}
 	}
 
-	// Note: BootDirSpec's .claude/settings.json render closure writes a
-	// trust-seed entry into ~/.claude.json keyed by realpath(bootDir).
-	// Per the v0.8.2 changelog, stale entries pointing at removed bootdirs
-	// are harmless — the bootdir is a tempdir torn down by t.TempDir().
-	// No cleanup is performed here; it would duplicate the
-	// TestClaudeBootDirSpec_TrustPreAccept_Smoke pattern with no benefit.
+	// BootDirSpec's .claude/settings.json render closure writes a trust-seed
+	// entry into ~/.claude.json keyed by realpath(bootDir). The bootdir
+	// tempdir itself is torn down by t.TempDir(), but the projects[...]
+	// entry in the user's real ~/.claude.json would otherwise accumulate
+	// across smoke runs. Best-effort cleanup mirrors the v0.8.2 sibling
+	// smoke (TestClaudeBootDirSpec_TrustPreAccept_Smoke).
+	t.Cleanup(func() {
+		removeBootDirTrustEntry(t, resolved)
+	})
 
 	inj := a.BareInjectionPaths(bootDir, projectDir)
 	a.MCPConfigPath = inj.MCPConfigPath
