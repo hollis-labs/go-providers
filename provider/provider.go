@@ -3,248 +3,45 @@ package provider
 import (
 	"context"
 	"os"
-	"strings"
 	"time"
+
+	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
-// ProviderCapabilities describes the capabilities supported by a provider.
-type ProviderCapabilities struct {
-	// SupportsStreamJSON indicates if the provider supports streaming responses with JSON tools
-	SupportsStreamJSON bool
-	// SupportsPreToolHooks indicates if the provider supports pre-tool execution hooks
-	SupportsPreToolHooks bool
-	// SupportsPostToolHooks indicates if the provider supports post-tool execution hooks
-	SupportsPostToolHooks bool
-	// SupportsSystemPromptCaching indicates if the provider supports system prompt caching
-	SupportsSystemPromptCaching bool
-	// SupportsToolCalling indicates if the provider supports tool/function calling
-	SupportsToolCalling bool
-	// SupportsBatch indicates if the provider supports batch processing
-	SupportsBatch bool
-	// SupportsImageInput indicates if the provider supports image inputs
-	SupportsImageInput bool
-	// MaxTokens is the maximum *output* tokens the model can generate in a single response
-	// (e.g., 16384 for Claude Sonnet). Do NOT set this to the context window size.
-	// 0 means no limit specified (provider default applies).
-	MaxTokens int
-	// ContextWindowSize is the total context window in tokens (input + output combined,
-	// e.g., 200000 for Claude). Used by slot-based context assembly for budget computation.
-	// 0 means unknown (falls back to default).
-	ContextWindowSize int
-	// SupportsEmbedding indicates if the provider supports text embedding.
-	SupportsEmbedding bool
-	// DefaultEmbeddingModel is the default model name for embedding, if supported.
-	DefaultEmbeddingModel string
-}
-
-// ToolDefinition describes a tool available to the LLM.
-type ToolDefinition struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
-	// Strict requests strict JSON-schema validation of tool inputs by the
-	// underlying provider when supported. Set to a pointer to true to
-	// opt in; nil (the default) is non-strict. The CLI's underlying model
-	// API decides what "strict" means; PTY/subprocess adapters pass the
-	// flag through where the wire format supports it and silently ignore
-	// it otherwise.
-	Strict *bool `json:"strict,omitempty"`
-}
-
-// ToolUseBlock represents a tool_use content block from the LLM.
-type ToolUseBlock struct {
-	ID    string         `json:"id"`
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input"`
-}
-
-// ContentBlock represents a content block in a multi-block message.
-// NOTE: Input uses a pointer to distinguish "absent" from "empty object".
-// Some providers require the input field on tool_use blocks even when
-// empty (e.g. claude via the PTY adapter).
-type ContentBlock struct {
-	Type      string          `json:"type"`                  // text, tool_use, tool_result, thinking
-	Text      string          `json:"text,omitempty"`        // text block; also thinking text for type="thinking"
-	ID        string          `json:"id,omitempty"`          // tool_use block ID
-	Name      string          `json:"name,omitempty"`        // tool_use tool name
-	Input     *map[string]any `json:"input,omitempty"`       // tool_use input (always set for tool_use blocks)
-	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result reference
-	Content   string          `json:"content,omitempty"`     // tool_result text
-	IsError   bool            `json:"is_error,omitempty"`    // tool_result error flag
-	// Signature is the cryptographic signature attached to thinking blocks
-	// (type="thinking") by the underlying model. Carried by the claude PTY
-	// adapter for interleaved-thinking continuity. Must be preserved
-	// verbatim for round-trip across turn boundaries
-	// (F3 / CW-20260420-0023). Empty for non-thinking blocks.
-	Signature string `json:"signature,omitempty"`
-}
-
-// EventType identifies the kind of a StreamEvent. The zero value is the empty
-// string; well-formed events always set one of the named constants below.
-type EventType string
+// Transport-agnostic request, response, and stream carrier types now live in
+// go-llm-types. The provider package re-exports them to preserve the existing
+// PTY/CLI adapter surface while narrowing local ownership to adapter-specific
+// helpers and context plumbing.
+type (
+	ProviderCapabilities = llmtypes.ProviderCapabilities
+	ToolDefinition       = llmtypes.ToolDefinition
+	ToolUseBlock         = llmtypes.ToolUseBlock
+	ContentBlock         = llmtypes.ContentBlock
+	EventType            = llmtypes.EventType
+	ThinkingBlock        = llmtypes.ThinkingBlock
+	StreamEvent          = llmtypes.StreamEvent
+	Usage                = llmtypes.Usage
+	CompleteResult       = llmtypes.CompleteResult
+	ChatMessage          = llmtypes.ChatMessage
+	SlotBlock            = llmtypes.SlotBlock
+	ChatRequest          = llmtypes.ChatRequest
+	Provider             = llmcontracts.Provider
+)
 
 const (
-	// EventDelta carries an incremental text fragment in StreamEvent.Content.
-	EventDelta EventType = "delta"
-	// EventToolUse carries a tool invocation in StreamEvent.ToolUse.
-	EventToolUse EventType = "tool_use"
-	// EventUsage carries token-usage data in StreamEvent.Usage. May appear
-	// alongside or in place of EventDone depending on the adapter.
-	EventUsage EventType = "usage"
-	// EventError is a terminal failure event with the message in StreamEvent.Error.
-	// No further events follow on the same channel.
-	EventError EventType = "error"
-	// EventDone is a terminal success event marking the end of a turn. No
-	// further events follow on the same channel.
-	EventDone EventType = "done"
-	// EventSessionID carries an adapter-assigned CLI session identifier in
-	// StreamEvent.SessionID, used by adapters that support resume (e.g. Claude's
-	// --resume flag). Emitted as informational metadata, not a turn boundary.
-	EventSessionID EventType = "session_id"
-	// EventThinking carries a completed interleaved thinking block as
-	// surfaced by the claude PTY adapter (F3 / CW-20260420-0023). The
-	// payload is in StreamEvent.ThinkingBlock. Emitted once per complete
-	// thinking block (after content_block_stop), not as incremental deltas.
-	// The signature field is cryptographically signed by the underlying
-	// model and must be preserved verbatim to satisfy the round-trip
-	// contract on subsequent turns.
-	EventThinking EventType = "thinking"
+	EventDelta     EventType = llmtypes.EventDelta
+	EventToolUse   EventType = llmtypes.EventToolUse
+	EventUsage     EventType = llmtypes.EventUsage
+	EventError     EventType = llmtypes.EventError
+	EventDone      EventType = llmtypes.EventDone
+	EventSessionID EventType = llmtypes.EventSessionID
+	EventThinking  EventType = llmtypes.EventThinking
 )
 
-// ThinkingBlock carries the content and signed signature of one interleaved
-// thinking block as surfaced by the claude PTY adapter
-// (F3 / CW-20260420-0023).
-type ThinkingBlock struct {
-	// Thinking is the raw thinking text accumulated from thinking_delta events.
-	Thinking string
-	// Signature is the cryptographic signature attached to the block by the
-	// underlying model. Must be preserved verbatim and round-tripped to
-	// subsequent turns.
-	Signature string
-}
-
-// StreamEvent represents a single event from a streaming provider response.
-type StreamEvent struct {
-	Type          EventType
-	Content       string         // EventDelta payload
-	Usage         *Usage         // EventUsage payload; may also appear on EventDone
-	Error         string         // EventError payload
-	ToolUse       *ToolUseBlock  // EventToolUse payload
-	SessionID     string         // EventSessionID payload
-	ThinkingBlock *ThinkingBlock // EventThinking payload (F3 / CW-20260420-0023)
-}
-
-// IsTurnComplete reports whether ev is a terminal event marking the end of an
-// agent turn. Consumers iterating a stream can use this to detect turn
-// boundaries without inspecting StreamEvent fields directly.
-//
-// Both EventDone (success) and EventError (failure) are turn-terminal; either
-// guarantees no further events on the same channel. Per-adapter turn-boundary
-// semantics are documented in each adapter's package-level docstring.
+// IsTurnComplete reports whether ev is a terminal event marking the end of a turn.
 func IsTurnComplete(ev StreamEvent) bool {
-	return ev.Type == EventDone || ev.Type == EventError
-}
-
-// Usage contains token usage information.
-type Usage struct {
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
-	StopReason          string
-}
-
-// CompleteResult contains the text and optional usage metadata for a
-// non-streaming completion call.
-type CompleteResult struct {
-	Text  string
-	Usage *Usage
-}
-
-// ChatMessage represents a single message in a conversation.
-// For simple text messages, use the Content field.
-// For multi-block messages (e.g. tool_result), use ContentBlocks.
-type ChatMessage struct {
-	Role          string         `json:"role"`
-	Content       string         `json:"content,omitempty"`
-	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
-}
-
-// SlotBlock is a pre-assembled region of the context window. PTY/subprocess
-// adapters concatenate non-empty blocks into the effective system prompt
-// (see EffectiveSystemPrompt). The shape exists for future adapters that may
-// distinguish slots (e.g. caching boundaries surfaced by a wrapped CLI).
-//
-// Changed == false means the block's content matches the previous turn's
-// cache key; adapters may use this to emit cache markers.
-type SlotBlock struct {
-	// Name is the slot identifier (e.g., "system", "memory", "conversation").
-	Name string
-	// Content is the rendered text for this slot.
-	Content string
-	// CacheKey is a content hash used by callers to detect changes across turns.
-	CacheKey string
-	// Changed is true when CacheKey differs from the previous turn.
-	Changed bool
-}
-
-// ChatRequest is the unified input to provider chat methods. Tools are
-// optional; providers that don't support tools ignore the field. SlotBlocks
-// are optional; when non-empty they extend SystemPrompt (appended after it).
-// To avoid duplication, callers should put system content exclusively in
-// SlotBlocks and leave SystemPrompt empty, or vice versa.
-type ChatRequest struct {
-	Model        string
-	SystemPrompt string
-	SlotBlocks   []SlotBlock
-	Messages     []ChatMessage
-	Tools        []ToolDefinition
-	// MaxTokens caps the maximum number of output tokens the provider may
-	// generate for this request. When 0 (the default), each provider applies
-	// its own default cap.
-	//
-	// Implementation status (v0.10.0): PTY/subprocess adapters silently
-	// ignore this field. The wrapped CLI's own model config is the
-	// effective cap; callers that need a hard ceiling must configure it
-	// in the CLI-side settings (e.g. claude's `max_tokens` in
-	// `.claude/settings.json` or via the `--max-tokens` flag where
-	// supported). Future PTY adapters that support a flag-level cap may
-	// honor this field.
-	MaxTokens int
-}
-
-// EffectiveSystemPrompt returns SystemPrompt when no slots are set, otherwise
-// returns SystemPrompt (if non-empty) followed by each non-empty slot's content
-// joined with "\n\n". Adapters that don't exploit slot boundaries should call
-// this to preserve the full semantic content.
-func (r ChatRequest) EffectiveSystemPrompt() string {
-	if len(r.SlotBlocks) == 0 {
-		return r.SystemPrompt
-	}
-	var b strings.Builder
-	if r.SystemPrompt != "" {
-		b.WriteString(r.SystemPrompt)
-	}
-	for _, s := range r.SlotBlocks {
-		if s.Content == "" {
-			continue
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(s.Content)
-	}
-	return b.String()
-}
-
-// Provider is the interface for LLM provider adapters.
-type Provider interface {
-	// StreamChat streams a response for the given request. Tools are optional.
-	StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error)
-	// Complete makes a non-streaming completion call.
-	Complete(ctx context.Context, req ChatRequest) (string, error)
-	// Capabilities returns the capabilities supported by this provider.
-	Capabilities() ProviderCapabilities
+	return llmtypes.IsTurnComplete(ev)
 }
 
 // ptySessionKeyType is the context key for passing a CLI session ID
@@ -324,10 +121,6 @@ type waitDelayKeyType struct{}
 // WithWaitDelay returns a context carrying a custom grace period for child
 // process termination. When the context is cancelled, the spawner sends SIGTERM
 // and waits up to d for the process to exit before sending SIGKILL.
-//
-// Non-positive values (zero or negative) fall back to DefaultWaitDelay; the
-// helper does not validate or clamp negative inputs. Consumers that want
-// effectively-immediate SIGKILL should use a small positive duration.
 func WithWaitDelay(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, waitDelayKeyType{}, d)
 }

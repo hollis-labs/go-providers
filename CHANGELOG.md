@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.11.0
+
+### Breaking — relocated rate-budget primitives; shared model types extracted
+
+- Removed `TokenRateTracker`, `CircuitBreaker`, `ErrRequestExceedsRateBudget`,
+  `PacingWait`, `CircuitState`, and `DefaultCooldown` from this module.
+  Their new home is `github.com/hollis-labs/go-llm-contracts` (`v0.1.0+`).
+- Extracted the transport-agnostic request/response/tool/event data model to
+  `github.com/hollis-labs/go-llm-types`.
+- `provider.Provider` now aliases the canonical interface in
+  `github.com/hollis-labs/go-llm-contracts`, while request/stream carrier types
+  such as `provider.ChatRequest`, `provider.StreamEvent`, and `provider.Usage`
+  alias the corresponding `go-llm-types` definitions.
+
+### Why
+
+With HTTP-backed adapters already removed in v0.10.0, the surviving
+rate-budget primitives were no longer part of the PTY/CLI implementation
+surface. Moving them to `go-llm-contracts` keeps this module focused on
+adapter implementations while giving SDK/HTTP wrappers a stable shared home.
+
 ## v0.10.0
 
 ### Breaking — HTTP providers removed; lib is now CLI/PTY/subprocess-only

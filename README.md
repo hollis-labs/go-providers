@@ -1,8 +1,8 @@
 # go-providers
 
-`go-providers` is a Go library that provides a single `Provider` interface over a collection of CLI-bridge adapters (Claude Code, Codex, Gemini CLI, Aider, Copilot, Junie, Kiro, Opencode, Qwen) wrapped via PTY or plain subprocess. It also ships cross-cutting primitives — a registry, circuit breaker, token-rate pacing, cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
+`go-providers` is a Go library that provides a single `Provider` interface over a collection of CLI-bridge adapters (Claude Code, Codex, Gemini CLI, Aider, Copilot, Junie, Kiro, Opencode, Qwen) wrapped via PTY or plain subprocess. It also ships cross-cutting primitives for the adapter layer — a registry, cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
 
-As of **v0.10.0** this library is **CLI/PTY-only** — direct HTTP chat and embedding adapters (Anthropic Messages, OpenAI, Gemini, Mistral, Azure OpenAI, OpenRouter, OpenZen, Ollama) were removed. See `CHANGELOG.md` v0.10.0 for the migration note.
+As of **v0.11.0** this library is **CLI/PTY-only** and no longer owns the shared LLM contracts or rate-budget primitives. Direct HTTP chat and embedding adapters were removed in v0.10.0; the shared transport-agnostic model types now live in `github.com/hollis-labs/go-llm-types`, and the shared provider contracts/rate-budget primitives live in `github.com/hollis-labs/go-llm-contracts`.
 
 ## Status
 
