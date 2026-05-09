@@ -288,10 +288,21 @@ func renderMCPJSON(loopbackURL string) string {
 		// a record. Emitting `{"mcpServers":{}}` is valid for both.
 		return `{"mcpServers":{}}` + "\n"
 	}
+	// Populated loopback: emit `{"type": "http", "url": "..."}`.
+	// Bare-mode validation requires an explicit transport discriminator
+	// for non-stdio servers; without `type`, the validator defaults to
+	// the stdio shape and rejects with `command: expected string,
+	// received undefined` (probed empirically against claude 2.1.137,
+	// CW-20260509-0003). `type: "http"` matches the `claude mcp add
+	// --transport http` CLI keyword and is accepted by both bare-mode
+	// strict validation and non-bare auto-discovery, so a single shape
+	// covers all callers (claude / codex / opencode adapters share this
+	// renderer).
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"loopback": map[string]any{
-				"url": loopbackURL,
+				"type": "http",
+				"url":  loopbackURL,
 			},
 		},
 	}
