@@ -66,7 +66,7 @@ func TestClaudeBootDirSpec(t *testing.T) {
 	// mode strict validation accepts the entry (non-bare auto-discovery
 	// also accepts it). Without `type`, the validator defaults to the
 	// stdio shape and rejects with `command: expected string, received
-	// undefined` (CW-20260509-0003).
+	// undefined`.
 	if !strings.Contains(mcpJSON, `"type": "http"`) {
 		t.Errorf(".mcp.json should declare type:\"http\" for the loopback entry, got %q", mcpJSON)
 	}
@@ -93,18 +93,18 @@ func TestClaudeBootDirSpec_ApiKeyHelper_Absent(t *testing.T) {
 
 // TestClaudeBootDirSpec_ApiKeyHelper_Set pins that ApiKeyHelperPath
 // threads into the planted .claude/settings.json as a JSON-encoded
-// `apiKeyHelper` field. Closes CW-20260509-0016: bare-mode subscription
-// users (no ANTHROPIC_API_KEY in env) point apiKeyHelper at a small
+// `apiKeyHelper` field. Bare-mode subscription users (no
+// ANTHROPIC_API_KEY in env) point apiKeyHelper at a small
 // helper that resolves auth from the macOS keychain or another
 // per-environment source.
 func TestClaudeBootDirSpec_ApiKeyHelper_Set(t *testing.T) {
 	a := NewClaudeAdapter()
-	a.ApiKeyHelperPath = "/usr/local/bin/clockwork-apikey-helper"
+	a.ApiKeyHelperPath = "/usr/local/bin/example-apikey-helper"
 	settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	want := `"apiKeyHelper": "/usr/local/bin/clockwork-apikey-helper"`
+	want := `"apiKeyHelper": "/usr/local/bin/example-apikey-helper"`
 	if !strings.Contains(settings, want) {
 		t.Errorf("settings.json should contain %s\ngot:\n%s", want, settings)
 	}
@@ -158,7 +158,7 @@ func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 // TestRenderMCPJSON_PopulatedShape pins the exact byte shape emitted for a
 // non-empty loopback URL. Bare-mode (`--mcp-config <path>`) strict validation
 // in claude 2.1.137 rejects entries without an explicit transport `type`
-// (probed empirically; see CW-20260509-0003 / agent-workspaces probe-results.md).
+// (probed empirically against claude 2.1.137).
 // `type: "http"` matches the `claude mcp add --transport http` CLI keyword and
 // is accepted by both bare-mode validation and non-bare auto-discovery, so
 // codex/opencode adapters that share renderMCPJSON inherit the same correct

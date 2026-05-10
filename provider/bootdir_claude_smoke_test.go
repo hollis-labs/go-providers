@@ -21,18 +21,16 @@ import (
 // TestClaudeBootDirSpec_TrustPreAccept_Smoke is a real-spawn integration
 // test for the v0.8.2 trust pre-acceptance fix.
 //
-// Surfaced incident (clockwork S2.5 plan-execute smoke retry, 2026-05-08
-// post-v0.8.1): the long-lived PTY claude spawn no longer dies on arg
-// validation, but instead stalls indefinitely on the first-run workspace
-// trust dialog ("Quick safety check: Is this a project you created or
-// one you trust?"). Per `claude --help`, the dialog auto-skips only in
-// non-interactive mode (-p / piped stdout). PTY = TTY = dialog fires.
-// `--dangerously-skip-permissions` covers per-tool permission checks, not
-// this gate.
+// Surfaced empirically (post-v0.8.1): the long-lived PTY claude spawn
+// no longer dies on arg validation, but instead stalls indefinitely on
+// the first-run workspace trust dialog ("Quick safety check: Is this a
+// project you created or one you trust?"). Per `claude --help`, the
+// dialog auto-skips only in non-interactive mode (-p / piped stdout).
+// PTY = TTY = dialog fires. `--dangerously-skip-permissions` covers
+// per-tool permission checks, not this gate.
 //
-// Probe results (see implementer-report under
-// agent-workspaces/execution/go-providers/2026-05-08-claude-pty-trust/):
-// trust state lives in `~/.claude.json`'s `projects[<realpath(cwd)>].
+// Probe results: trust state lives in `~/.claude.json`'s
+// `projects[<realpath(cwd)>].
 // hasTrustDialogAccepted` field. Per-cwd `.claude/settings.json` does
 // NOT honor any trust field (probed: hasTrustDialogAccepted,
 // trustDialogAccepted, trusted, workspaceTrust — all leave the dialog
@@ -71,8 +69,9 @@ func TestClaudeBootDirSpec_TrustPreAccept_Smoke(t *testing.T) {
 		resolved = bootDir
 	}
 
-	// Plant the spec into bootDir, exercising the lib's PlantedFiles loop
-	// the way clockwork does — this is the path that fires the trust seed.
+	// Plant the spec into bootDir, exercising the lib's PlantedFiles
+	// loop the way a downstream caller would — this is the path that
+	// fires the trust seed.
 	spec := a.BootDirSpec()
 	pctx := PlantContext{
 		SystemPrompt: "You are a smoke test agent. Respond exactly with the literal text TEST_OK_2026 and nothing else.",

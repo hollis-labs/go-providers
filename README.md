@@ -16,7 +16,10 @@ go get github.com/hollis-labs/go-providers
 
 ## Usage
 
-Construct a CLI/PTY adapter, register it, and stream a chat response.
+The minimum viable shape is: pick an adapter, materialize its
+`BootDirSpec` into a per-task tempdir, wire the adapter's flag fields
+from the planted layout, and call `StreamChat` through a transport
+bridge.
 
 ```go
 package main
@@ -24,47 +27,82 @@ package main
 import (
     "context"
     "fmt"
+    "os"
+    "path/filepath"
 
+    llmtypes "github.com/hollis-labs/go-llm-types"
     "github.com/hollis-labs/go-providers/provider"
 )
 
 func main() {
-    reg := provider.NewRegistry()
+    // 1. Construct the adapter (bare-mode Claude in this example).
+    adapter := provider.NewClaudeAdapterBare()
 
-    claude := provider.NewClaudeAdapterBare()
-    inj := claude.BareInjectionPaths(bootDir, projectDir)
-    claude.MCPConfigPath = inj.MCPConfigPath
-    claude.AppendSystemPromptFile = inj.AppendSystemPromptFile
-    claude.SettingsPath = inj.SettingsPath
-    claude.ProjectDir = inj.ProjectDir
-    reg.Register("claude", claude)
+    // 2. Materialize the BootDirSpec into a fresh tempdir.
+    bootDir, _ := os.MkdirTemp("", "boot-claude-*")
+    defer os.RemoveAll(bootDir)
 
-    p, _ := reg.Get("claude")
+    projectDir, _ := filepath.Abs(".")
 
-    ctx := context.Background()
-    req := provider.ChatRequest{
-        Model: "claude-sonnet-4-5",
-        Messages: []provider.ChatMessage{
-            {Role: "user", Content: "Say hello in one short sentence."},
-        },
+    spec := adapter.BootDirSpec()
+    pctx := provider.PlantContext{
+        SystemPrompt: "You are a terse assistant.",
+        ProjectDir:   projectDir,
+        BootDir:      bootDir,
+    }
+    for _, pf := range spec.PlantedFiles {
+        content, _ := pf.Render(pctx)
+        dst := filepath.Join(bootDir, pf.RelPath)
+        os.MkdirAll(filepath.Dir(dst), 0o755)
+        os.WriteFile(dst, []byte(content), 0o644)
     }
 
-    stream, err := p.StreamChat(ctx, req)
+    // 3. Wire bare-mode flag values from the planted layout.
+    inj := adapter.BareInjectionPaths(bootDir, projectDir)
+    adapter.MCPConfigPath = inj.MCPConfigPath
+    adapter.AppendSystemPromptFile = inj.AppendSystemPromptFile
+    adapter.SettingsPath = inj.SettingsPath
+    adapter.ProjectDir = inj.ProjectDir
+
+    // 4. Detect the binary and stream a chat turn.
+    cliPath, _ := adapter.Detect()
+    bridge := provider.NewSubprocessBridge(adapter, cliPath)
+
+    stream, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{
+        Model: "claude-sonnet-4-5",
+        Messages: []llmtypes.ChatMessage{
+            {Role: "user", Content: "Say hello in one short sentence."},
+        },
+    })
     if err != nil {
         panic(err)
     }
     for ev := range stream {
         switch ev.Type {
-        case "delta":
+        case llmtypes.EventDelta:
             fmt.Print(ev.Content)
-        case "error":
+        case llmtypes.EventError:
             fmt.Println("error:", ev.Error)
-        case "done":
+        case llmtypes.EventDone:
             return
         }
     }
 }
 ```
+
+Three runnable end-to-end programs (claude bare, codex, opencode) live
+under `examples/`; see `examples/README.md` for the differences and
+auth-setup notes.
+
+### Bare-mode auth
+
+Bare-mode Claude requires either `ANTHROPIC_API_KEY` in env *or* an
+`apiKeyHelper` executable referenced from the planted
+`.claude/settings.json`. Set `adapter.ApiKeyHelperPath = "/path/to/bin"`
+before iterating `BootDirSpec().PlantedFiles`; the helper is invoked
+per request and its first line of stdout is consumed as the bearer
+token. Use this for OAuth-via-keychain auth or any other
+per-environment secret store.
 
 ## API Overview
 
