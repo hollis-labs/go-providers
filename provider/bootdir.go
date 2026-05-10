@@ -1,5 +1,7 @@
 package provider
 
+import "os"
+
 // BootDirSpec declares the per-task tempdir layout convention for an
 // adapter. The lib owns the spec; apps materialize the directory
 // (write files, set env, choose cwd) by iterating over it.
@@ -10,7 +12,11 @@ package provider
 //	    spec := bp.BootDirSpec()
 //	    for _, pf := range spec.PlantedFiles {
 //	        content, _ := pf.Render(plantCtx)
-//	        os.WriteFile(filepath.Join(bootDir, pf.RelPath), []byte(content), 0o644)
+//	        mode := pf.Mode
+//	        if mode == 0 {
+//	            mode = 0o644
+//	        }
+//	        os.WriteFile(filepath.Join(bootDir, pf.RelPath), []byte(content), mode)
 //	    }
 //	    env := append(env, spec.EnvAmendments...)
 //	    cwd := spec.SpawnWorkdir(bootDir, projectDir)
@@ -69,6 +75,12 @@ type PlantedFile struct {
 	// runs) don't pollute global state. The content return value
 	// remains the file payload either way.
 	Render func(ctx PlantContext) (string, error)
+	// Mode is the file mode for the planted file. Zero value falls back
+	// to 0o644. Set to 0o600 (or stricter) for sensitive files like auth
+	// tokens or MCP loopback URLs (which contain a localhost port that
+	// an attacker with read access could probe). The caller's WriteFile
+	// must honor this value (with 0o644 fallback when zero).
+	Mode os.FileMode
 }
 
 // PlantContext carries the values render functions commonly need.

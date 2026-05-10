@@ -14,7 +14,7 @@ import (
 //	<bootDir>/
 //	├── AGENTS.md           # system context (auto-loaded by Codex on cwd)
 //	├── boot.md             # task kickoff content
-//	├── config.toml         # codex config (model + MCP loopback) — load-bearing
+//	├── config.toml         # codex config (MCP loopback) — load-bearing
 //	├── auth.json           # ChatGPT/API auth, copied from user's $CODEX_HOME
 //	└── .mcp.json           # legacy claude-shape sidecar — NOT read by codex,
 //	                        # kept for cross-tool inspection sanity (analogous
@@ -50,10 +50,12 @@ import (
 // codex will then fail at dispatch time with "Not logged in" which surfaces
 // correctly through the stderr sidecar.
 //
-// auth.json is sensitive (contains OAuth tokens / API keys). The render
-// closure handles the file content; apps SHOULD chmod the planted file to
-// 0o600. The clockwork-manifold planter does this for .mcp.json and
-// auth.json; standalone callers should mirror.
+// File-mode plumbing: auth.json (OAuth tokens / API keys), config.toml
+// (loopback URL), and .mcp.json (loopback URL sidecar) all carry per-task
+// secret-ish content. They are declared with PlantedFile.Mode = 0o600 so
+// the lib spec — not the caller — owns the policy. Apps that honor
+// PlantedFile.Mode (with a 0o644 fallback when zero) automatically pick
+// up the stricter perms.
 func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
@@ -77,20 +79,32 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				Render: func(ctx PlantContext) (string, error) {
 					return renderCodexConfigTOML(ctx.MCPLoopbackURL), nil
 				},
+				// Mode 0o600: config.toml embeds the per-task MCP loopback
+				// URL. Treat as secret-ish (matches the .mcp.json policy).
+				Mode: 0o600,
 			},
 			{
 				RelPath: "auth.json",
 				Render: func(ctx PlantContext) (string, error) {
 					// Read the user's ~/.codex/auth.json (or $CODEX_HOME/auth.json
 					// if CODEX_HOME is set in the parent env) and return its
-					// content for the caller to plant. App-side WriteFile is
-					// expected to chmod 0o600 (clockwork-manifold's bootdir
-					// planter does this).
+					// content. The caller's WriteFile honors PlantedFile.Mode
+					// (0o600 below) so the planted auth.json is not world-
+					// readable.
 					//
-					// Empty content if the user isn't logged in — codex will
-					// surface "Not logged in" at dispatch time.
-					return readCodexAuthSource(), nil
+					// Empty content + (false, nil) if the user isn't logged in —
+					// codex will surface "Not logged in" at dispatch time. A
+					// non-NotExist read error (e.g. permission denied) bubbles
+					// up so the operator sees an actionable message instead of
+					// a misleading "Not logged in" downstream.
+					content, _, err := readCodexAuthSource()
+					if err != nil {
+						return "", err
+					}
+					return content, nil
 				},
+				// Mode 0o600: auth.json carries OAuth tokens / API keys.
+				Mode: 0o600,
 			},
 			{
 				RelPath: ".mcp.json",
@@ -102,6 +116,9 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 					// lives in config.toml above.
 					return renderMCPJSON(ctx.MCPLoopbackURL), nil
 				},
+				// Mode 0o600: mirrors config.toml — the loopback URL is the
+				// same shape and the same sensitivity.
+				Mode: 0o600,
 			},
 		},
 		EnvAmendments: []string{"CODEX_HOME={{.BootDir}}"},
@@ -129,24 +146,35 @@ func renderCodexConfigTOML(loopbackURL string) string {
 
 // readCodexAuthSource reads the user's codex auth.json bytes for replication
 // into the bootdir. Honors $CODEX_HOME (matches codex's own discovery rule),
-// falls back to ~/.codex/auth.json. Returns "" silently if the source doesn't
-// exist or any read error occurs — the bootdir gets an empty auth.json
-// placeholder and codex surfaces the "not logged in" error at dispatch time.
+// falls back to ~/.codex/auth.json.
 //
-// This matches the contract that auth seeding is best-effort: a missing /
-// unreadable user auth shouldn't fail the entire boot, because failure
-// modes downstream (codex dispatch) are already well-handled by the
-// substrate's stderr sidecar.
-func readCodexAuthSource() string {
+// Return values:
+//   - (content, true,  nil) on success
+//   - ("",      false, nil) when the source doesn't exist (best-effort silent
+//     path: the bootdir gets an empty auth.json and codex surfaces "Not logged
+//     in" at dispatch time)
+//   - ("",      false, err) for other read errors (permission denied, IO
+//     errors, etc.) so callers can surface actionable messages instead of
+//     swallowing the cause and producing a misleading "Not logged in"
+//     downstream
+//
+// The auth-seeding contract is best-effort for the missing-file case
+// (downstream dispatch is well-handled by the stderr sidecar) but NOT for
+// the unreadable-file case (a real misconfiguration the operator needs to
+// see).
+func readCodexAuthSource() (string, bool, error) {
 	src := codexAuthSourcePath()
 	if src == "" {
-		return ""
+		return "", false, nil
 	}
 	b, err := os.ReadFile(src)
 	if err != nil {
-		return ""
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read codex auth.json at %s: %w", src, err)
 	}
-	return string(b)
+	return string(b), true, nil
 }
 
 // codexAuthSourcePath resolves the user's codex auth.json path, honoring
