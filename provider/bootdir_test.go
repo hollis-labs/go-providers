@@ -282,6 +282,45 @@ func TestOpencodeBootDirSpec(t *testing.T) {
 	if !strings.Contains(opencodeJSON, "{file:./agents/executor.md}") {
 		t.Errorf("opencode.json should reference agent file, got %s", opencodeJSON)
 	}
+	// With no MCP loopback URL, opencode.json should NOT carry an `mcp`
+	// block. opencode merges per-dir config with global, so an empty
+	// mcp map would be benign — but absent is the cleaner signal.
+	if strings.Contains(opencodeJSON, `"mcp"`) {
+		t.Errorf("opencode.json should omit mcp block when MCPLoopbackURL is empty, got %s", opencodeJSON)
+	}
+}
+
+// TestOpencodeBootDirSpec_MCPBlock pins the mcp-block shape opencode
+// expects. opencode 1.14.x reads `mcp:{<name>:{type,url,enabled}}`
+// from opencode.json (NOT `.mcp.json` — that file is a claude
+// convention opencode ignores). The transport keyword is "remote"
+// (HTTP/SSE), not claude's "http". Probed empirically against
+// opencode 1.14.20.
+func TestOpencodeBootDirSpec_MCPBlock(t *testing.T) {
+	a := NewOpencodeAdapter()
+	a.Agent = "executor"
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{
+		AgentName:      "executor",
+		MCPLoopbackURL: "http://127.0.0.1:65500/mcp",
+	}
+	opencodeJSON, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	wants := []string{
+		`"mcp"`,
+		`"loopback"`,
+		`"type": "remote"`,
+		`"url": "http://127.0.0.1:65500/mcp"`,
+		`"enabled": true`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(opencodeJSON, w) {
+			t.Errorf("opencode.json missing %q\ngot:\n%s", w, opencodeJSON)
+		}
+	}
 }
 
 func TestOpencodeBootDirSpec_AgentNameDefault(t *testing.T) {
