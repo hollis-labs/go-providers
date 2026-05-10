@@ -59,14 +59,10 @@ import (
 //
 // Mux: PlantContext carries optional MuxCommand/Args/Env fields populated
 // when the caller wants spawned agents to also reach a Mux-aggregated MCP
-// server (Vanta/Clockwork/Cerberus). For codex specifically, the planted
-// .mcp.json sidecar carries the Mux entry for cross-tool inspection
-// parity, but codex itself does NOT read .mcp.json — and renderCodexConfigTOML
-// only emits a [mcp_servers.loopback] block. So as of v0.15.0, codex
-// dispatched via this spec will NOT reach Mux through the planted config.
-// Apps that need codex→Mux today must pre-populate the user's
-// ~/.codex/config.toml [mcp_servers.mux] block manually, or extend
-// renderCodexConfigTOML to emit one (filed as a follow-up).
+// server (Vanta/Clockwork/Cerberus). Unlike Claude, Codex's load-bearing
+// config is $CODEX_HOME/config.toml, so the mux entry must be emitted there
+// as a stdio server block. The legacy .mcp.json sidecar is still planted for
+// cross-tool inspection parity, but Codex itself ignores that file.
 func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
@@ -88,7 +84,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: "config.toml",
 				Render: func(ctx PlantContext) (string, error) {
-					return renderCodexConfigTOML(ctx.MCPLoopbackURL), nil
+					return renderCodexConfigTOML(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 				// Mode 0o600: config.toml embeds the per-task MCP loopback
 				// URL. Treat as secret-ish (matches the .mcp.json policy).
@@ -141,20 +137,54 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	}
 }
 
-// renderCodexConfigTOML emits a minimal codex config.toml that registers
-// the per-task MCP loopback server. Empty URL → empty config (codex falls
-// back to defaults, which is fine for the no-loopback test path).
+// renderCodexConfigTOML emits the codex config.toml blocks for the per-task
+// MCP servers. Empty loopback + empty mux → empty config (codex falls back to
+// defaults, which is fine for the no-MCP test path).
 //
-// The loopback transport is "streamable_http" in codex's terminology;
-// the schema requires `url = "..."` for HTTP servers (no `command`/`args`).
-func renderCodexConfigTOML(loopbackURL string) string {
-	if loopbackURL == "" {
+// The loopback transport is "streamable_http" in codex's terminology and is
+// configured via `url = "..."`. Stdio servers use `command = "..."` plus
+// `args = [...]` and optional `[mcp_servers.<name>.env]` key/value pairs.
+func renderCodexConfigTOML(loopbackURL string, mux muxEntry) string {
+	if loopbackURL == "" && !mux.present() {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[mcp_servers.loopback]\n")
-	fmt.Fprintf(&b, "url = %q\n", loopbackURL)
+	if loopbackURL != "" {
+		b.WriteString("[mcp_servers.loopback]\n")
+		fmt.Fprintf(&b, "url = %q\n", loopbackURL)
+	}
+	if mux.present() {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("[mcp_servers.mux]\n")
+		fmt.Fprintf(&b, "command = %q\n", mux.Command)
+		if len(mux.Args) > 0 {
+			fmt.Fprintf(&b, "args = %s\n", tomlStringArray(mux.Args))
+		}
+		if len(mux.Env) > 0 {
+			b.WriteString("\n[mcp_servers.mux.env]\n")
+			for _, kv := range mux.Env {
+				key, value, ok := strings.Cut(kv, "=")
+				if !ok {
+					value = ""
+				}
+				fmt.Fprintf(&b, "%s = %q\n", key, value)
+			}
+		}
+	}
 	return b.String()
+}
+
+func tomlStringArray(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(values))
+	for _, v := range values {
+		quoted = append(quoted, fmt.Sprintf("%q", v))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 // readCodexAuthSource reads the user's codex auth.json bytes for replication
