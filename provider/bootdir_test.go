@@ -560,8 +560,8 @@ command = "/path/to/mux"
 args = ["mcp", "--proxy", "--servers=vanta,clockwork,cerberus", "--token", "local-dev", "--scopes", "session.write,message.write"]
 
 [mcp_servers.mux.env]
-MUX_AUTH_MODE = "stdio"
-EMPTY = ""
+"MUX_AUTH_MODE" = "stdio"
+"EMPTY" = ""
 `
 	if got != want {
 		t.Errorf("loopback+mux shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
@@ -580,6 +580,48 @@ args = ["mcp", "--proxy"]
 `
 	if got != want {
 		t.Errorf("mux-only shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderCodexConfigTOML_MuxOnly_EmptyArgs pins that stdio mux entries emit
+// a stable empty args array rather than omitting the line entirely.
+func TestRenderCodexConfigTOML_MuxOnly_EmptyArgs(t *testing.T) {
+	got := renderCodexConfigTOML("", muxEntry{
+		Command: "/path/to/mux",
+	})
+	want := `[mcp_servers.mux]
+command = "/path/to/mux"
+args = []
+`
+	if got != want {
+		t.Errorf("mux-only empty-args shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderCodexConfigTOML_MuxEnvKeysQuoted pins that env keys are quoted in
+// TOML and empty keys are skipped, preventing dotted keys or invalid syntax.
+func TestRenderCodexConfigTOML_MuxEnvKeysQuoted(t *testing.T) {
+	got := renderCodexConfigTOML("", muxEntry{
+		Command: "/path/to/mux",
+		Env: []string{
+			"MUX.AUTH.MODE=stdio",
+			"KEY WITH SPACE=value",
+			"=drop-me",
+		},
+	})
+	wants := []string{
+		`args = []`,
+		`[mcp_servers.mux.env]`,
+		`"MUX.AUTH.MODE" = "stdio"`,
+		`"KEY WITH SPACE" = "value"`,
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("quoted env TOML missing %q\ngot:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"" = "drop-me"`) {
+		t.Errorf("empty env key should be skipped, got:\n%s", got)
 	}
 }
 

@@ -159,9 +159,7 @@ func renderCodexConfigTOML(loopbackURL string, mux muxEntry) string {
 		}
 		b.WriteString("[mcp_servers.mux]\n")
 		fmt.Fprintf(&b, "command = %q\n", mux.Command)
-		if len(mux.Args) > 0 {
-			fmt.Fprintf(&b, "args = %s\n", tomlStringArray(mux.Args))
-		}
+		fmt.Fprintf(&b, "args = %s\n", tomlStringArray(mux.Args))
 		if len(mux.Env) > 0 {
 			b.WriteString("\n[mcp_servers.mux.env]\n")
 			for _, kv := range mux.Env {
@@ -169,7 +167,10 @@ func renderCodexConfigTOML(loopbackURL string, mux muxEntry) string {
 				if !ok {
 					value = ""
 				}
-				fmt.Fprintf(&b, "%s = %q\n", key, value)
+				if key == "" {
+					continue
+				}
+				fmt.Fprintf(&b, "%q = %q\n", key, value)
 			}
 		}
 	}
