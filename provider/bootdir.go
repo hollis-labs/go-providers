@@ -108,6 +108,51 @@ type PlantContext struct {
 	// on the bootdir (see PlantedFile.Render) MUST gate the side effect
 	// on `BootDir != ""` so render stays pure when the field is unset.
 	BootDir string
+
+	// MuxCommand is the absolute path to a Mux (or other aggregating)
+	// stdio MCP binary the spawned agent should also reach, alongside
+	// the per-task loopback. When non-empty, the planted MCP config
+	// gains a second server entry (named "mux") whose stdio child is
+	// `MuxCommand MuxArgs...` with `MuxEnv` (KEY=VALUE pairs) merged
+	// onto the spawned process env.
+	//
+	// Why this exists: the per-task loopback URL only carries the
+	// task-restricted clockwork tool surface. Spawned agents need
+	// access to the broader portfolio (Vanta memory, cross-task
+	// clockwork, cerberus) that the user's interactive shell already
+	// reaches via Mux. Loopback stays put (role-aware tool surface);
+	// the Mux entry adds the aggregated surface in parallel.
+	//
+	// Empty MuxCommand → no Mux entry is emitted (back-compat
+	// preserved; existing planted config stays byte-identical for
+	// callers that don't populate this field).
+	MuxCommand string
+
+	// MuxArgs is the argv passed to MuxCommand when the planted MCP
+	// config invokes it as a stdio child. Typical shape mirrors the
+	// user's interactive Mux entry, e.g.:
+	//
+	//	["mcp", "--proxy", "--servers", "vanta,clockwork,cerberus",
+	//	 "--token", "local-dev",
+	//	 "--scopes", "session.write,message.write"]
+	//
+	// Empty / nil is permitted; the planted entry then carries an
+	// empty args array. Apps should populate this from their own
+	// bootstrap config so token/scopes line up with operator policy.
+	MuxArgs []string
+
+	// MuxEnv carries optional KEY=VALUE env pairs the planted Mux
+	// entry should set when claude/opencode spawn the stdio child.
+	// Usually empty (the spawned agent inherits the parent process
+	// env, which already carries auth tokens, $HOME, etc). Provided
+	// for the rare case where Mux needs an isolated env (e.g. a
+	// scoped API key that shouldn't leak through to the parent).
+	//
+	// Each entry is "KEY=VALUE" exactly as the renderer encodes it
+	// into the planted config's env map (claude/opencode both expect
+	// an object-shaped env). Malformed entries (no "=") are emitted
+	// verbatim; the spawned CLI's MCP client decides what to do.
+	MuxEnv []string
 }
 
 // CwdPreference declares the spawned process's working directory.

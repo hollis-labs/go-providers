@@ -65,7 +65,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: ".mcp.json",
 				Render: func(ctx PlantContext) (string, error) {
-					return renderMCPJSON(ctx.MCPLoopbackURL), nil
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
@@ -123,10 +123,22 @@ func renderClaudeMD(ctx PlantContext) string {
 		b.WriteString(ctx.SystemPrompt)
 		b.WriteString("\n\n")
 	}
-	if ctx.MCPLoopbackURL != "" {
-		b.WriteString("## MCP\n\nTools for this task are available via the MCP server configured in .mcp.json (")
-		b.WriteString(ctx.MCPLoopbackURL)
-		b.WriteString(").\n")
+	if ctx.MCPLoopbackURL != "" || ctx.MuxCommand != "" {
+		b.WriteString("## MCP\n\n")
+		if ctx.MCPLoopbackURL != "" {
+			b.WriteString("Tools for this task are available via the MCP server configured in .mcp.json (")
+			b.WriteString(ctx.MCPLoopbackURL)
+			b.WriteString(").\n")
+		}
+		if ctx.MuxCommand != "" {
+			// Cross-task / portfolio-wide tooling (Vanta memory, cross-task
+			// clockwork, cerberus) is exposed via a second MCP entry that
+			// spawns the Mux aggregator over stdio. Spelled out so the
+			// LLM can route tool calls correctly when both surfaces exist.
+			b.WriteString("Additional cross-task tools (Vanta + portfolio surface) are available via the `mux` MCP entry in .mcp.json (")
+			b.WriteString(ctx.MuxCommand)
+			b.WriteString(").\n")
+		}
 	}
 	return b.String()
 }
@@ -301,33 +313,126 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 	return nil
 }
 
-func renderMCPJSON(loopbackURL string) string {
-	if loopbackURL == "" {
-		// Empty loopback — emit a minimal valid MCP config (empty
+// muxEntry captures the planted Mux-stdio MCP entry inputs in a single
+// value so the per-provider renderers can pass it through cleanly. Empty
+// Command means "no Mux entry" (back-compat path); the renderers omit
+// the entry entirely in that case.
+//
+// Args / Env mirror PlantContext.MuxArgs / PlantContext.MuxEnv with the
+// same semantics — see PlantContext doc comments for shape and
+// motivation.
+type muxEntry struct {
+	Command string
+	Args    []string
+	Env     []string
+}
+
+// present reports whether the entry should be emitted into the planted
+// MCP config. False = back-compat path (loopback-only).
+func (m muxEntry) present() bool {
+	return m.Command != ""
+}
+
+// muxEntryFromContext extracts a muxEntry from a PlantContext. Pure
+// translation; no validation. Empty Command propagates through and the
+// renderers skip the entry entry-side.
+func muxEntryFromContext(ctx PlantContext) muxEntry {
+	return muxEntry{
+		Command: ctx.MuxCommand,
+		Args:    ctx.MuxArgs,
+		Env:     ctx.MuxEnv,
+	}
+}
+
+// muxEnvMap converts the KEY=VALUE entries from PlantContext.MuxEnv into
+// a JSON-object-shaped map. Both claude (~/.claude.json) and opencode
+// (opencode.json) expect an object-shaped env on stdio MCP entries, so
+// this helper is shared. Entries without a "=" land as ("", value)
+// which the spawned CLI is free to reject; better than silently
+// dropping the operator's intent.
+func muxEnvMap(env []string) map[string]any {
+	if len(env) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(env))
+	for _, kv := range env {
+		key := kv
+		val := ""
+		if idx := indexEq(kv); idx >= 0 {
+			key = kv[:idx]
+			val = kv[idx+1:]
+		}
+		out[key] = val
+	}
+	return out
+}
+
+// indexEq returns the index of the first '=' in s, or -1 if absent.
+// Inlined to avoid pulling strings just for this.
+func indexEq(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '=' {
+			return i
+		}
+	}
+	return -1
+}
+
+// renderMCPJSON renders the planted .mcp.json content for claude (and,
+// historically, codex via the shared renderer). The shape always
+// declares `mcpServers` as a record. When loopbackURL is non-empty, a
+// "loopback" HTTP entry is emitted; when mux.present() is true, a
+// second "mux" stdio entry is emitted alongside.
+//
+// Branch matrix:
+//
+//	loopback="", mux=zero                     → {"mcpServers":{}} (legacy empty)
+//	loopback set, mux=zero                    → loopback-only HTTP entry (legacy populated)
+//	loopback="", mux set                      → mux-only stdio entry (rare)
+//	loopback set, mux set                     → both entries side-by-side (CW-20260510-0110)
+//
+// Bare-mode validation requires an explicit transport discriminator
+// (`type`) for non-stdio servers; without `type`, the validator defaults
+// to the stdio shape and rejects with `command: expected string,
+// received undefined` (probed empirically against claude 2.1.137).
+// `type: "http"` matches the `claude mcp add --transport http` CLI
+// keyword and is accepted by both bare-mode strict validation and
+// non-bare auto-discovery. The stdio shape uses `type: "stdio"` (the
+// canonical user-shell shape from ~/.claude.json — verified against the
+// installed claude 2.1.x revision).
+func renderMCPJSON(loopbackURL string, mux muxEntry) string {
+	servers := map[string]any{}
+	if loopbackURL != "" {
+		servers["loopback"] = map[string]any{
+			"type": "http",
+			"url":  loopbackURL,
+		}
+	}
+	if mux.present() {
+		// Args is nil-safe: json.Marshal emits `null` for a nil slice
+		// vs `[]` for an empty slice. Coerce nil→empty so the planted
+		// entry is consistent (downstream MCP clients handle either,
+		// but operators reading the file expect `[]`).
+		args := mux.Args
+		if args == nil {
+			args = []string{}
+		}
+		servers["mux"] = map[string]any{
+			"type":    "stdio",
+			"command": mux.Command,
+			"args":    args,
+			"env":     muxEnvMap(mux.Env),
+		}
+	}
+	if len(servers) == 0 {
+		// Empty loopback + no Mux — emit minimal valid MCP config (empty
 		// servers map). `{}` works for auto-discovery (non-bare) but
 		// fails claude's schema validation when referenced via
 		// --mcp-config (bare mode), which requires `mcpServers` to be
 		// a record. Emitting `{"mcpServers":{}}` is valid for both.
 		return `{"mcpServers":{}}` + "\n"
 	}
-	// Populated loopback: emit `{"type": "http", "url": "..."}`.
-	// Bare-mode validation requires an explicit transport discriminator
-	// for non-stdio servers; without `type`, the validator defaults to
-	// the stdio shape and rejects with `command: expected string,
-	// received undefined` (probed empirically against claude 2.1.137).
-	// `type: "http"` matches the `claude mcp add
-	// --transport http` CLI keyword and is accepted by both bare-mode
-	// strict validation and non-bare auto-discovery, so a single shape
-	// covers all callers (claude / codex / opencode adapters share this
-	// renderer).
-	cfg := map[string]any{
-		"mcpServers": map[string]any{
-			"loopback": map[string]any{
-				"type": "http",
-				"url":  loopbackURL,
-			},
-		},
-	}
+	cfg := map[string]any{"mcpServers": servers}
 	out, _ := json.MarshalIndent(cfg, "", "  ")
 	return string(out) + "\n"
 }

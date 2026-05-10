@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -167,7 +168,7 @@ func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 // codex/opencode adapters that share renderMCPJSON inherit the same correct
 // shape transparently.
 func TestRenderMCPJSON_PopulatedShape(t *testing.T) {
-	got := renderMCPJSON("http://127.0.0.1:65535/mcp")
+	got := renderMCPJSON("http://127.0.0.1:65535/mcp", muxEntry{})
 	want := `{
   "mcpServers": {
     "loopback": {
@@ -186,9 +187,144 @@ func TestRenderMCPJSON_PopulatedShape(t *testing.T) {
 // TestClaudeBootDirSpec_EmptyMCP but at the function level for direct
 // regression coverage of renderMCPJSON's two branches).
 func TestRenderMCPJSON_Empty(t *testing.T) {
-	got := renderMCPJSON("")
+	got := renderMCPJSON("", muxEntry{})
 	if strings.TrimSpace(got) != `{"mcpServers":{}}` {
 		t.Errorf("renderMCPJSON(\"\") should emit `{\"mcpServers\":{}}`, got %q", got)
+	}
+}
+
+// TestRenderMCPJSON_LoopbackPlusMux pins the dual-entry shape emitted
+// when both loopback and Mux are configured (CW-20260510-0110). Spawned
+// task agents need access to the per-task loopback (role-aware
+// clockwork surface) AND the portfolio-wide Mux aggregator (Vanta +
+// cross-task clockwork + cerberus).
+//
+// stdio shape mirrors the canonical user-shell entry from
+// ~/.claude.json: `{"type":"stdio","command":"...","args":[...],
+// "env":{...}}`.
+func TestRenderMCPJSON_LoopbackPlusMux(t *testing.T) {
+	mux := muxEntry{
+		Command: "/usr/local/bin/mux",
+		Args: []string{
+			"mcp", "--proxy",
+			"--servers", "vanta,clockwork,cerberus",
+			"--token", "local-dev",
+			"--scopes", "session.write,message.write",
+		},
+	}
+	got := renderMCPJSON("http://127.0.0.1:65535/mcp", mux)
+
+	wants := []string{
+		`"mcpServers"`,
+		`"loopback"`,
+		`"type": "http"`,
+		`"url": "http://127.0.0.1:65535/mcp"`,
+		`"mux"`,
+		`"type": "stdio"`,
+		`"command": "/usr/local/bin/mux"`,
+		`"args"`,
+		`"--proxy"`,
+		`"--servers"`,
+		`"vanta,clockwork,cerberus"`,
+		`"env"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("renderMCPJSON loopback+mux missing %q\ngot:\n%s", w, got)
+		}
+	}
+
+	// Ensure the JSON is valid and round-trips. A regression here
+	// (e.g. trailing comma, unbalanced brace) silently breaks bare-
+	// mode claude with a noisy validator error.
+	var parsed struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("renderMCPJSON loopback+mux JSON invalid: %v\ngot:\n%s", err, got)
+	}
+	if _, ok := parsed.MCPServers["loopback"]; !ok {
+		t.Error("loopback entry absent after round-trip")
+	}
+	muxEntryParsed, ok := parsed.MCPServers["mux"]
+	if !ok {
+		t.Fatal("mux entry absent after round-trip")
+	}
+	if muxEntryParsed["type"] != "stdio" {
+		t.Errorf("mux.type: want stdio, got %v", muxEntryParsed["type"])
+	}
+	if muxEntryParsed["command"] != "/usr/local/bin/mux" {
+		t.Errorf("mux.command: want /usr/local/bin/mux, got %v", muxEntryParsed["command"])
+	}
+}
+
+// TestRenderMCPJSON_MuxOnly pins the mux-only branch (loopback empty,
+// Mux present). Rare in practice — clockwork always provisions the
+// loopback — but the renderer must still emit a valid one-entry config
+// so the field is forensically discoverable when an operator
+// deliberately disables the loopback (e.g. by passing nil
+// LoopbackBuilder in a unit test).
+func TestRenderMCPJSON_MuxOnly(t *testing.T) {
+	got := renderMCPJSON("", muxEntry{
+		Command: "/path/to/mux",
+		Args:    []string{"mcp", "--proxy"},
+	})
+	wants := []string{
+		`"mcpServers"`,
+		`"mux"`,
+		`"type": "stdio"`,
+		`"command": "/path/to/mux"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("renderMCPJSON mux-only missing %q\ngot:\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, `"loopback"`) {
+		t.Errorf("renderMCPJSON mux-only should NOT emit loopback entry, got:\n%s", got)
+	}
+}
+
+// TestRenderMCPJSON_MuxEnv pins env passthrough into the planted Mux
+// stdio entry. The KEY=VALUE shape lands as a JSON object under the
+// `env` key. Operators use this for Mux-scoped overrides (e.g. a
+// non-default token via env without recompiling the daemon).
+func TestRenderMCPJSON_MuxEnv(t *testing.T) {
+	got := renderMCPJSON("http://127.0.0.1:1/mcp", muxEntry{
+		Command: "/bin/mux",
+		Args:    []string{"mcp"},
+		Env:     []string{"MUX_TOKEN=secret-xyz", "MUX_VERBOSE=1"},
+	})
+	wants := []string{
+		`"env"`,
+		`"MUX_TOKEN": "secret-xyz"`,
+		`"MUX_VERBOSE": "1"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("renderMCPJSON mux env missing %q\ngot:\n%s", w, got)
+		}
+	}
+}
+
+// TestMuxEnvMap_Edge pins the helper's behavior on edge cases: bare
+// keys (no `=`), empty input, multiple equals signs (only first split).
+func TestMuxEnvMap_Edge(t *testing.T) {
+	if got := muxEnvMap(nil); len(got) != 0 {
+		t.Errorf("muxEnvMap(nil) should be empty, got %v", got)
+	}
+	if got := muxEnvMap([]string{}); len(got) != 0 {
+		t.Errorf("muxEnvMap([]) should be empty, got %v", got)
+	}
+	got := muxEnvMap([]string{"KEY=VALUE", "BARE", "EQ=A=B=C"})
+	if got["KEY"] != "VALUE" {
+		t.Errorf("KEY=VALUE: got %v", got["KEY"])
+	}
+	if got["BARE"] != "" {
+		t.Errorf("BARE (no =): want empty value, got %v", got["BARE"])
+	}
+	if got["EQ"] != "A=B=C" {
+		t.Errorf("EQ=A=B=C: should split on first '='; got %v", got["EQ"])
 	}
 }
 
@@ -511,5 +647,224 @@ func TestBootDirProvider_AssertedOnAllAdapters(t *testing.T) {
 		if _, ok := a.(BootDirProvider); !ok {
 			t.Errorf("%s adapter should implement BootDirProvider", a.Name())
 		}
+	}
+}
+
+// TestClaudeBootDirSpec_MuxEntry pins that PlantContext.MuxCommand
+// flows through the claude BootDirSpec into the planted .mcp.json as
+// a stdio-shape "mux" server entry alongside the loopback HTTP entry.
+//
+// CW-20260510-0110: spawned task agents need access to Vanta + the
+// portfolio-wide Mux-aggregated MCP surface, not just the per-task
+// loopback. The Mux entry spawns the Mux aggregator as an stdio child
+// per session (mirrors how the user's interactive claude reaches Mux
+// via ~/.claude.json's `mcpServers.mux`).
+func TestClaudeBootDirSpec_MuxEntry(t *testing.T) {
+	a := NewClaudeAdapter()
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{
+		SystemPrompt:   "you are an orchestrator",
+		BootContent:    "boot",
+		MCPLoopbackURL: "http://127.0.0.1:9000/mcp",
+		MuxCommand:     "/Users/chrispian/go/bin/mux",
+		MuxArgs: []string{
+			"mcp", "--proxy",
+			"--servers", "vanta,clockwork,cerberus",
+			"--token", "local-dev",
+			"--scopes", "session.write,message.write",
+		},
+	}
+	mcpJSON, err := spec.PlantedFiles[3].Render(pctx)
+	if err != nil {
+		t.Fatalf(".mcp.json render: %v", err)
+	}
+
+	// Loopback entry preserved.
+	if !strings.Contains(mcpJSON, `"loopback"`) {
+		t.Error("loopback entry missing")
+	}
+	if !strings.Contains(mcpJSON, `"http://127.0.0.1:9000/mcp"`) {
+		t.Error("loopback URL missing")
+	}
+	// Mux entry added with stdio shape.
+	if !strings.Contains(mcpJSON, `"mux"`) {
+		t.Error("mux entry missing")
+	}
+	if !strings.Contains(mcpJSON, `"type": "stdio"`) {
+		t.Error("mux entry should declare type:stdio")
+	}
+	if !strings.Contains(mcpJSON, `"command": "/Users/chrispian/go/bin/mux"`) {
+		t.Error("mux command missing")
+	}
+	if !strings.Contains(mcpJSON, `"vanta,clockwork,cerberus"`) {
+		t.Error("mux servers arg missing")
+	}
+
+	// CLAUDE.md should mention both loopback URL and mux command so the
+	// LLM has a textual cue about which MCP entry serves which surface.
+	claudeMD, err := spec.PlantedFiles[0].Render(pctx)
+	if err != nil {
+		t.Fatalf("CLAUDE.md render: %v", err)
+	}
+	if !strings.Contains(claudeMD, "http://127.0.0.1:9000/mcp") {
+		t.Error("CLAUDE.md should reference loopback URL")
+	}
+	if !strings.Contains(claudeMD, "/Users/chrispian/go/bin/mux") {
+		t.Error("CLAUDE.md should reference Mux command when MuxCommand is set")
+	}
+}
+
+// TestClaudeBootDirSpec_NoMux_BackCompat pins that PlantContext with
+// no Mux fields preserves the pre-CW-20260510-0110 byte-for-byte
+// shape — single "loopback" entry, no `mux` key. This is the back-
+// compat guarantee for callers that haven't bumped to populate the
+// new fields.
+func TestClaudeBootDirSpec_NoMux_BackCompat(t *testing.T) {
+	a := NewClaudeAdapter()
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{
+		MCPLoopbackURL: "http://127.0.0.1:9000/mcp",
+	}
+	mcpJSON, err := spec.PlantedFiles[3].Render(pctx)
+	if err != nil {
+		t.Fatalf(".mcp.json render: %v", err)
+	}
+	if strings.Contains(mcpJSON, `"mux"`) {
+		t.Errorf("no-mux back-compat: .mcp.json should NOT contain `\"mux\"` entry, got:\n%s", mcpJSON)
+	}
+	want := `{
+  "mcpServers": {
+    "loopback": {
+      "type": "http",
+      "url": "http://127.0.0.1:9000/mcp"
+    }
+  }
+}
+`
+	if mcpJSON != want {
+		t.Errorf("no-mux back-compat: shape drift\nwant:\n%s\ngot:\n%s", want, mcpJSON)
+	}
+}
+
+// TestOpencodeBootDirSpec_MuxEntry pins that PlantContext.MuxCommand
+// threads into opencode.json's `mcp` block as a "local" stdio entry
+// alongside the existing "remote" loopback entry. Schema notes:
+//
+//   - opencode's stdio transport keyword is "local" (NOT claude's
+//     "stdio").
+//   - opencode's stdio entry uses a SINGLE `command` array (argv[0] is
+//     the binary, the rest are args); it does NOT use the claude
+//     command-string + args-array split.
+//
+// Probed against opencode 1.14.46 user config (~/.config/opencode/
+// config.json).
+func TestOpencodeBootDirSpec_MuxEntry(t *testing.T) {
+	a := NewOpencodeAdapter()
+	a.Agent = "executor"
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{
+		AgentName:      "executor",
+		MCPLoopbackURL: "http://127.0.0.1:65500/mcp",
+		MuxCommand:     "/Users/chrispian/go/bin/mux",
+		MuxArgs: []string{
+			"mcp", "--proxy",
+			"--servers", "vanta,clockwork,cerberus",
+			"--token", "local-dev",
+			"--scopes", "session.write,message.write",
+		},
+	}
+	opencodeJSON, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("opencode.json render: %v", err)
+	}
+
+	// Loopback "remote" entry preserved.
+	if !strings.Contains(opencodeJSON, `"loopback"`) {
+		t.Error("loopback entry missing")
+	}
+	if !strings.Contains(opencodeJSON, `"type": "remote"`) {
+		t.Error("loopback should still declare type:remote")
+	}
+	// Mux entry added with stdio shape.
+	if !strings.Contains(opencodeJSON, `"mux"`) {
+		t.Error("mux entry missing")
+	}
+	if !strings.Contains(opencodeJSON, `"type": "local"`) {
+		t.Error("mux entry should declare type:local (opencode's stdio keyword)")
+	}
+	// command is a single array — argv[0] is the binary path.
+	if !strings.Contains(opencodeJSON, `"/Users/chrispian/go/bin/mux"`) {
+		t.Error("mux command (binary path) missing")
+	}
+	if !strings.Contains(opencodeJSON, `"--proxy"`) {
+		t.Error("mux args should be inlined into the command array")
+	}
+	// enabled:true so opencode honors the entry.
+	if !strings.Contains(opencodeJSON, `"enabled": true`) {
+		t.Error("mux entry should declare enabled:true")
+	}
+
+	// Round-trip the JSON and verify command is an array (not a string).
+	var parsed struct {
+		MCP map[string]map[string]any `json:"mcp"`
+	}
+	if err := json.Unmarshal([]byte(opencodeJSON), &parsed); err != nil {
+		t.Fatalf("opencode.json invalid JSON: %v", err)
+	}
+	muxBlock, ok := parsed.MCP["mux"]
+	if !ok {
+		t.Fatal("mux entry absent after round-trip")
+	}
+	cmd, ok := muxBlock["command"].([]any)
+	if !ok {
+		t.Fatalf("mux.command should be an array, got %T", muxBlock["command"])
+	}
+	if len(cmd) < 1 {
+		t.Fatal("mux.command array empty")
+	}
+	if cmd[0] != "/Users/chrispian/go/bin/mux" {
+		t.Errorf("mux.command[0]: want binary path, got %v", cmd[0])
+	}
+}
+
+// TestCodexBootDirSpec_MuxEntry pins that the codex .mcp.json renderer
+// produces both loopback and mux entries when MuxCommand is set.
+//
+// Caveat (encoded in the BootDirSpec doc-block at the top of
+// bootdir_codex.go): codex itself does NOT read .mcp.json — it reads
+// config.toml (planted at PlantedFiles[2] post-v0.15.0). renderCodexConfigTOML
+// only emits a [mcp_servers.loopback] block, so codex won't actually
+// reach Mux through this plant today. The .mcp.json sidecar carries the
+// Mux entry for cross-tool inspection parity (matches claude/opencode);
+// this test pins that rendered shape so apps that grow a TOML-conversion
+// step downstream have a stable input.
+func TestCodexBootDirSpec_MuxEntry(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{
+		SystemPrompt:   "you are codex",
+		AgentName:      "codex-exec",
+		MCPLoopbackURL: "http://lp:1",
+		MuxCommand:     "/path/to/mux",
+		MuxArgs:        []string{"mcp", "--proxy"},
+	}
+	// .mcp.json is at index 4 post-v0.15.0 (AGENTS.md, boot.md,
+	// config.toml, auth.json, .mcp.json).
+	mcpJSON, err := spec.PlantedFiles[4].Render(pctx)
+	if err != nil {
+		t.Fatalf(".mcp.json render: %v", err)
+	}
+	if !strings.Contains(mcpJSON, `"mux"`) {
+		t.Error("mux entry missing")
+	}
+	if !strings.Contains(mcpJSON, `"type": "stdio"`) {
+		t.Error("mux entry should declare type:stdio")
+	}
+	if !strings.Contains(mcpJSON, `"command": "/path/to/mux"`) {
+		t.Error("mux command missing")
 	}
 }

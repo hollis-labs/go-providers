@@ -56,6 +56,17 @@ import (
 // the lib spec — not the caller — owns the policy. Apps that honor
 // PlantedFile.Mode (with a 0o644 fallback when zero) automatically pick
 // up the stricter perms.
+//
+// Mux: PlantContext carries optional MuxCommand/Args/Env fields populated
+// when the caller wants spawned agents to also reach a Mux-aggregated MCP
+// server (Vanta/Clockwork/Cerberus). For codex specifically, the planted
+// .mcp.json sidecar carries the Mux entry for cross-tool inspection
+// parity, but codex itself does NOT read .mcp.json — and renderCodexConfigTOML
+// only emits a [mcp_servers.loopback] block. So as of v0.15.0, codex
+// dispatched via this spec will NOT reach Mux through the planted config.
+// Apps that need codex→Mux today must pre-populate the user's
+// ~/.codex/config.toml [mcp_servers.mux] block manually, or extend
+// renderCodexConfigTOML to emit one (filed as a follow-up).
 func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
@@ -110,11 +121,13 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				RelPath: ".mcp.json",
 				Render: func(ctx PlantContext) (string, error) {
 					// Legacy claude-shape sidecar. Codex does NOT read this
-					// file. Kept for cross-tool inspection sanity (operator
-					// probing the bootdir manually, parity with the other
-					// adapters' plant shapes). Load-bearing MCP config
-					// lives in config.toml above.
-					return renderMCPJSON(ctx.MCPLoopbackURL), nil
+					// file (codex reads config.toml above via CODEX_HOME).
+					// Kept for cross-tool inspection sanity (operator probing
+					// the bootdir manually, parity with claude/opencode plant
+					// shapes). Mux entry from PlantContext is included for
+					// the same parity reason; it has no effect on codex itself
+					// (see top-of-file Mux note).
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 				// Mode 0o600: mirrors config.toml — the loopback URL is the
 				// same shape and the same sensitivity.
