@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v0.13.0 — 2026-05-09
+
+- Added `ApiKeyHelperPath` field to `ClaudeAdapter`. When set on a bare-mode adapter, the planted `.claude/settings.json` includes `"apiKeyHelper": "<path>"`; bare-mode claude invokes the helper per request and consumes its first line of stdout as the bearer token used for `Authorization: Bearer <token>` against `https://api.anthropic.com`. Closes the auth gap surfaced by clockwork-manifold CW-20260509-0016: bare mode disables the CLI's OAuth/keychain auto-resolution, so subscription users (no `ANTHROPIC_API_KEY` in env, authenticated via `claude` interactive login → macOS keychain) lose the auth surface bare needs. The helper closes that gap by reading the keychain (or any other per-environment secret store) and emitting a fresh token on demand.
+- Empirically verified (CW-20260509-0016 empirical-tests, 2026-05-09): the keychain's `claudeAiOauth.accessToken` (`sk-ant-oat01-...`) authenticates against the API directly when returned by an apiKeyHelper — no exchange to `sk-ant-api03-` needed. `apiKeySource: "apiKeyHelper"` confirmed in claude's stream-json `system/init` event; the request returned `result/success` with the expected response. Also verified that `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w` works from a launchd-spawned daemon-spawned subprocess without firing a Touch-ID prompt or GUI dialog (probed via a wrapper-binary intercept inside a cerberus-deployed `clockwork-api-service` dispatch).
+- `claudeSettingsStub` signature changed from `claudeSettingsStub() string` to `claudeSettingsStub(apiKeyHelperPath string) string`. The function is unexported, so this is a private-API change with no external impact. The `BootDirSpec().PlantedFiles[2].Render` closure now passes `a.ApiKeyHelperPath` through (closure captures the receiver). Empty `ApiKeyHelperPath` (default zero value) emits no `apiKeyHelper` field — backward-compatible with the v0.9.0/v0.9.1 stub.
+- Tests: three new unit tests in `provider/bootdir_test.go` — `TestClaudeBootDirSpec_ApiKeyHelper_Absent` pins that the field is absent in settings.json when `ApiKeyHelperPath` is empty (default), `_Set` pins that a non-empty path threads into the JSON-encoded settings, and `_BareAdapterRespects` pins that both `NewClaudeAdapterBare()` and `NewClaudeAdapterDevBare()` honor the field. `go test -race -count=1 ./...` clean on darwin. `go vet ./...` clean.
+
+### Compatibility
+
+- Behavior-additive. Existing callers that don't set `ApiKeyHelperPath` get byte-for-byte identical settings.json (the `apiKeyHelper` key is omitted, so the stub remains `{"mcpServers":{},"approvedTools":[]}`). The `ClaudeAdapter` struct gains one additive field; positional composite literals continue to compile because the new field is appended after the existing six and defaults to its zero value, but keyed literals are preferred per the v0.9.0 caveat.
+- Non-bare callers can set `ApiKeyHelperPath` if they want — the field threads into `.claude/settings.json` regardless of `Bare`. The non-bare CLI honors the same `apiKeyHelper` settings.json field per its docs, so this is a uniform improvement.
+- `claudeSettingsStub`'s signature change is internal-only (unexported); no external consumers affected.
+
+### Consumer pickup
+
+- `clockwork-manifold` (CW-20260509-0016): bump go-providers to `v0.13.0`. Build a small Go binary (e.g. `cmd/clockwork-apikey-helper/main.go`) that does env-first / keychain-fallback (read `$ANTHROPIC_API_KEY` first; on empty, run `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`, parse the JSON, return `claudeAiOauth.accessToken`). Plant the helper alongside the daemon binary; populate `adapter.ApiKeyHelperPath` in `internal/runtime/agent/boot.go`'s bare-mode field-injection block (next to `adapter.MCPConfigPath` etc). Subscription users then dispatch without needing `ANTHROPIC_API_KEY` in the daemon env; API-key users keep the env-first fast path.
+
 ## v0.12.0 — 2026-05-09
 
 ### BREAKING — Removed (transitional aliases dropped per Path B)
@@ -118,6 +135,24 @@ User decision documented in Vanta as `followups.nanite.subagent_http_api_long_te
 ### Migration
 
 Replace HTTP provider construction with the corresponding CLI/PTY adapter: e.g. `provider.NewAnthropic()` → `provider.NewClaudeAdapter()` or `provider.NewClaudeAdapterBare()` (depending on whether you want non-bare auto-discovery or bare-mode strict validation); `provider.NewGemini()` → `provider.NewGeminiAdapter()` (PTY); `provider.NewOpenAI()` → no direct successor in this lib (OpenAI doesn't ship a first-party CLI agent). Embedding consumers must migrate to a different lib — go-providers v0.10.0 no longer ships embedding adapters.
+=======
+## v0.9.2
+
+- Added `ApiKeyHelperPath` field to `ClaudeAdapter`. When set on a bare-mode adapter, the planted `.claude/settings.json` includes `"apiKeyHelper": "<path>"`; bare-mode claude invokes the helper per request and consumes its first line of stdout as the bearer token used for `Authorization: Bearer <token>` against `https://api.anthropic.com`. Closes the auth gap surfaced by clockwork-manifold CW-20260509-0016: bare mode disables the CLI's OAuth/keychain auto-resolution, so subscription users (no `ANTHROPIC_API_KEY` in env, authenticated via `claude` interactive login → macOS keychain) lose the auth surface bare needs. The helper closes that gap by reading the keychain (or any other per-environment secret store) and emitting a fresh token on demand.
+- Empirically verified (CW-20260509-0016 empirical-tests, 2026-05-09): the keychain's `claudeAiOauth.accessToken` (`sk-ant-oat01-...`) authenticates against the API directly when returned by an apiKeyHelper — no exchange to `sk-ant-api03-` needed. `apiKeySource: "apiKeyHelper"` confirmed in claude's stream-json `system/init` event; the request returned `result/success` with the expected response. Also verified that `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w` works from a launchd-spawned daemon-spawned subprocess without firing a Touch-ID prompt or GUI dialog (probed via a wrapper-binary intercept inside a cerberus-deployed `clockwork-api-service` dispatch).
+- `claudeSettingsStub` signature changed from `claudeSettingsStub() string` to `claudeSettingsStub(apiKeyHelperPath string) string`. The function is unexported, so this is a private-API change with no external impact. The `BootDirSpec().PlantedFiles[2].Render` closure now passes `a.ApiKeyHelperPath` through (closure captures the receiver). Empty `ApiKeyHelperPath` (default zero value) emits no `apiKeyHelper` field — backward-compatible with the v0.9.0/v0.9.1 stub.
+- Tests: three new unit tests in `provider/bootdir_test.go` — `TestClaudeBootDirSpec_ApiKeyHelper_Absent` pins that the field is absent in settings.json when `ApiKeyHelperPath` is empty (default), `_Set` pins that a non-empty path threads into the JSON-encoded settings, and `_BareAdapterRespects` pins that both `NewClaudeAdapterBare()` and `NewClaudeAdapterDevBare()` honor the field. `go test -race -count=1 ./...` clean on darwin (33.8s). `go vet ./...` clean.
+
+### Compatibility
+
+- Behavior-additive. Existing callers that don't set `ApiKeyHelperPath` get byte-for-byte identical settings.json (the `apiKeyHelper` key is omitted, so the stub remains `{"mcpServers":{},"approvedTools":[]}`). The `ClaudeAdapter` struct gains one additive field; positional composite literals continue to compile because the new field is appended after the existing six and defaults to its zero value, but keyed literals are preferred per the v0.9.0 caveat.
+- Non-bare callers can set `ApiKeyHelperPath` if they want — the field threads into `.claude/settings.json` regardless of `Bare`. The non-bare CLI honors the same `apiKeyHelper` settings.json field per its docs, so this is a uniform improvement.
+- `claudeSettingsStub`'s signature change is internal-only (unexported); no external consumers affected.
+
+### Consumer pickup
+
+- `clockwork-manifold` (CW-20260509-0016): bump go-providers to `v0.9.2`. Build a small Go binary (e.g. `cmd/clockwork-apikey-helper/main.go`) that does env-first / keychain-fallback (read `$ANTHROPIC_API_KEY` first; on empty, run `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`, parse the JSON, return `claudeAiOauth.accessToken`). Plant the helper alongside the daemon binary; populate `adapter.ApiKeyHelperPath` in `internal/runtime/agent/boot.go`'s bare-mode field-injection block (next to `adapter.MCPConfigPath` etc). Subscription users then dispatch without needing `ANTHROPIC_API_KEY` in the daemon env; API-key users keep the env-first fast path.
+>>>>>>> 6cbdc21 (feat(provider): claude apiKeyHelper field for bare-mode subscription users (v0.9.2))
 
 ## v0.9.1
 

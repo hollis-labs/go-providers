@@ -67,6 +67,39 @@ type ClaudeAdapter struct {
 	// runs with cwd = bootDir. Ignored when Bare is false. (Non-bare
 	// consumers continue to add --add-dir from BootDirSpec.ProjectDirArg.)
 	ProjectDir string
+
+	// ApiKeyHelperPath, when non-empty, is written into the planted
+	// .claude/settings.json as `apiKeyHelper: <path>`. Bare-mode claude
+	// invokes the helper per request: the helper's stdout is consumed as
+	// the bearer token used for `Authorization: Bearer <token>` against
+	// `https://api.anthropic.com`. Documented at
+	// https://docs.claude.com/en/docs/claude-code/iam (search "apiKeyHelper").
+	//
+	// Why this exists (CW-20260509-0016): bare mode disables the CLI's
+	// OAuth/keychain auto-resolution, so subscription users (no
+	// ANTHROPIC_API_KEY in env, authenticated via `claude` interactive
+	// login → macOS keychain) lose the auth surface bare needs. The
+	// helper closes the gap: it can read the keychain (or any other
+	// per-environment secret store) and emit a fresh token on demand.
+	// Empirically the keychain's `claudeAiOauth.accessToken`
+	// (`sk-ant-oat01-...`) authenticates against the API directly when
+	// returned by an apiKeyHelper — no exchange to `sk-ant-api03-`
+	// needed.
+	//
+	// Path requirements (per claude's docs):
+	//   - Absolute path; relative paths are not honored.
+	//   - Executable bit set; the file is invoked directly (no shell
+	//     interpretation).
+	//   - First line of stdout is consumed as the token; trailing
+	//     whitespace is trimmed.
+	//   - Non-zero exit aborts the request with an auth error surfaced
+	//     by the CLI ("Not logged in" or similar).
+	//
+	// Ignored when Bare is false (the non-bare CLI runs its own auto-
+	// discovery and ignores this settings.json field). Empty value
+	// emits no `apiKeyHelper` field — bare mode then falls back to
+	// ANTHROPIC_API_KEY only.
+	ApiKeyHelperPath string
 }
 
 func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
