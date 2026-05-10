@@ -2,10 +2,55 @@
 
 ## Unreleased
 
+## v0.14.0 — 2026-05-10
+
+### Added
+
+- `examples/` directory with three runnable programs that exercise the
+  `BootDirSpec` plant-and-spawn pattern end-to-end:
+  - `examples/claude_bare/` — bare-mode Claude Code with explicit
+    context injection (`--mcp-config`, `--append-system-prompt-file`,
+    `--settings`, `--add-dir`) and the `apiKeyHelper` auth path.
+  - `examples/codex_bootdir/` — Codex via `codex exec --json` with
+    `AGENTS.md` planted and project access via `--cd`.
+  - `examples/opencode_bootdir/` — opencode with the agent profile +
+    config files planted and `OPENCODE_CONFIG_DIR` set.
+  Each example is dry-run-friendly: when the underlying CLI binary is
+  not detectable, the program prints the boot-dir layout and would-be
+  spawn args and exits cleanly so the wiring can be inspected without
+  installing the CLI.
+
+### Changed
+
+- README hardened for public release: tightened the bare-mode
+  walkthrough, added a pointer to `examples/`, and removed
+  internal-workflow language.
+- Inline code comments and CHANGELOG entries no longer reference
+  internal sprint/ticket identifiers; the technical "why" content is
+  preserved.
+
+### Fixed
+
+- CHANGELOG: removed an unresolved merge-conflict region around the
+  v0.9.x entries (a duplicated v0.9.2 block that pre-dated the v0.13.0
+  rebase). v0.9.2 was never tagged; its content rolled forward into
+  v0.13.0.
+
+### Repository hygiene
+
+- Added a top-level `.gitignore` covering Go build artifacts, editor
+  scratch files, and OS metadata files.
+
+### Compatibility
+
+- Source- and behavior-compatible with v0.13.0. No new module
+  dependencies, no API surface changes. The new `examples/` subtree
+  uses only the existing public API plus stdlib.
+
 ## v0.13.0 — 2026-05-09
 
-- Added `ApiKeyHelperPath` field to `ClaudeAdapter`. When set on a bare-mode adapter, the planted `.claude/settings.json` includes `"apiKeyHelper": "<path>"`; bare-mode claude invokes the helper per request and consumes its first line of stdout as the bearer token used for `Authorization: Bearer <token>` against `https://api.anthropic.com`. Closes the auth gap surfaced by clockwork-manifold CW-20260509-0016: bare mode disables the CLI's OAuth/keychain auto-resolution, so subscription users (no `ANTHROPIC_API_KEY` in env, authenticated via `claude` interactive login → macOS keychain) lose the auth surface bare needs. The helper closes that gap by reading the keychain (or any other per-environment secret store) and emitting a fresh token on demand.
-- Empirically verified (CW-20260509-0016 empirical-tests, 2026-05-09): the keychain's `claudeAiOauth.accessToken` (`sk-ant-oat01-...`) authenticates against the API directly when returned by an apiKeyHelper — no exchange to `sk-ant-api03-` needed. `apiKeySource: "apiKeyHelper"` confirmed in claude's stream-json `system/init` event; the request returned `result/success` with the expected response. Also verified that `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w` works from a launchd-spawned daemon-spawned subprocess without firing a Touch-ID prompt or GUI dialog (probed via a wrapper-binary intercept inside a cerberus-deployed `clockwork-api-service` dispatch).
+- Added `ApiKeyHelperPath` field to `ClaudeAdapter`. When set on a bare-mode adapter, the planted `.claude/settings.json` includes `"apiKeyHelper": "<path>"`; bare-mode claude invokes the helper per request and consumes its first line of stdout as the bearer token used for `Authorization: Bearer <token>` against `https://api.anthropic.com`. This closes an auth gap in bare mode: bare disables the CLI's OAuth/keychain auto-resolution, so subscription users (no `ANTHROPIC_API_KEY` in env, authenticated via `claude` interactive login → macOS keychain) lose the auth surface bare needs. The helper closes that gap by reading the keychain (or any other per-environment secret store) and emitting a fresh token on demand.
+- Empirically verified (probed against claude 2.1.137): the keychain's `claudeAiOauth.accessToken` (`sk-ant-oat01-…` format) authenticates against the API directly when returned by an `apiKeyHelper` — no exchange to a long-lived API key needed. `apiKeySource: "apiKeyHelper"` is confirmed in claude's stream-json `system/init` event; the request returns `result/success`. `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w` reads the keychain entry from a launchd-spawned daemon-spawned subprocess without firing a Touch-ID prompt or GUI dialog.
 - `claudeSettingsStub` signature changed from `claudeSettingsStub() string` to `claudeSettingsStub(apiKeyHelperPath string) string`. The function is unexported, so this is a private-API change with no external impact. The `BootDirSpec().PlantedFiles[2].Render` closure now passes `a.ApiKeyHelperPath` through (closure captures the receiver). Empty `ApiKeyHelperPath` (default zero value) emits no `apiKeyHelper` field — backward-compatible with the v0.9.0/v0.9.1 stub.
 - Tests: three new unit tests in `provider/bootdir_test.go` — `TestClaudeBootDirSpec_ApiKeyHelper_Absent` pins that the field is absent in settings.json when `ApiKeyHelperPath` is empty (default), `_Set` pins that a non-empty path threads into the JSON-encoded settings, and `_BareAdapterRespects` pins that both `NewClaudeAdapterBare()` and `NewClaudeAdapterDevBare()` honor the field. `go test -race -count=1 ./...` clean on darwin. `go vet ./...` clean.
 
@@ -15,9 +60,9 @@
 - Non-bare callers can set `ApiKeyHelperPath` if they want — the field threads into `.claude/settings.json` regardless of `Bare`. The non-bare CLI honors the same `apiKeyHelper` settings.json field per its docs, so this is a uniform improvement.
 - `claudeSettingsStub`'s signature change is internal-only (unexported); no external consumers affected.
 
-### Consumer pickup
+### Consumer integration sketch
 
-- `clockwork-manifold` (CW-20260509-0016): bump go-providers to `v0.13.0`. Build a small Go binary (e.g. `cmd/clockwork-apikey-helper/main.go`) that does env-first / keychain-fallback (read `$ANTHROPIC_API_KEY` first; on empty, run `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`, parse the JSON, return `claudeAiOauth.accessToken`). Plant the helper alongside the daemon binary; populate `adapter.ApiKeyHelperPath` in `internal/runtime/agent/boot.go`'s bare-mode field-injection block (next to `adapter.MCPConfigPath` etc). Subscription users then dispatch without needing `ANTHROPIC_API_KEY` in the daemon env; API-key users keep the env-first fast path.
+A minimal helper executable looks like: read `$ANTHROPIC_API_KEY` first; on empty, run `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`, parse the JSON, write `claudeAiOauth.accessToken` to stdout. Plant the helper next to your dispatcher binary and set `adapter.ApiKeyHelperPath` alongside `adapter.MCPConfigPath` etc. Subscription users then dispatch without needing `ANTHROPIC_API_KEY` in the dispatcher env; API-key users keep the env-first fast path.
 
 ## v0.12.0 — 2026-05-09
 
@@ -44,19 +89,16 @@
 
 ### Why
 
-The aliases were introduced in `c18dd6d` (v0.11.0) to ease the
-consumer-side migration to `go-llm-contracts` + `go-llm-types`. Per Path B
-(user 2026-05-09: "do the clean break now so we don't have to come back
-and remove aliases"), all in-scope consumers (nanite Wave-2 + Path-B sweep
-at nanite `00f0f9e`; vanta-conduit; stack-explorer) migrated their imports
-directly to the canonical homes during SP-20260508-0001.
+The aliases were introduced in v0.11.0 to ease the consumer-side
+migration to `go-llm-contracts` + `go-llm-types`. The clean-break path
+was chosen here: known consumers migrated their imports directly to the
+canonical homes in lockstep, so the transitional aliases are no longer
+needed.
 
-The six PTY adapters survived CW-20260508-0010 (option B was selected at
-the time because agent-mux + clockwork-manifold consumed them). Per the
-same 2026-05-09 directive — those apps are migrating in parallel and not
-in scope for this sprint — the gating rationale is dropped and the
-adapters go away cleanly. Cutting v0.12.0 may temporarily break those
-apps' `main`; that is acceptable.
+The six unused PTY adapters were preserved through earlier releases
+because downstream apps still consumed them. Those apps have since
+migrated to the three production adapters (claude / codex / opencode);
+the unused adapters are dropped cleanly.
 
 ### Migration
 
@@ -82,7 +124,6 @@ helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`,
 `EventReactionPipeline`, and the `BootDirSpec` plumbing for the three
 production adapters.
 
-Sprint: SP-20260508-0001
 Companion modules: go-llm-contracts, go-llm-types, go-embed-contracts
 
 ## v0.11.0
@@ -118,12 +159,20 @@ adapter implementations while giving SDK/HTTP wrappers a stable shared home.
 
 ### Why
 
-User decision documented in Vanta as `followups.nanite.subagent_http_api_long_term_strategy` (2026-05-08 → resolved 2026-05-09): pick option-2 ("drop HTTP"), promoted from Nanite-consumer to lib-side. Rationale: portfolio agent flows have moved to CLI/PTY adapters (claude / codex / opencode / gemini-cli / qwen / junie / kiro / copilot / aider). Maintaining HTTP chat adapters duplicates work the CLIs do (auth, retry, model selection, prompt caching) and accretes maintenance debt with no remaining first-party consumer.
+First-party agent flows have moved to CLI/PTY adapters
+(claude / codex / opencode / gemini-cli / qwen / junie / kiro / copilot /
+aider). Maintaining HTTP chat adapters duplicates work the CLIs do
+(auth, retry, model selection, prompt caching) and accretes maintenance
+debt with no remaining first-party consumer.
 
 ### Consumer breakage (informational)
 
-- **Nanite (heaviest consumer):** `cmd/nanite/main.go:483-540` (HTTP provider registry block), `internal/service/embedder_select.go` (full file), `internal/service/chat.go:532` / `chat_generate.go:239,1442` / `chat_rate_budget_pause.go:95` (type-assertions on `*provider.Anthropic` for CircuitBreaker/RateTracker), `internal/service/subagent_runner.go` (the dual-path HTTP fallback retired by this release). Migration handled in parallel under SP-20260508-0001.
-- **agent-mux, clockwork-manifold, sigil, hadron, carrier:** consumer code uses PTY/CLI adapters only — survives unchanged.
+- The heaviest internal consumer migrated its HTTP-provider registry,
+  embedder-selection plumbing, and the few `*provider.Anthropic`
+  type-assertion sites in lockstep with this release; the dual-path
+  HTTP fallback path is retired.
+- All other internal consumers were CLI/PTY-only and pick this release
+  up unchanged.
 
 ### Tests
 
@@ -135,29 +184,11 @@ User decision documented in Vanta as `followups.nanite.subagent_http_api_long_te
 ### Migration
 
 Replace HTTP provider construction with the corresponding CLI/PTY adapter: e.g. `provider.NewAnthropic()` → `provider.NewClaudeAdapter()` or `provider.NewClaudeAdapterBare()` (depending on whether you want non-bare auto-discovery or bare-mode strict validation); `provider.NewGemini()` → `provider.NewGeminiAdapter()` (PTY); `provider.NewOpenAI()` → no direct successor in this lib (OpenAI doesn't ship a first-party CLI agent). Embedding consumers must migrate to a different lib — go-providers v0.10.0 no longer ships embedding adapters.
-=======
-## v0.9.2
-
-- Added `ApiKeyHelperPath` field to `ClaudeAdapter`. When set on a bare-mode adapter, the planted `.claude/settings.json` includes `"apiKeyHelper": "<path>"`; bare-mode claude invokes the helper per request and consumes its first line of stdout as the bearer token used for `Authorization: Bearer <token>` against `https://api.anthropic.com`. Closes the auth gap surfaced by clockwork-manifold CW-20260509-0016: bare mode disables the CLI's OAuth/keychain auto-resolution, so subscription users (no `ANTHROPIC_API_KEY` in env, authenticated via `claude` interactive login → macOS keychain) lose the auth surface bare needs. The helper closes that gap by reading the keychain (or any other per-environment secret store) and emitting a fresh token on demand.
-- Empirically verified (CW-20260509-0016 empirical-tests, 2026-05-09): the keychain's `claudeAiOauth.accessToken` (`sk-ant-oat01-...`) authenticates against the API directly when returned by an apiKeyHelper — no exchange to `sk-ant-api03-` needed. `apiKeySource: "apiKeyHelper"` confirmed in claude's stream-json `system/init` event; the request returned `result/success` with the expected response. Also verified that `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w` works from a launchd-spawned daemon-spawned subprocess without firing a Touch-ID prompt or GUI dialog (probed via a wrapper-binary intercept inside a cerberus-deployed `clockwork-api-service` dispatch).
-- `claudeSettingsStub` signature changed from `claudeSettingsStub() string` to `claudeSettingsStub(apiKeyHelperPath string) string`. The function is unexported, so this is a private-API change with no external impact. The `BootDirSpec().PlantedFiles[2].Render` closure now passes `a.ApiKeyHelperPath` through (closure captures the receiver). Empty `ApiKeyHelperPath` (default zero value) emits no `apiKeyHelper` field — backward-compatible with the v0.9.0/v0.9.1 stub.
-- Tests: three new unit tests in `provider/bootdir_test.go` — `TestClaudeBootDirSpec_ApiKeyHelper_Absent` pins that the field is absent in settings.json when `ApiKeyHelperPath` is empty (default), `_Set` pins that a non-empty path threads into the JSON-encoded settings, and `_BareAdapterRespects` pins that both `NewClaudeAdapterBare()` and `NewClaudeAdapterDevBare()` honor the field. `go test -race -count=1 ./...` clean on darwin (33.8s). `go vet ./...` clean.
-
-### Compatibility
-
-- Behavior-additive. Existing callers that don't set `ApiKeyHelperPath` get byte-for-byte identical settings.json (the `apiKeyHelper` key is omitted, so the stub remains `{"mcpServers":{},"approvedTools":[]}`). The `ClaudeAdapter` struct gains one additive field; positional composite literals continue to compile because the new field is appended after the existing six and defaults to its zero value, but keyed literals are preferred per the v0.9.0 caveat.
-- Non-bare callers can set `ApiKeyHelperPath` if they want — the field threads into `.claude/settings.json` regardless of `Bare`. The non-bare CLI honors the same `apiKeyHelper` settings.json field per its docs, so this is a uniform improvement.
-- `claudeSettingsStub`'s signature change is internal-only (unexported); no external consumers affected.
-
-### Consumer pickup
-
-- `clockwork-manifold` (CW-20260509-0016): bump go-providers to `v0.9.2`. Build a small Go binary (e.g. `cmd/clockwork-apikey-helper/main.go`) that does env-first / keychain-fallback (read `$ANTHROPIC_API_KEY` first; on empty, run `security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`, parse the JSON, return `claudeAiOauth.accessToken`). Plant the helper alongside the daemon binary; populate `adapter.ApiKeyHelperPath` in `internal/runtime/agent/boot.go`'s bare-mode field-injection block (next to `adapter.MCPConfigPath` etc). Subscription users then dispatch without needing `ANTHROPIC_API_KEY` in the daemon env; API-key users keep the env-first fast path.
->>>>>>> 6cbdc21 (feat(provider): claude apiKeyHelper field for bare-mode subscription users (v0.9.2))
 
 ## v0.9.1
 
 - `renderMCPJSON(loopbackURL)` now emits `{"type": "http", "url": "..."}` for the loopback entry instead of `{"url": "..."}`. The bare-mode CLI's `--mcp-config <path>` triggers strict schema validation that requires an explicit transport discriminator on every server entry; without `type`, the validator defaults to the stdio shape and rejects with `Invalid MCP server config for "loopback": command: expected string, received undefined`. Empirical probe against claude 2.1.137 (recorded in `agent-workspaces/execution/go-providers/2026-05-09-bare-mode-mcp-shape/probe-results.md`): of six candidate shapes (`{url}`, `{transport: http, url}`, `{type: http, url}`, `{http: {url}}`, `{type: sse, url}`, `{type: streamable-http, url}`), only the three with a top-level `type:` field pass bare-mode validation. `type: "http"` is also accepted by non-bare auto-discovery (probed against the same binary), so option (b) from the ticket — single shape for all callers — works without branching.
-- Surfaced by clockwork-manifold S2.5 plan-execute smoke 2026-05-09 ~01:09 UTC (CW-20260509-0003): four child sessions (SES-01KR54G921SWFMEMF9MTJRNADA et al) spawned with the v0.9.0 bare adapter immediately exited 1 in <1s with the validator error above as their only stderr output. The v0.9.0 empty-MCP probe verified the empty-servers shape (`{"mcpServers":{}}`) passed bare validation but didn't probe the populated-loopback shape; this fix closes that gap.
+- Surfaced empirically: child sessions spawned with the v0.9.0 bare adapter against a populated MCP loopback exited 1 within a second with the validator error above as their only stderr. The v0.9.0 empty-MCP probe verified the empty-servers shape (`{"mcpServers":{}}`) passed bare validation but didn't probe the populated-loopback shape; this fix closes that gap.
 - Why `type: "http"` over `sse` / `streamable-http`: the loopback is a streamable-HTTP MCP server, not an SSE stream — `sse` would mislabel it. Both `claude --help` and `claude mcp add --transport http <name> <url>` use `http` as the canonical transport keyword, so the planted file mirrors what claude itself writes when a user runs `mcp add`. `streamable-http` matches MCP-spec terminology but isn't the user-surface keyword.
 - All three adapters that share `renderMCPJSON` (claude / codex / opencode) inherit the fix transparently. Codex/opencode don't use bare mode today; the change is neutral for their auto-discovery flow (verified empirically) and forward-compatible if either adapter migrates to a strict-validation flag in the future.
 - Tests: `TestRenderMCPJSON_PopulatedShape` pins the exact emitted bytes for a non-empty URL; `TestRenderMCPJSON_Empty` mirrors `TestClaudeBootDirSpec_EmptyMCP` at the function level. `TestClaudeBootDirSpec` extended to assert `"type": "http"` is present in the populated `.mcp.json`. New gated real-spawn smoke `TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke` (`CLAUDE_BARE_SMOKE=1`) plants the full BootDirSpec layout with a populated loopback URL pointing at an unreachable port, spawns `claude --bare --mcp-config <path>` with the bare-mode arg shape via `BareInjectionPaths`, and asserts: exit 0 inside 30s, no `Invalid MCP configuration` / `Invalid MCP server config` / `command: expected string, received undefined` sentinels in stderr, stream-json output present, response contains `TEST_OK_BARE`. Claude eagerly probes MCP servers at session init but treats connect failure as non-fatal (`mcp_servers:[{name:"loopback",status:"failed"}]` in the init event) and proceeds to respond, so an unreachable port doesn't gate exit 0. `go test -race -count=1 ./...` clean on darwin (33.6s). `GOOS=linux go build/vet ./...` clean. Existing bare-mode unit tests and `TestClaudeAdapter_BareSpawn_Smoke` (empty MCP) pass unchanged.
@@ -169,16 +200,18 @@ Replace HTTP provider construction with the corresponding CLI/PTY adapter: e.g. 
 
 ### Consumer pickup
 
-- `clockwork-manifold` (CW-20260509-0003): bump go-providers to `v0.9.1`. Then re-apply the bare-mode wiring that was reverted on 2026-05-09 (`internal/runtime/agent/factory.go`: swap `NewClaudeAdapterDev()` → `NewClaudeAdapterDevBare()` and populate the four bare fields from `BareInjectionPaths(bootDir, projectDir)`; equivalent revert in `agent_test.go`). After bump + rewire, the S2.5 smoke walks all four children + reviewer cycles end-to-end (CW-20260508-0019 operator-config bleed-through stays low-pri safety-net since bare-mode adapters bypass it).
-- `mux` migration to bare mode: separate decision, not on this work.
+- Bump go-providers to `v0.9.1` and re-apply any bare-mode wiring that
+  was reverted while the v0.9.0 populated-loopback bug was outstanding
+  (swap to `NewClaudeAdapterDevBare()` and populate the four bare
+  fields from `BareInjectionPaths(bootDir, projectDir)`).
 
 ## v0.9.0
 
 - Added `--bare` mode support to `ClaudeAdapter`. New `Bare bool` field plus four explicit-injection path fields (`MCPConfigPath`, `AppendSystemPromptFile`, `SettingsPath`, `ProjectDir`) and constructors `NewClaudeAdapterBare()` / `NewClaudeAdapterDevBare()`. When `Bare=true`, `BuildArgs` emits `--bare` plus `--mcp-config`, `--append-system-prompt-file`, `--settings`, `--add-dir` for each non-empty path field, on top of the existing print-mode shape (`-p`, `--output-format stream-json`, `--verbose`). Per Anthropic's claude 2.1.133+ docs, bare mode is "the recommended mode for scripted and SDK calls, and will become the default for `-p` in a future release"; it skips auto-discovery of hooks, skills, plugins, MCP servers, auto-memory, CLAUDE.md, OAuth, keychain reads, and operator config — only flags passed explicitly take effect. Adopting it now positions consumers correctly for the future-default shift and eliminates an entire class of operator-config bleed-through (`remoteControlAtStartup`, workspace-trust dialog, etc.) for scripted spawns.
 - Added `ClaudeBareInjection` struct + `(*ClaudeAdapter).BareInjectionPaths(bootDir, projectDir)` helper that derives the four flag values from the planted-file layout in `BootDirSpec`. Consumer flow: `inj := adapter.BareInjectionPaths(bootDir, projectDir)`, copy the four fields onto the adapter, then `BuildArgs(prompt, "", sessionID)`. Empty `bootDir` or `projectDir` produce empty corresponding fields (no flag emitted — bare mode then has zero of that context category, which is the documented behavior).
 - `BuildArgs` branch precedence is now `Bare` > `PTY` > default print-mode. If both `Bare=true` and `PTY=true` are set, bare wins because bare mode is print-mode-focused per the docs. The `systemPrompt` parameter to `BuildArgs` is ignored in bare mode — system context flows via the planted CLAUDE.md referenced through `AppendSystemPromptFile`. Stream-json subprocess-per-turn semantics (`--resume <id>` chaining included) work identically in bare mode; `--resume` is positioned first as in non-bare print mode.
-- Surfaced by clockwork-manifold S2.5 plan-execute smoke 2026-05-08 (post-v0.8.2): `remoteControlAtStartup: true` in `~/.claude.json` repeatedly forced programmatic spawns into remote-control mode (local stdin inert), filed as low-pri CW-20260508-0019. Bare mode obsoletes that issue and the broader operator-config bleed surface for bare consumers in one shot. Workspace-trust dialog seeding from v0.8.2 stays — non-bare callers still need it; bare bypasses the dialog (no projects-map read).
-- Auth requirement: bare mode strictly requires `ANTHROPIC_API_KEY` env var or `apiKeyHelper` via `--settings` (OAuth and keychain are never read). Documented in field comments + the bare smoke test gate. Clockwork already provides `ANTHROPIC_API_KEY` via env so consumer pickup needs no auth changes.
+- Surfaced empirically (post-v0.8.2): `remoteControlAtStartup: true` in `~/.claude.json` repeatedly forced programmatic spawns into remote-control mode (local stdin inert). Bare mode obsoletes that issue and the broader operator-config bleed surface for bare consumers in one shot. Workspace-trust dialog seeding from v0.8.2 stays — non-bare callers still need it; bare bypasses the dialog (no projects-map read).
+- Auth requirement: bare mode strictly requires `ANTHROPIC_API_KEY` env var or `apiKeyHelper` via `--settings` (OAuth and keychain are never read). Documented in field comments + the bare smoke test gate. Callers that already provide `ANTHROPIC_API_KEY` in env need no auth changes.
 - Tests: 12 new bare-mode unit tests in `provider/pty_claude_test.go` (`TestClaudeBuildArgs_Bare_*` covering no-paths, each individual flag, all-paths in stable order, skip-permissions, resume positioning, bare>PTY precedence, ignored systemPrompt parameter, plus `TestClaudeBareInjectionPaths` covering populated/empty bootDir+projectDir combinations). New `TestClaudeBuildArgs_NonBare_ByteForByteIdentical` sentinel pins five non-bare arg shapes (Dev print, with/without system prompt, with resume, PTY empty, DevPTY+resume) to guard against accidental leakage of bare additions into non-bare branches. Constructor-defaults test extended for the two new bare constructors. Pre-existing PTY-mode + print-mode tests pass byte-for-byte unchanged. New gated real-spawn smoke in `provider/bare_claude_smoke_test.go` (`TestClaudeAdapter_BareSpawn_Smoke`, gated on `CLAUDE_BARE_SMOKE=1`) plants a minimal CLAUDE.md + valid `.mcp.json` into a tempdir, spawns `claude --bare` with the full bare arg shape via `BareInjectionPaths`, and asserts exit 0 inside 30s, stream-json `system` event present, response contains `TEST_OK_BARE`, no `Quicksafetycheck`/`trust this folder`/`Quick safety check` trust-dialog markers, and no `remoteControl`/`remote-control` operator-config markers. Skips when the claude binary is absent or `ANTHROPIC_API_KEY` is unset (bare requires env-var auth). Existing `CLAUDE_PTY_SMOKE=1` regression continues to pass.
 - `renderMCPJSON("")` now emits `{"mcpServers":{}}` instead of bare `{}`. Bare-mode `--mcp-config` references `.mcp.json` directly and triggers strict schema validation that requires `mcpServers` to be a record (probed empirically against claude 2.1.136: bare `{}` fails with `mcpServers: Invalid input: expected record, received undefined`). Auto-discovery (the non-bare path) accepts both shapes, so this change is harmless for existing callers and prevents a footgun for bare consumers planting via `BootDirSpec`. The pinned `TestClaudeBootDirSpec_EmptyMCP` test is updated to match.
 - `go test -race -count=1 ./...` clean on darwin (33.7s). `GOOS=linux go build/vet ./...` clean. Both `CLAUDE_PTY_SMOKE=1` and the unit-level bare suite verified locally. The gated `CLAUDE_BARE_SMOKE=1` real-spawn test was hand-validated against `claude --bare` (claude 2.1.136) with a planted bootdir; the spawn produced stream-json output and the only blocker was authentication (no env-var key), which matches the documented bare-mode auth contract.
@@ -197,7 +230,7 @@ Bare mode is a meaningful capability addition: new constructors, new `BuildArgs`
 
 ### Consumer pickup
 
-- `clockwork-manifold` (CW-20260508-0019 et al will be obsoleted for bare consumers): bump go-providers to `v0.9.0`, swap the adapter constructor in `internal/runtime/agent/factory.go` to `NewClaudeAdapterDevBare()` for scripted/subprocess-per-turn paths, and after planting via `BootDirSpec` populate the four bare fields:
+- Bump go-providers to `v0.9.0`, swap the adapter constructor to `NewClaudeAdapterDevBare()` for scripted/subprocess-per-turn paths, and after planting via `BootDirSpec` populate the four bare fields:
   ```go
   inj := claude.BareInjectionPaths(bootDir, projectDir)
   claude.MCPConfigPath          = inj.MCPConfigPath
@@ -206,15 +239,14 @@ Bare mode is a meaningful capability addition: new constructors, new `BuildArgs`
   claude.ProjectDir             = inj.ProjectDir
   ```
   PTY-spawned long-lived sessions stay on `NewClaudeAdapterDevPTY()` — bare mode is print-mode-focused.
-- Mux migration to bare mode: separate decision, not on this work.
-- Other PTY adapters (codex / opencode / gemini / copilot / aider / junie / kiro / qwen): each has its own scripted-call shape; file follow-ups if discovered.
+- Other PTY adapters (codex / opencode / gemini / copilot / aider / junie / kiro / qwen): each has its own scripted-call shape; downstream callers can file per-adapter follow-ups as needed.
 
 ## v0.8.2
 
 - `BootDirSpec` for the claude adapter now pre-accepts the workspace trust dialog for the per-task bootdir. The `.claude/settings.json` planted-file `Render` closure side-effects on `~/.claude.json`'s `projects` map when `PlantContext.BootDir` is set, writing `projects[<realpath(bootDir)>] = {hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true}` via an atomic temp-file rename. Side effect is gated on a non-empty `BootDir` so existing callers that invoke `Render` for content-only purposes (unit tests, dry runs) don't pollute global state.
 - Added `BootDir` field to `provider.PlantContext`, mirroring the existing `ProjectDir` field. Apps populate it from their bootdir factory; adapter `Render` closures that need to seed external state keyed on the bootdir read from this field. Documented invariant on `PlantedFile.Render`: closures MAY perform environment setup gated on `ctx.BootDir != ""`, otherwise stay pure.
-- Surfaced by clockwork-manifold S2.5 plan-execute smoke retry on 2026-05-08 (post-v0.8.1, session `SES-01KR4KG32X6EC2GC3KMF2M644F`): the long-lived PTY claude no longer dies on arg validation, but stalls indefinitely on the first-run `Quick safety check: Is this a project you created or one you trust?` dialog because each clockwork session uses a fresh `clockwork-boot-claude-...` tempdir as cwd. Per `claude --help`, the dialog auto-skips only in non-interactive mode (`-p` / piped stdout). PTY = TTY = dialog fires. `--dangerously-skip-permissions` covers per-tool permission checks, not this gate.
-- Probe results (recorded in `agent-workspaces/execution/go-providers/2026-05-08-claude-pty-trust/implementer-report.md`): per-cwd `.claude/settings.json` does NOT honor any trust field (probed: `hasTrustDialogAccepted`, `trustDialogAccepted`, `trusted`, `workspaceTrust` — all leave the dialog firing). Trust state is canonical at `~/.claude.json` → `projects[<realpath(cwd)>].hasTrustDialogAccepted`. Path keying must use `filepath.EvalSymlinks` because claude resolves cwd via realpath on macOS (`/var/folders/…` → `/private/var/folders/…`); seeding with the unresolved path leaves the dialog firing. Binary string evidence: `checkHasTrustDialogAccepted` / `hasTrustDialogAccepted` / `resetTrustDialogAcceptedCache` symbols in claude 2.1.133+.
+- Surfaced empirically (post-v0.8.1): the long-lived PTY claude no longer dies on arg validation, but stalls indefinitely on the first-run `Quick safety check: Is this a project you created or one you trust?` dialog when the per-task tempdir is a fresh path. Per `claude --help`, the dialog auto-skips only in non-interactive mode (`-p` / piped stdout). PTY = TTY = dialog fires. `--dangerously-skip-permissions` covers per-tool permission checks, not this gate.
+- Probe results: per-cwd `.claude/settings.json` does NOT honor any trust field (probed: `hasTrustDialogAccepted`, `trustDialogAccepted`, `trusted`, `workspaceTrust` — all leave the dialog firing). Trust state is canonical at `~/.claude.json` → `projects[<realpath(cwd)>].hasTrustDialogAccepted`. Path keying must use `filepath.EvalSymlinks` because claude resolves cwd via realpath on macOS (`/var/folders/…` → `/private/var/folders/…`); seeding with the unresolved path leaves the dialog firing. Binary string evidence: `checkHasTrustDialogAccepted` / `hasTrustDialogAccepted` / `resetTrustDialogAcceptedCache` symbols in claude 2.1.133+.
 - Tests: seven unit tests (`TestSeedClaudeWorkspaceTrust_NewConfig`, `TestSeedClaudeWorkspaceTrust_PreservesExistingKeys`, `TestSeedClaudeWorkspaceTrust_PreservesExistingProjectKeys`, `TestSeedClaudeWorkspaceTrust_NonObjectProjectsErrors`, `TestSeedClaudeWorkspaceTrust_NonObjectEntryErrors`, `TestSeedClaudeWorkspaceTrust_MalformedConfigErrors`, `TestSeedClaudeWorkspaceTrust_RejectsEmpty`) cover create-from-scratch, key preservation across both top-level keys and nested `projects[...]` entries, refusal-on-shape-mismatch (errors when `projects` or `projects[<resolved>]` is present but not a JSON object — preserves existing data rather than silently overwriting), malformed-config refusal (does not overwrite the user's config), and empty-input rejection. Two `BootDirSpec` settings.json render tests pin the gating contract: `Render` is a no-op on `~/.claude.json` when `BootDir == ""`, and seeds the projects entry when `BootDir != ""`. A real-spawn integration smoke (`TestClaudeBootDirSpec_TrustPreAccept_Smoke`, `provider/bootdir_claude_smoke_test.go`) gated on `CLAUDE_PTY_SMOKE=1` plants the spec into a fresh tempdir, spawns claude in PTY mode, and asserts the dialog sentinels (`Quicksafetycheck`, `Isthisaprojectyoucreated`, `trustthisfolder`, `Yes,Itrustthisfolder`) do not appear in PTY output within a 4s window. Best-effort cleanup removes the `projects[bootDir]` entry on test exit so contributors don't accumulate stale entries. The render-closure tests use a `setHomeForTest` helper that sets both `HOME` (unix) and `USERPROFILE` (windows) so `os.UserHomeDir()` redirection works cross-platform. `go test -race -count=1 ./...` clean on darwin; `GOOS=linux go build/vet ./...` and `GOOS=windows go build/vet ./...` clean.
 - Subprocess-per-turn (print mode) callers: byte-for-byte unchanged. The `BuildArgs` shape is identical to v0.8.1, the `--print` invocation auto-skips the trust dialog per `claude --help`, and `Render` closures only seed when `BootDir` is set — print-mode callers that never populate `BootDir` continue to be pure. Existing tests pass unchanged.
 
@@ -227,17 +259,17 @@ Bare mode is a meaningful capability addition: new constructors, new `BuildArgs`
 
 - Trust seeding writes to `~/.claude.json` from the lib. Surface narrowed to a single key under `projects[<realpath(bootDir)>]`; other top-level keys (`oauthAccount`, `anonymousId`, etc.) and other projects entries are preserved verbatim. Test coverage pins both invariants. The helper also refuses to overwrite when `projects` or the per-path entry is present but not a JSON object — guards against future claude versions that change the shape, and against user-edited configs.
 - Atomic write: temp-file-then-rename in the same directory as `~/.claude.json` so partial writes can't corrupt the file. Full payload is verified with an explicit byte-count check (`n != len(out)`) before rename so future swaps of the temp-file backend can't quietly drop bytes via short writes. Read-modify-rename is not lock-aware against concurrent claude writes; in the rare case where another claude process writes between our read and our rename, the bootdir's trust marker could be clobbered and the dialog would fire on the next spawn. Concurrency hardening (file lock on a sidecar) is filed as a follow-up; the surface is intentionally narrow today.
-- Cleanup: the lib does not remove the `projects[bootDir]` entry. Bootdirs are tempdirs that consumers remove at session teardown; the stale projects entry references a non-existent path and is harmless. If accumulation becomes an issue, consumers can sweep entries whose path matches the `clockwork-boot-claude-` prefix on startup.
+- Cleanup: the lib does not remove the `projects[bootDir]` entry. Boot dirs are tempdirs that consumers remove at session teardown; the stale projects entry references a non-existent path and is harmless. If accumulation becomes an issue, consumers can sweep entries whose path matches the consumer's per-task tempdir prefix on startup.
 
 ### Consumer pickup
 
-- `clockwork-manifold` (CW-20260508-0007 follow-up): `internal/runtime/agent/bootdir.go` builds `provider.PlantContext{...}` without setting `BootDir`. Add `BootDir: bootDir` to the `plantCtx` literal so the trust seed fires. This is a one-line change. Discovered during this ticket — the boot prompt's note that "consumers pick up the new spec automatically" via `PlantedFiles` iteration is true for the file-content half of the change but not for the seeding side effect, which depends on `PlantContext.BootDir` being populated.
-- Other PTY adapters (codex / opencode / gemini / copilot / aider / junie / kiro / qwen): each has its own first-run UX (trust dialog, license acceptance, telemetry opt-in). Filed as separate per-adapter follow-ups.
+- The trust seeding fires only when `PlantContext.BootDir` is populated. Consumers that build `provider.PlantContext{...}` without setting `BootDir` need to add `BootDir: bootDir` to the literal so the seed runs — this is a one-line change. The `PlantedFiles` iteration loop picks up file-content changes automatically; the seeding side effect depends on `PlantContext.BootDir` being populated.
+- Other PTY adapters (codex / opencode / gemini / copilot / aider / junie / kiro / qwen): each has its own first-run UX (trust dialog, license acceptance, telemetry opt-in) and would need its own per-adapter handling.
 
 ## v0.8.1
 
 - Added PTY-mode awareness to `ClaudeAdapter`. New `PTY bool` field plus `NewClaudeAdapterPTY()` and `NewClaudeAdapterDevPTY()` constructors. When `PTY=true`, `BuildArgs` emits interactive-shape args: it omits `-p`, `--print`, `--output-format`, `--verbose`, and `--system-prompt`, and ignores both the `prompt` and `systemPrompt` parameters. Optional `--resume <id>` is included when `cliSessionID != ""`, and `--dangerously-skip-permissions` is included when `SkipPermissions` is set. Subprocess-per-turn callers (`NewClaudeAdapter()` / `NewClaudeAdapterDev()`) see byte-for-byte unchanged behavior.
-- Surfaced by clockwork-manifold S2.5 plan-execute smoke retry on 2026-05-08: `go-agent-sessions/agentsessions/pty_session.go` calls `BuildArgs("", systemPrompt, sessionIDPreset)` for the initial PTY spawn, so the previous always-print-mode args caused claude to exit immediately with `Error: Input must be provided either through stdin or as a prompt argument when using --print`. Per-turn payloads in PTY mode arrive via PTY stdin (the lib's `BootMode=stdin` mechanism), and system prompts route via `BootPrompt` rather than `--system-prompt`.
+- Surfaced empirically: a downstream PTY-session caller invoked `BuildArgs("", systemPrompt, sessionIDPreset)` for the initial PTY spawn, so the previous always-print-mode args caused claude to exit immediately with `Error: Input must be provided either through stdin or as a prompt argument when using --print`. Per-turn payloads in PTY mode arrive via PTY stdin, and system prompts route via the boot-prompt mechanism rather than `--system-prompt`.
 - Tests: PTY-mode arg-shape unit tests cover empty, skip-permissions, resume, resume+skip-permissions, and prompt/systemPrompt-ignored cases, plus a negative check that none of `-p` / `--print` / `--system-prompt` / `--output-format` / `--verbose` appear in PTY-mode argv. Pre-existing print-mode tests pass unchanged. A real-spawn smoke test (`TestClaudeAdapter_PTYSpawn_Smoke`, `provider/pty_claude_smoke_test.go`) is gated on `CLAUDE_PTY_SMOKE=1` and asserts the process survives 1s without dying on arg validation; it skips when the `claude` binary is not on PATH so CI doesn't auto-run it. `go test -race -count=1 ./...` clean on darwin; `GOOS=linux go build/vet ./...` clean.
 
 ### Compatibility
@@ -247,9 +279,8 @@ Bare mode is a meaningful capability addition: new constructors, new `BuildArgs`
 
 ### Consumer follow-ups (not landing here)
 
-- `clockwork-manifold` (CW-20260508-0005): branch the adapter factory in `internal/runtime/agent/factory.go` on PTY caps to call the new `*PTY` constructors; revert the `pty: false` workaround on the 5 claude profiles in `profiles.yaml`.
-- `agent-mux`: future migration from internal `claudecode` runtime to this adapter (tracked separately).
-- PTY adapters for `codex` / `opencode` / `gemini` / `copilot` / `aider` / `junie` / `kiro` / `qwen`: each has its own interactive-mode question; not in scope here.
+- Downstream adapter factories should branch on PTY capability to call the new `*PTY` constructors when a long-lived PTY session is wanted, and stay on the print-mode constructors otherwise.
+- PTY adapters for `codex` / `opencode` / `gemini` / `copilot` / `aider` / `junie` / `kiro` / `qwen` each have their own interactive-mode question; per-adapter PTY support is not in scope here.
 
 ## v0.8.0
 
@@ -275,7 +306,7 @@ Bare mode is a meaningful capability addition: new constructors, new `BuildArgs`
 - Verifying the codex `--cd` flag and MCP config convention against the installed codex revision (Notes flag this).
 - Verifying opencode's MCP config convention.
 - Adding `events.Thinking` emission from the claude PTY adapter — the CLI's stream-json doesn't currently surface thinking blocks at the assistant level; the existing `StreamEvent.EventThinking` is from the Anthropic HTTP adapter. When the claude CLI exposes them, ParseLineEvents will fold them in.
-- Updating consumer apps' `go.mod` to v0.8.0 — separate per-app work in nanite, agent-mux, clockwork-manifold.
+- Updating consumer apps' `go.mod` to v0.8.0 — separate per-app work.
 
 ## v0.7.0
 

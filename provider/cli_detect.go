@@ -8,7 +8,7 @@ import (
 
 // lookPathExpanded tries exec.LookPath first, then checks common install
 // directories that may not be in the service PATH (e.g., when launched by
-// a process manager like Cerberus).
+// a process supervisor with a minimal PATH).
 func lookPathExpanded(name string) (string, error) {
 	// Standard LookPath using current PATH.
 	if p, err := exec.LookPath(name); err == nil {

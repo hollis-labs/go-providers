@@ -19,7 +19,7 @@ import (
 
 // PTYBridge is a provider that wraps CLI tools in pseudo-terminals.
 // It spawns the CLI as a child process, reads its structured output,
-// and maps events to Nanite's llmtypes.StreamEvent types.
+// and maps events to llmtypes.StreamEvent values.
 type PTYBridge struct {
 	adapter CLIAdapter
 	cliPath string // resolved path to the CLI binary

@@ -75,7 +75,7 @@ type ClaudeAdapter struct {
 	// `https://api.anthropic.com`. Documented at
 	// https://docs.claude.com/en/docs/claude-code/iam (search "apiKeyHelper").
 	//
-	// Why this exists (CW-20260509-0016): bare mode disables the CLI's
+	// Why this exists: bare mode disables the CLI's
 	// OAuth/keychain auto-resolution, so subscription users (no
 	// ANTHROPIC_API_KEY in env, authenticated via `claude` interactive
 	// login → macOS keychain) lose the auth surface bare needs. The

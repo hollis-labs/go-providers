@@ -56,7 +56,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 					}
 					// a.ApiKeyHelperPath threads through into the planted
 					// settings.json so bare-mode claude can resolve auth
-					// via the helper (CW-20260509-0016). Empty path leaves
+					// via the helper. Empty path leaves
 					// the field unset — bare mode then requires
 					// ANTHROPIC_API_KEY in env.
 					return claudeSettingsStub(a.ApiKeyHelperPath), nil
@@ -139,7 +139,7 @@ func renderClaudeMD(ctx PlantContext) string {
 // apiKeyHelperPath, when non-empty, threads into the stub as
 // `apiKeyHelper: <path>`. Bare-mode claude invokes the helper per
 // request and consumes its first line of stdout as the bearer token.
-// CW-20260509-0016 added this knob so subscription users (no
+// This knob exists so subscription users (no
 // ANTHROPIC_API_KEY in env, authenticated via `claude` interactive →
 // macOS keychain) can run bare-mode dispatches without manually
 // setting up an API key — the helper reads the keychain entry and
@@ -314,8 +314,8 @@ func renderMCPJSON(loopbackURL string) string {
 	// Bare-mode validation requires an explicit transport discriminator
 	// for non-stdio servers; without `type`, the validator defaults to
 	// the stdio shape and rejects with `command: expected string,
-	// received undefined` (probed empirically against claude 2.1.137,
-	// CW-20260509-0003). `type: "http"` matches the `claude mcp add
+	// received undefined` (probed empirically against claude 2.1.137).
+	// `type: "http"` matches the `claude mcp add
 	// --transport http` CLI keyword and is accepted by both bare-mode
 	// strict validation and non-bare auto-discovery, so a single shape
 	// covers all callers (claude / codex / opencode adapters share this

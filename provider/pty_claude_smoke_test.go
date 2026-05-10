@@ -14,9 +14,10 @@ import (
 	"github.com/creack/pty"
 )
 
-// TestClaudeAdapter_PTYSpawn_Smoke is a real-spawn regression test for the
-// CW-20260508-0005 incident: the previous BuildArgs always emitted print-mode
-// args, so the initial PTY spawn (with empty prompt) died on:
+// TestClaudeAdapter_PTYSpawn_Smoke is a real-spawn regression test for
+// the v0.8.1 PTY-mode arg-shape fix. The previous BuildArgs always
+// emitted print-mode args, so the initial PTY spawn (with empty prompt)
+// died on:
 //
 //	Error: Input must be provided either through stdin or as a prompt argument
 //	when using --print

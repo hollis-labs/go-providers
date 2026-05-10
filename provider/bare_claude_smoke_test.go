@@ -149,7 +149,7 @@ func TestClaudeAdapter_BareSpawn_Smoke(t *testing.T) {
 }
 
 // TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke is a real-spawn regression
-// test for the v0.9.1 bare-mode MCP-shape fix (CW-20260509-0003). It plants a
+// test for the v0.9.1 bare-mode MCP-shape fix. It plants a
 // .mcp.json containing a populated HTTP loopback entry via BootDirSpec's
 // renderer (renderMCPJSON("http://...")), spawns claude --bare, and asserts:
 //
@@ -283,7 +283,7 @@ func TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke(t *testing.T) {
 	combined := out + "\n" + stderr.String()
 
 	// The v0.9.0 validator-failure sentinels must NOT appear — this is the
-	// load-bearing assertion for CW-20260509-0003.
+	// load-bearing assertion that the v0.9.1 MCP-shape fix is in place.
 	for _, marker := range []string{
 		"Invalid MCP configuration",
 		"Invalid MCP server config",
