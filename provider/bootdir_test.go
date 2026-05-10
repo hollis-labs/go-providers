@@ -200,12 +200,29 @@ func TestCodexBootDirSpec(t *testing.T) {
 		t.Errorf("ProjectDirArg should template ProjectDir, got %q", spec.ProjectDirArg)
 	}
 	if spec.Notes == "" {
-		t.Error("codex spec Notes should describe TBD probes")
+		t.Error("codex spec Notes should document the TOML/JSON config split")
 	}
 
-	wantPaths := []string{"AGENTS.md", "boot.md", ".mcp.json"}
+	// CODEX_HOME env amendment isolates per-task config + auth from ~/.codex.
+	foundEnv := false
+	for _, e := range spec.EnvAmendments {
+		if strings.Contains(e, "CODEX_HOME") && strings.Contains(e, "{{.BootDir}}") {
+			foundEnv = true
+		}
+	}
+	if !foundEnv {
+		t.Errorf("expected CODEX_HOME env amendment, got %v", spec.EnvAmendments)
+	}
+
+	// AGENTS.md + boot.md + config.toml + auth.json + .mcp.json (sidecar).
+	wantPaths := []string{"AGENTS.md", "boot.md", "config.toml", "auth.json", ".mcp.json"}
 	if len(spec.PlantedFiles) != len(wantPaths) {
 		t.Fatalf("PlantedFiles count: want %d, got %d", len(wantPaths), len(spec.PlantedFiles))
+	}
+	for i, want := range wantPaths {
+		if spec.PlantedFiles[i].RelPath != want {
+			t.Errorf("PlantedFiles[%d].RelPath: want %q, got %q", i, want, spec.PlantedFiles[i].RelPath)
+		}
 	}
 
 	pctx := PlantContext{
@@ -222,6 +239,48 @@ func TestCodexBootDirSpec(t *testing.T) {
 	}
 	if !strings.Contains(agentsMD, `name: "codex-exec"`) {
 		t.Error("AGENTS.md frontmatter should contain JSON-quoted name")
+	}
+
+	// config.toml is the load-bearing MCP config.
+	configTOML, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	if !strings.Contains(configTOML, "[mcp_servers.loopback]") {
+		t.Errorf("config.toml should contain [mcp_servers.loopback] block, got %q", configTOML)
+	}
+	if !strings.Contains(configTOML, `"http://lp:1"`) {
+		t.Errorf("config.toml should contain the loopback URL, got %q", configTOML)
+	}
+}
+
+// TestCodexBootDirSpec_EmptyMCP pins the empty-loopback path: no config.toml
+// content (codex falls back to defaults), no .mcp.json error.
+func TestCodexBootDirSpec_EmptyMCP(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{AgentName: "codex-exec"} // no MCPLoopbackURL
+
+	configTOML, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	if configTOML != "" {
+		t.Errorf("empty MCPLoopbackURL should produce empty config.toml, got %q", configTOML)
+	}
+}
+
+// TestRenderCodexConfigTOML pins the populated and empty branches of the
+// codex TOML emitter.
+func TestRenderCodexConfigTOML(t *testing.T) {
+	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp")
+	want := "[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
+	if got != want {
+		t.Errorf("populated shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	if got := renderCodexConfigTOML(""); got != "" {
+		t.Errorf("empty URL should produce empty TOML, got %q", got)
 	}
 }
 
