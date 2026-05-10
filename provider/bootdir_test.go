@@ -391,6 +391,9 @@ func TestCodexBootDirSpec(t *testing.T) {
 	if !strings.Contains(configTOML, `"http://lp:1"`) {
 		t.Errorf("config.toml should contain the loopback URL, got %q", configTOML)
 	}
+	if strings.Contains(configTOML, "[mcp_servers.mux]") {
+		t.Errorf("config.toml should not contain mux block when MuxCommand is empty, got %q", configTOML)
+	}
 }
 
 // TestCodexBootDirSpec_EmptyMCP pins the empty-loopback path: with no
@@ -445,11 +448,11 @@ func TestCodexBootDirSpec_PlantedFileModes(t *testing.T) {
 	spec := a.BootDirSpec()
 
 	want := map[string]os.FileMode{
-		"AGENTS.md":   0,      // unset → 0o644 fallback
-		"boot.md":     0,      // unset → 0o644 fallback
-		"config.toml": 0o600,  // loopback URL — secret-ish
-		"auth.json":   0o600,  // OAuth tokens / API keys
-		".mcp.json":   0o600,  // loopback URL sidecar
+		"AGENTS.md":   0,     // unset → 0o644 fallback
+		"boot.md":     0,     // unset → 0o644 fallback
+		"config.toml": 0o600, // loopback URL — secret-ish
+		"auth.json":   0o600, // OAuth tokens / API keys
+		".mcp.json":   0o600, // loopback URL sidecar
 	}
 	got := make(map[string]os.FileMode, len(spec.PlantedFiles))
 	for _, pf := range spec.PlantedFiles {
@@ -520,13 +523,105 @@ func TestReadCodexAuthSource_Missing(t *testing.T) {
 // TestRenderCodexConfigTOML pins the populated and empty branches of the
 // codex TOML emitter.
 func TestRenderCodexConfigTOML(t *testing.T) {
-	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp")
+	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp", muxEntry{})
 	want := "[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
 	if got != want {
 		t.Errorf("populated shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
-	if got := renderCodexConfigTOML(""); got != "" {
+	if got := renderCodexConfigTOML("", muxEntry{}); got != "" {
 		t.Errorf("empty URL should produce empty TOML, got %q", got)
+	}
+}
+
+// TestRenderCodexConfigTOML_LoopbackPlusMux pins the load-bearing dual-entry
+// shape for Codex: loopback HTTP plus stdio mux in config.toml.
+func TestRenderCodexConfigTOML_LoopbackPlusMux(t *testing.T) {
+	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp", muxEntry{
+		Command: "/path/to/mux",
+		Args: []string{
+			"mcp",
+			"--proxy",
+			"--servers=vanta,clockwork,cerberus",
+			"--token",
+			"local-dev",
+			"--scopes",
+			"session.write,message.write",
+		},
+		Env: []string{
+			"MUX_AUTH_MODE=stdio",
+			"EMPTY",
+		},
+	})
+	want := `[mcp_servers.loopback]
+url = "http://127.0.0.1:65535/mcp"
+
+[mcp_servers.mux]
+command = "/path/to/mux"
+args = ["mcp", "--proxy", "--servers=vanta,clockwork,cerberus", "--token", "local-dev", "--scopes", "session.write,message.write"]
+
+[mcp_servers.mux.env]
+"MUX_AUTH_MODE" = "stdio"
+"EMPTY" = ""
+`
+	if got != want {
+		t.Errorf("loopback+mux shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderCodexConfigTOML_MuxOnly pins the mux-only branch.
+func TestRenderCodexConfigTOML_MuxOnly(t *testing.T) {
+	got := renderCodexConfigTOML("", muxEntry{
+		Command: "/path/to/mux",
+		Args:    []string{"mcp", "--proxy"},
+	})
+	want := `[mcp_servers.mux]
+command = "/path/to/mux"
+args = ["mcp", "--proxy"]
+`
+	if got != want {
+		t.Errorf("mux-only shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderCodexConfigTOML_MuxOnly_EmptyArgs pins that stdio mux entries emit
+// a stable empty args array rather than omitting the line entirely.
+func TestRenderCodexConfigTOML_MuxOnly_EmptyArgs(t *testing.T) {
+	got := renderCodexConfigTOML("", muxEntry{
+		Command: "/path/to/mux",
+	})
+	want := `[mcp_servers.mux]
+command = "/path/to/mux"
+args = []
+`
+	if got != want {
+		t.Errorf("mux-only empty-args shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestRenderCodexConfigTOML_MuxEnvKeysQuoted pins that env keys are quoted in
+// TOML and empty keys are skipped, preventing dotted keys or invalid syntax.
+func TestRenderCodexConfigTOML_MuxEnvKeysQuoted(t *testing.T) {
+	got := renderCodexConfigTOML("", muxEntry{
+		Command: "/path/to/mux",
+		Env: []string{
+			"MUX.AUTH.MODE=stdio",
+			"KEY WITH SPACE=value",
+			"=drop-me",
+		},
+	})
+	wants := []string{
+		`args = []`,
+		`[mcp_servers.mux.env]`,
+		`"MUX.AUTH.MODE" = "stdio"`,
+		`"KEY WITH SPACE" = "value"`,
+	}
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Errorf("quoted env TOML missing %q\ngot:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"" = "drop-me"`) {
+		t.Errorf("empty env key should be skipped, got:\n%s", got)
 	}
 }
 
@@ -833,14 +928,9 @@ func TestOpencodeBootDirSpec_MuxEntry(t *testing.T) {
 // TestCodexBootDirSpec_MuxEntry pins that the codex .mcp.json renderer
 // produces both loopback and mux entries when MuxCommand is set.
 //
-// Caveat (encoded in the BootDirSpec doc-block at the top of
-// bootdir_codex.go): codex itself does NOT read .mcp.json — it reads
-// config.toml (planted at PlantedFiles[2] post-v0.15.0). renderCodexConfigTOML
-// only emits a [mcp_servers.loopback] block, so codex won't actually
-// reach Mux through this plant today. The .mcp.json sidecar carries the
-// Mux entry for cross-tool inspection parity (matches claude/opencode);
-// this test pins that rendered shape so apps that grow a TOML-conversion
-// step downstream have a stable input.
+// Codex itself reads config.toml, not .mcp.json. This test therefore pins
+// both the load-bearing config.toml mux block and the legacy .mcp.json sidecar
+// parity shape.
 func TestCodexBootDirSpec_MuxEntry(t *testing.T) {
 	a := NewCodexAdapter()
 	spec := a.BootDirSpec()
@@ -852,6 +942,23 @@ func TestCodexBootDirSpec_MuxEntry(t *testing.T) {
 		MuxCommand:     "/path/to/mux",
 		MuxArgs:        []string{"mcp", "--proxy"},
 	}
+
+	configTOML, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	for _, want := range []string{
+		`[mcp_servers.loopback]`,
+		`url = "http://lp:1"`,
+		`[mcp_servers.mux]`,
+		`command = "/path/to/mux"`,
+		`args = ["mcp", "--proxy"]`,
+	} {
+		if !strings.Contains(configTOML, want) {
+			t.Errorf("config.toml missing %q\ngot:\n%s", want, configTOML)
+		}
+	}
+
 	// .mcp.json is at index 4 post-v0.15.0 (AGENTS.md, boot.md,
 	// config.toml, auth.json, .mcp.json).
 	mcpJSON, err := spec.PlantedFiles[4].Render(pctx)
