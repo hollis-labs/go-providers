@@ -73,7 +73,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 					if name == "" {
 						name = agentName
 					}
-					return renderOpencodeJSON(name, ctx.MCPLoopbackURL), nil
+					return renderOpencodeJSON(name, ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 			{
@@ -86,7 +86,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				RelPath: ".mcp.json",
 				Mode:    0o600,
 				Render: func(ctx PlantContext) (string, error) {
-					return renderMCPJSON(ctx.MCPLoopbackURL), nil
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
@@ -125,7 +125,7 @@ func renderOpencodeAgentsJSON(agentName string) string {
 	return string(out) + "\n"
 }
 
-func renderOpencodeJSON(agentName, mcpLoopbackURL string) string {
+func renderOpencodeJSON(agentName, mcpLoopbackURL string, mux muxEntry) string {
 	cfg := map[string]any{
 		"agent": map[string]any{
 			agentName: map[string]any{
@@ -134,20 +134,58 @@ func renderOpencodeJSON(agentName, mcpLoopbackURL string) string {
 		},
 	}
 	// opencode's MCP config lives under the top-level "mcp" key in
-	// opencode.json (opencode 1.14.x). The transport keyword is
-	// "remote" (HTTP/SSE) rather than claude's "http". When the
-	// caller leaves MCPLoopbackURL empty, omit the mcp block entirely
-	// — opencode merges per-dir configs with global so an empty map
-	// would still be valid, but a missing key is the cleaner
-	// signal-of-absence.
+	// opencode.json (opencode 1.14.x). The transport keywords differ
+	// from claude's:
+	//   - HTTP/SSE: "remote" (NOT claude's "http"). Carries `url`.
+	//   - stdio:    "local"  (NOT claude's "stdio"). Carries `command`
+	//               as a SINGLE array — argv[0] is the binary, the
+	//               rest are args. opencode does NOT use claude's
+	//               separate command-string + args-array shape.
+	//
+	// Probed against opencode 1.14.46 user config (~/.config/opencode/
+	// config.json) where the canonical mux entry is:
+	//
+	//	"mux": {
+	//	  "type": "local",
+	//	  "command": ["/path/to/mux", "mcp", "--proxy", ...],
+	//	  "enabled": true
+	//	}
+	//
+	// When the caller leaves both MCPLoopbackURL and Mux empty, omit
+	// the mcp block entirely — opencode merges per-dir configs with
+	// global so an empty map would still be valid, but a missing key
+	// is the cleaner signal-of-absence.
+	mcp := map[string]any{}
 	if mcpLoopbackURL != "" {
-		cfg["mcp"] = map[string]any{
-			"loopback": map[string]any{
-				"type":    "remote",
-				"url":     mcpLoopbackURL,
-				"enabled": true,
-			},
+		mcp["loopback"] = map[string]any{
+			"type":    "remote",
+			"url":     mcpLoopbackURL,
+			"enabled": true,
 		}
+	}
+	if mux.present() {
+		// Collapse command + args into the single-array shape opencode
+		// expects. Nil-safe; the resulting array always starts with the
+		// binary path even when MuxArgs is nil/empty.
+		command := make([]string, 0, 1+len(mux.Args))
+		command = append(command, mux.Command)
+		command = append(command, mux.Args...)
+		entry := map[string]any{
+			"type":    "local",
+			"command": command,
+			"enabled": true,
+		}
+		// opencode's stdio entries support an optional `environment`
+		// object (probed via the schema; schema URL is in the user's
+		// config). Emit only when non-empty so the planted config stays
+		// minimal in the common case.
+		if env := muxEnvMap(mux.Env); len(env) > 0 {
+			entry["environment"] = env
+		}
+		mcp["mux"] = entry
+	}
+	if len(mcp) > 0 {
+		cfg["mcp"] = mcp
 	}
 	out, _ := json.MarshalIndent(cfg, "", "  ")
 	return string(out) + "\n"
