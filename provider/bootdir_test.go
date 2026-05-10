@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -200,12 +203,29 @@ func TestCodexBootDirSpec(t *testing.T) {
 		t.Errorf("ProjectDirArg should template ProjectDir, got %q", spec.ProjectDirArg)
 	}
 	if spec.Notes == "" {
-		t.Error("codex spec Notes should describe TBD probes")
+		t.Error("codex spec Notes should document the TOML/JSON config split")
 	}
 
-	wantPaths := []string{"AGENTS.md", "boot.md", ".mcp.json"}
+	// CODEX_HOME env amendment isolates per-task config + auth from ~/.codex.
+	foundEnv := false
+	for _, e := range spec.EnvAmendments {
+		if strings.Contains(e, "CODEX_HOME") && strings.Contains(e, "{{.BootDir}}") {
+			foundEnv = true
+		}
+	}
+	if !foundEnv {
+		t.Errorf("expected CODEX_HOME env amendment, got %v", spec.EnvAmendments)
+	}
+
+	// AGENTS.md + boot.md + config.toml + auth.json + .mcp.json (sidecar).
+	wantPaths := []string{"AGENTS.md", "boot.md", "config.toml", "auth.json", ".mcp.json"}
 	if len(spec.PlantedFiles) != len(wantPaths) {
 		t.Fatalf("PlantedFiles count: want %d, got %d", len(wantPaths), len(spec.PlantedFiles))
+	}
+	for i, want := range wantPaths {
+		if spec.PlantedFiles[i].RelPath != want {
+			t.Errorf("PlantedFiles[%d].RelPath: want %q, got %q", i, want, spec.PlantedFiles[i].RelPath)
+		}
 	}
 
 	pctx := PlantContext{
@@ -222,6 +242,155 @@ func TestCodexBootDirSpec(t *testing.T) {
 	}
 	if !strings.Contains(agentsMD, `name: "codex-exec"`) {
 		t.Error("AGENTS.md frontmatter should contain JSON-quoted name")
+	}
+
+	// config.toml is the load-bearing MCP config.
+	configTOML, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	if !strings.Contains(configTOML, "[mcp_servers.loopback]") {
+		t.Errorf("config.toml should contain [mcp_servers.loopback] block, got %q", configTOML)
+	}
+	if !strings.Contains(configTOML, `"http://lp:1"`) {
+		t.Errorf("config.toml should contain the loopback URL, got %q", configTOML)
+	}
+}
+
+// TestCodexBootDirSpec_EmptyMCP pins the empty-loopback path: with no
+// MCPLoopbackURL the config.toml renderer returns "" (codex falls back to
+// defaults). The .mcp.json sidecar is exercised by TestRenderMCPJSON_Empty
+// — this test only walks the codex-specific config.toml branch.
+func TestCodexBootDirSpec_EmptyMCP(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+
+	pctx := PlantContext{AgentName: "codex-exec"} // no MCPLoopbackURL
+
+	configTOML, err := spec.PlantedFiles[2].Render(pctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	if configTOML != "" {
+		t.Errorf("empty MCPLoopbackURL should produce empty config.toml, got %q", configTOML)
+	}
+}
+
+// TestOpencodeBootDirSpec_PlantedFileModes pins PlantedFile.Mode for the
+// opencode spec: .mcp.json carries the per-task loopback URL and gets 0o600;
+// other planted files leave Mode unset (caller falls back to 0o644).
+func TestOpencodeBootDirSpec_PlantedFileModes(t *testing.T) {
+	a := NewOpencodeAdapter()
+	spec := a.BootDirSpec()
+
+	want := map[string]os.FileMode{
+		".mcp.json": 0o600, // loopback URL — secret-ish
+	}
+	for _, pf := range spec.PlantedFiles {
+		w, pinned := want[pf.RelPath]
+		if !pinned {
+			if pf.Mode != 0 {
+				t.Errorf("PlantedFile[%s].Mode: want unset (0), got %#o", pf.RelPath, pf.Mode)
+			}
+			continue
+		}
+		if pf.Mode != w {
+			t.Errorf("PlantedFile[%s].Mode: want %#o, got %#o", pf.RelPath, w, pf.Mode)
+		}
+	}
+}
+
+// TestCodexBootDirSpec_PlantedFileModes pins PlantedFile.Mode for the codex
+// spec: secret-ish files (config.toml, auth.json, .mcp.json — all carry the
+// per-task loopback URL or OAuth tokens) get 0o600; AGENTS.md/boot.md leave
+// Mode unset (caller falls back to 0o644 per the spec contract).
+func TestCodexBootDirSpec_PlantedFileModes(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+
+	want := map[string]os.FileMode{
+		"AGENTS.md":   0,      // unset → 0o644 fallback
+		"boot.md":     0,      // unset → 0o644 fallback
+		"config.toml": 0o600,  // loopback URL — secret-ish
+		"auth.json":   0o600,  // OAuth tokens / API keys
+		".mcp.json":   0o600,  // loopback URL sidecar
+	}
+	got := make(map[string]os.FileMode, len(spec.PlantedFiles))
+	for _, pf := range spec.PlantedFiles {
+		got[pf.RelPath] = pf.Mode
+	}
+	for rel, w := range want {
+		if got[rel] != w {
+			t.Errorf("PlantedFile[%s].Mode: want %#o, got %#o", rel, w, got[rel])
+		}
+	}
+}
+
+// TestReadCodexAuthSource_PermissionError pins the bubbles-up behavior for
+// non-NotExist read errors. Set CODEX_HOME to a directory whose auth.json
+// is unreadable (chmod 000) — the helper must return the error so callers
+// can surface a real diagnostic instead of masking it as "not logged in".
+//
+// Skipped on Windows (no POSIX file modes) and when running as root (chmod
+// 000 doesn't deny root).
+func TestReadCodexAuthSource_PermissionError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file modes not honored on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses chmod 000")
+	}
+
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"token":"x"}`), 0o600); err != nil {
+		t.Fatalf("seed auth.json: %v", err)
+	}
+	if err := os.Chmod(authPath, 0o000); err != nil {
+		t.Fatalf("chmod 000: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(authPath, 0o600) })
+
+	t.Setenv("CODEX_HOME", dir)
+	content, ok, err := readCodexAuthSource()
+	if err == nil {
+		t.Fatalf("want permission error, got content=%q ok=%v", content, ok)
+	}
+	if ok {
+		t.Errorf("ok should be false on error")
+	}
+	if content != "" {
+		t.Errorf("content should be empty on error, got %q", content)
+	}
+}
+
+// TestReadCodexAuthSource_Missing pins the silent-success path: source
+// doesn't exist → ("", false, nil), no error. The bootdir gets an empty
+// auth.json and codex's downstream "Not logged in" surfaces correctly.
+func TestReadCodexAuthSource_Missing(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir()) // empty dir, no auth.json
+	content, ok, err := readCodexAuthSource()
+	if err != nil {
+		t.Fatalf("missing-source path should not error, got %v", err)
+	}
+	if ok {
+		t.Errorf("ok should be false for missing source")
+	}
+	if content != "" {
+		t.Errorf("content should be empty for missing source, got %q", content)
+	}
+}
+
+// TestRenderCodexConfigTOML pins the populated and empty branches of the
+// codex TOML emitter.
+func TestRenderCodexConfigTOML(t *testing.T) {
+	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp")
+	want := "[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
+	if got != want {
+		t.Errorf("populated shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	if got := renderCodexConfigTOML(""); got != "" {
+		t.Errorf("empty URL should produce empty TOML, got %q", got)
 	}
 }
 

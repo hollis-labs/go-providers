@@ -84,6 +84,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 			},
 			{
 				RelPath: ".mcp.json",
+				Mode:    0o600,
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL), nil
 				},

@@ -1,5 +1,12 @@
 package provider
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
 // BootDirSpec for the OpenAI Codex CLI.
 //
 // Layout:
@@ -7,17 +14,48 @@ package provider
 //	<bootDir>/
 //	├── AGENTS.md           # system context (auto-loaded by Codex on cwd)
 //	├── boot.md             # task kickoff content
-//	└── .mcp.json           # MCP loopback config (codex MCP convention TBD)
+//	├── config.toml         # codex config (MCP loopback) — load-bearing
+//	├── auth.json           # ChatGPT/API auth, copied from user's $CODEX_HOME
+//	└── .mcp.json           # legacy claude-shape sidecar — NOT read by codex,
+//	                        # kept for cross-tool inspection sanity (analogous
+//	                        # to opencode's bootdir keeping the same plant)
 //
-// Spawn invariants: cwd = bootDir; project access via Codex's
-// project-dir flag — empirically observed via `codex --help` to be
-// `--cd <dir>` in current versions but apps should re-verify per
-// their installed codex revision. AGENTS.md is auto-loaded by the
-// CLI as the system prompt.
+// Spawn invariants:
+//   - cwd = bootDir
+//   - CODEX_HOME={{.BootDir}} env amendment isolates this dir's config.toml
+//     and auth.json from the user's globals (~/.codex/). Without CODEX_HOME,
+//     codex merges per-spawn config with ~/.codex/config.toml AND uses the
+//     user's ~/.codex/auth.json — both bleed-throughs we want to avoid for
+//     a per-task isolated boot.
+//   - Project access is granted via codex's `--cd <dir>` flag.
+//   - AGENTS.md is auto-loaded by the CLI as the system prompt (when codex
+//     finds it at cwd).
 //
-// Notes: the Codex MCP convention has not been fully probed at the
-// time of this spec; apps planting .mcp.json should verify the
-// installed Codex respects it. The spec is otherwise stable.
+// MCP config: codex stores MCP servers in TOML at $CODEX_HOME/config.toml
+// under [mcp_servers.<name>] blocks. The shape is:
+//
+//	[mcp_servers.loopback]
+//	url = "http://127.0.0.1:NNNN/mcp"
+//
+// for streamable HTTP servers (verified against codex-cli 0.130.0). This is
+// fundamentally different from claude's `.mcp.json` shape; the legacy
+// `.mcp.json` file is left in the plant for cross-tool inspection but is
+// IGNORED by codex.
+//
+// Auth: codex stores auth in $CODEX_HOME/auth.json (ChatGPT login or API
+// key). When CODEX_HOME points at the bootdir, codex looks ONLY at
+// <bootDir>/auth.json — so we copy the user's ~/.codex/auth.json into the
+// bootdir at plant time. If the user isn't logged in (no source auth.json),
+// the Render returns "" and the bootdir gets an empty auth.json file;
+// codex will then fail at dispatch time with "Not logged in" which surfaces
+// correctly through the stderr sidecar.
+//
+// File-mode plumbing: auth.json (OAuth tokens / API keys), config.toml
+// (loopback URL), and .mcp.json (loopback URL sidecar) all carry per-task
+// secret-ish content. They are declared with PlantedFile.Mode = 0o600 so
+// the lib spec — not the caller — owns the policy. Apps that honor
+// PlantedFile.Mode (with a 0o644 fallback when zero) automatically pick
+// up the stricter perms.
 func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
@@ -37,14 +75,117 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
+				RelPath: "config.toml",
+				Render: func(ctx PlantContext) (string, error) {
+					return renderCodexConfigTOML(ctx.MCPLoopbackURL), nil
+				},
+				// Mode 0o600: config.toml embeds the per-task MCP loopback
+				// URL. Treat as secret-ish (matches the .mcp.json policy).
+				Mode: 0o600,
+			},
+			{
+				RelPath: "auth.json",
+				Render: func(ctx PlantContext) (string, error) {
+					// Read the user's ~/.codex/auth.json (or $CODEX_HOME/auth.json
+					// if CODEX_HOME is set in the parent env) and return its
+					// content. The caller's WriteFile honors PlantedFile.Mode
+					// (0o600 below) so the planted auth.json is not world-
+					// readable.
+					//
+					// Empty content + (false, nil) if the user isn't logged in —
+					// codex will surface "Not logged in" at dispatch time. A
+					// non-NotExist read error (e.g. permission denied) bubbles
+					// up so the operator sees an actionable message instead of
+					// a misleading "Not logged in" downstream.
+					content, _, err := readCodexAuthSource()
+					if err != nil {
+						return "", err
+					}
+					return content, nil
+				},
+				// Mode 0o600: auth.json carries OAuth tokens / API keys.
+				Mode: 0o600,
+			},
+			{
 				RelPath: ".mcp.json",
 				Render: func(ctx PlantContext) (string, error) {
+					// Legacy claude-shape sidecar. Codex does NOT read this
+					// file. Kept for cross-tool inspection sanity (operator
+					// probing the bootdir manually, parity with the other
+					// adapters' plant shapes). Load-bearing MCP config
+					// lives in config.toml above.
 					return renderMCPJSON(ctx.MCPLoopbackURL), nil
 				},
+				// Mode 0o600: mirrors config.toml — the loopback URL is the
+				// same shape and the same sensitivity.
+				Mode: 0o600,
 			},
 		},
+		EnvAmendments: []string{"CODEX_HOME={{.BootDir}}"},
 		CwdPreference: CwdBootDir,
 		ProjectDirArg: "--cd {{.ProjectDir}}",
-		Notes:         "verify codex --help for the project-dir flag and MCP config convention against your installed version",
+		Notes:         "codex MCP config lives in config.toml under [mcp_servers.<name>]; .mcp.json is legacy sidecar only. CODEX_HOME isolates per-task config + auth from ~/.codex/.",
 	}
+}
+
+// renderCodexConfigTOML emits a minimal codex config.toml that registers
+// the per-task MCP loopback server. Empty URL → empty config (codex falls
+// back to defaults, which is fine for the no-loopback test path).
+//
+// The loopback transport is "streamable_http" in codex's terminology;
+// the schema requires `url = "..."` for HTTP servers (no `command`/`args`).
+func renderCodexConfigTOML(loopbackURL string) string {
+	if loopbackURL == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[mcp_servers.loopback]\n")
+	fmt.Fprintf(&b, "url = %q\n", loopbackURL)
+	return b.String()
+}
+
+// readCodexAuthSource reads the user's codex auth.json bytes for replication
+// into the bootdir. Honors $CODEX_HOME (matches codex's own discovery rule),
+// falls back to ~/.codex/auth.json.
+//
+// Return values:
+//   - (content, true,  nil) on success
+//   - ("",      false, nil) when the source doesn't exist (best-effort silent
+//     path: the bootdir gets an empty auth.json and codex surfaces "Not logged
+//     in" at dispatch time)
+//   - ("",      false, err) for other read errors (permission denied, IO
+//     errors, etc.) so callers can surface actionable messages instead of
+//     swallowing the cause and producing a misleading "Not logged in"
+//     downstream
+//
+// The auth-seeding contract is best-effort for the missing-file case
+// (downstream dispatch is well-handled by the stderr sidecar) but NOT for
+// the unreadable-file case (a real misconfiguration the operator needs to
+// see).
+func readCodexAuthSource() (string, bool, error) {
+	src := codexAuthSourcePath()
+	if src == "" {
+		return "", false, nil
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read codex auth.json at %s: %w", src, err)
+	}
+	return string(b), true, nil
+}
+
+// codexAuthSourcePath resolves the user's codex auth.json path, honoring
+// $CODEX_HOME if set, falling back to ~/.codex/auth.json.
+func codexAuthSourcePath() string {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return filepath.Join(h, "auth.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".codex", "auth.json")
 }
