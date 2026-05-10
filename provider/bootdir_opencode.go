@@ -13,7 +13,7 @@ import (
 //	├── agents/
 //	│   └── <agentName>.md    # system context referenced by agents.json + opencode.json
 //	├── agents.json            # {"agents":[{"name","instructions_file"}]}
-//	├── opencode.json          # {"agent":{...},"mcp":{"loopback":{"type":"remote","url":...}}}
+//	├── opencode.json          # {"agent":{...},"mcp":{"loopback":{"type":"remote","url":...,"enabled":true}}}
 //	├── boot.md                # task kickoff content
 //	└── .mcp.json              # claude-shape mirror (kept for cross-tool sanity, ignored by opencode)
 //
