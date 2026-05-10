@@ -276,6 +276,30 @@ func TestCodexBootDirSpec_EmptyMCP(t *testing.T) {
 	}
 }
 
+// TestOpencodeBootDirSpec_PlantedFileModes pins PlantedFile.Mode for the
+// opencode spec: .mcp.json carries the per-task loopback URL and gets 0o600;
+// other planted files leave Mode unset (caller falls back to 0o644).
+func TestOpencodeBootDirSpec_PlantedFileModes(t *testing.T) {
+	a := NewOpencodeAdapter()
+	spec := a.BootDirSpec()
+
+	want := map[string]os.FileMode{
+		".mcp.json": 0o600, // loopback URL — secret-ish
+	}
+	for _, pf := range spec.PlantedFiles {
+		w, pinned := want[pf.RelPath]
+		if !pinned {
+			if pf.Mode != 0 {
+				t.Errorf("PlantedFile[%s].Mode: want unset (0), got %#o", pf.RelPath, pf.Mode)
+			}
+			continue
+		}
+		if pf.Mode != w {
+			t.Errorf("PlantedFile[%s].Mode: want %#o, got %#o", pf.RelPath, w, pf.Mode)
+		}
+	}
+}
+
 // TestCodexBootDirSpec_PlantedFileModes pins PlantedFile.Mode for the codex
 // spec: secret-ish files (config.toml, auth.json, .mcp.json — all carry the
 // per-task loopback URL or OAuth tokens) get 0o600; AGENTS.md/boot.md leave
