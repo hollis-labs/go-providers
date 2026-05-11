@@ -53,9 +53,25 @@ type codexItemMessage struct {
 	Delta   string `json:"delta"`
 }
 
+type codexItemCompleted struct {
+	Type string `json:"type"`
+	Item struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"item"`
+}
+
+type codexUsage struct {
+	InputTokens         int `json:"input_tokens"`
+	CachedInputTokens   int `json:"cached_input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	ReasoningOutputUsed int `json:"reasoning_output_tokens"`
+}
+
 type codexTurnCompleted struct {
-	Type   string `json:"type"`
-	TurnID string `json:"turn_id"`
+	Type   string      `json:"type"`
+	TurnID string      `json:"turn_id"`
+	Usage  *codexUsage `json:"usage,omitempty"`
 }
 
 type codexError struct {
@@ -91,8 +107,35 @@ func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 		}
 		return nil, nil
 
+	case "item.completed":
+		var item codexItemCompleted
+		if err := json.Unmarshal(line, &item); err != nil {
+			return nil, fmt.Errorf("parse codex item.completed: %w", err)
+		}
+		if item.Item.Type != "agent_message" || item.Item.Text == "" {
+			return nil, nil
+		}
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: item.Item.Text}}, nil
+
 	case "turn.completed":
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}, nil
+		var done codexTurnCompleted
+		if err := json.Unmarshal(line, &done); err != nil {
+			return nil, fmt.Errorf("parse codex turn.completed: %w", err)
+		}
+		out := make([]llmtypes.StreamEvent, 0, 2)
+		if done.Usage != nil {
+			out = append(out, llmtypes.StreamEvent{
+				Type: llmtypes.EventUsage,
+				Usage: &llmtypes.Usage{
+					InputTokens:         done.Usage.InputTokens,
+					OutputTokens:        done.Usage.OutputTokens,
+					CacheReadTokens:     done.Usage.CachedInputTokens,
+					CacheCreationTokens: 0,
+				},
+			})
+		}
+		out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		return out, nil
 
 	case "turn.failed", "error":
 		var errEvt codexError

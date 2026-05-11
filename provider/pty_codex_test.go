@@ -55,7 +55,27 @@ func TestParseCodexStreamLine_UserMessage(t *testing.T) {
 }
 
 func TestParseCodexStreamLine_TurnCompleted(t *testing.T) {
-	line := []byte(`{"type":"turn.completed","turn_id":"abc"}`)
+	line := []byte(`{"type":"turn.completed","turn_id":"abc","usage":{"input_tokens":12746,"cached_input_tokens":7552,"output_tokens":18,"reasoning_output_tokens":8}}`)
+	events, err := parseCodexStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	if events[0].Type != "usage" {
+		t.Fatalf("expected type=usage, got %s", events[0].Type)
+	}
+	if events[0].Usage == nil || events[0].Usage.InputTokens != 12746 || events[0].Usage.OutputTokens != 18 || events[0].Usage.CacheReadTokens != 7552 {
+		t.Fatalf("unexpected usage payload: %+v", events[0].Usage)
+	}
+	if events[1].Type != "done" {
+		t.Errorf("expected type=done, got %s", events[1].Type)
+	}
+}
+
+func TestParseCodexStreamLine_ItemCompleted(t *testing.T) {
+	line := []byte(`{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"telemetry probe ok"}}`)
 	events, err := parseCodexStreamLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -63,8 +83,11 @@ func TestParseCodexStreamLine_TurnCompleted(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Type != "done" {
-		t.Errorf("expected type=done, got %s", events[0].Type)
+	if events[0].Type != "delta" {
+		t.Fatalf("expected type=delta, got %s", events[0].Type)
+	}
+	if events[0].Content != "telemetry probe ok" {
+		t.Fatalf("unexpected delta: %q", events[0].Content)
 	}
 }
 

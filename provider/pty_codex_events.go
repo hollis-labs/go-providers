@@ -11,7 +11,8 @@ import (
 //
 // Codex's --json output is line-oriented; per-line types observed:
 // - item.message (assistant role, delta or content) → events.Delta
-// - turn.completed → events.Done
+// - item.completed (agent_message text) → events.Delta(final)
+// - turn.completed (with optional usage) → events.Usage + events.Done
 // - turn.failed / error → events.Error
 // - thread.started / turn.started → informational, no event
 func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
@@ -44,8 +45,32 @@ func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 		}
 		return []events.Event{events.Delta{Text: text, Phase: phase}}, nil
 
+	case "item.completed":
+		var item codexItemCompleted
+		if err := json.Unmarshal(line, &item); err != nil {
+			return nil, fmt.Errorf("parse codex item.completed: %w", err)
+		}
+		if item.Item.Type != "agent_message" || item.Item.Text == "" {
+			return nil, nil
+		}
+		return []events.Event{events.Delta{Text: item.Item.Text, Phase: "final"}}, nil
+
 	case "turn.completed":
-		return []events.Event{events.Done{}}, nil
+		var done codexTurnCompleted
+		if err := json.Unmarshal(line, &done); err != nil {
+			return nil, fmt.Errorf("parse codex turn.completed: %w", err)
+		}
+		out := make([]events.Event, 0, 2)
+		if done.Usage != nil {
+			out = append(out, events.Usage{
+				InputTokens:         done.Usage.InputTokens,
+				OutputTokens:        done.Usage.OutputTokens,
+				CacheCreationTokens: 0,
+				CacheReadTokens:     done.Usage.CachedInputTokens,
+			})
+		}
+		out = append(out, events.Done{})
+		return out, nil
 
 	case "turn.failed", "error":
 		var errEvt codexError
