@@ -10,23 +10,66 @@ import (
 
 // CodexAdapter implements CLIAdapter for the OpenAI Codex CLI.
 //
-// Turn boundary: emits llmtypes.EventDone on the `turn.completed` event, llmtypes.EventError on
-// `turn.failed` or top-level `error` events. Codex always runs single-turn via
-// `codex exec`, so each invocation produces exactly one turn boundary.
-type CodexAdapter struct{}
+// Two argv shapes are supported, selected by the Mode field:
+//
+//   - "" (default, exec mode): emits `codex exec <prompt> --json`. One
+//     subprocess per turn. Turn boundary: llmtypes.EventDone on the
+//     `turn.completed` event; llmtypes.EventError on `turn.failed` or a
+//     top-level `error` event. ParseLine handles the line-delimited
+//     stream-json events.
+//
+//   - "app-server": emits `codex app-server`. One long-lived subprocess
+//     speaking JSON-RPC 2.0 over stdio (default `--listen stdio://`;
+//     unix-socket / websocket are documented experimental and not
+//     exposed here yet). Threads live in-process until 30-min idle;
+//     `thread/resume` is the cold-start primitive. ParseLine is a
+//     pass-through that returns no events — JSON-RPC framing, request
+//     correlation, and event mapping live in the consumer runtime
+//     (go-agent-sessions jsonRpcStdio kind), not in this adapter.
+type CodexAdapter struct {
+	// Mode selects the argv shape. "" or "exec" → `codex exec`
+	// (single-turn subprocess). "app-server" → `codex app-server`
+	// (long-lived JSON-RPC daemon over stdio).
+	Mode string
+}
 
 func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }
+
+// NewCodexAdapterAppServer returns a CodexAdapter configured for
+// app-server mode: BuildArgs emits `["app-server"]`, ParseLine returns
+// no events (the consumer runtime owns JSON-RPC framing). Use this when
+// driving Codex as a long-lived headless session via the consumer's
+// jsonRpcStdio runtime.
+func NewCodexAdapterAppServer() *CodexAdapter { return &CodexAdapter{Mode: "app-server"} }
 
 func (a *CodexAdapter) Name() string { return "codex" }
 
 func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	// Codex uses: codex exec "prompt" --json
+	if a.Mode == "app-server" {
+		// App-server mode: one long-lived process speaking JSON-RPC over
+		// stdio. The positional prompt and cliSessionID are intentionally
+		// ignored — `thread/start` / `thread/resume` are JSON-RPC methods
+		// driven by the consumer runtime, not argv flags. Defaults to
+		// --listen stdio:// (omitted; explicit-listen flags are not
+		// exposed in this sprint).
+		return []string{"app-server"}
+	}
+	// Exec mode (default): single-turn `codex exec <prompt> --json`.
 	// System prompt is file-based (AGENTS.md in sandbox dir), not a flag.
-	// Resume is interactive-only in Codex, so we always use single-turn exec.
 	return []string{"exec", prompt, "--json"}
 }
 
 func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
+	if a.Mode == "app-server" {
+		// JSON-RPC framing + event mapping live in the consumer runtime
+		// (go-agent-sessions jsonRpcStdio kind). This adapter is a
+		// pass-through in app-server mode; the runtime reads stdout
+		// directly, frames JSON-RPC messages (Content-Length headers),
+		// correlates requests to responses, and emits its own typed
+		// events. Returning (nil, nil) here is deliberate — do not
+		// "fix" this by adding a JSON-RPC parser; that's the wrong layer.
+		return nil, nil
+	}
 	return parseCodexStreamLine(line)
 }
 

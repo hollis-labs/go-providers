@@ -133,3 +133,66 @@ func TestCodexAdapter_BuildArgs(t *testing.T) {
 		t.Errorf("expected --json flag, got %s", args[2])
 	}
 }
+
+func TestCodexAdapter_Defaults(t *testing.T) {
+	if a := NewCodexAdapter(); a.Mode != "" {
+		t.Errorf("NewCodexAdapter: expected Mode=\"\", got %q", a.Mode)
+	}
+	if a := NewCodexAdapterAppServer(); a.Mode != "app-server" {
+		t.Errorf("NewCodexAdapterAppServer: expected Mode=\"app-server\", got %q", a.Mode)
+	}
+}
+
+func TestCodexAdapter_AppServer_BuildArgs(t *testing.T) {
+	a := NewCodexAdapterAppServer()
+	args := a.BuildArgs("ignored prompt", "ignored system", "ignored session")
+	if len(args) != 1 || args[0] != "app-server" {
+		t.Errorf("expected [\"app-server\"], got %v", args)
+	}
+}
+
+func TestCodexAdapter_AppServer_BuildArgs_IgnoresAllParams(t *testing.T) {
+	// Pin: in app-server mode the per-turn prompt, systemPrompt, and
+	// cliSessionID must not leak into argv. thread/start and thread/resume
+	// are JSON-RPC methods, not CLI flags.
+	a := NewCodexAdapterAppServer()
+	args := a.BuildArgs("prompt that should not appear", "system that should not appear", "sess-that-should-not-appear")
+	for _, arg := range args {
+		switch arg {
+		case "prompt that should not appear",
+			"system that should not appear",
+			"sess-that-should-not-appear",
+			"exec", "--json", "--resume":
+			t.Errorf("app-server mode leaked exec-mode arg %q: full args=%v", arg, args)
+		}
+	}
+}
+
+func TestCodexAdapter_AppServer_ParseLineIsPassThrough(t *testing.T) {
+	// Pin: ParseLine returns (nil, nil) in app-server mode. JSON-RPC
+	// framing lives in the consumer runtime, not in this adapter.
+	a := NewCodexAdapterAppServer()
+	jsonRPC := []byte(`{"jsonrpc":"2.0","id":1,"method":"thread/start","params":{}}`)
+	events, err := a.ParseLine(jsonRPC)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if events != nil {
+		t.Errorf("expected nil events (pass-through), got %v", events)
+	}
+}
+
+func TestCodexAdapter_ExecMode_ParseLineStillWorks(t *testing.T) {
+	// Pin: regression guard for the default exec mode after introducing
+	// the Mode field — ParseLine must still dispatch through
+	// parseCodexStreamLine and surface deltas.
+	a := NewCodexAdapter()
+	line := []byte(`{"type":"item.message","role":"assistant","content":"","delta":"hi"}`)
+	events, err := a.ParseLine(line)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(events) != 1 || events[0].Type != "delta" || events[0].Content != "hi" {
+		t.Errorf("expected single delta event with content 'hi', got %v", events)
+	}
+}
