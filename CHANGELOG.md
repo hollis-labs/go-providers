@@ -2,6 +2,85 @@
 
 ## Unreleased
 
+## v0.17.0 — 2026-05-11
+
+### Added
+
+- `ClaudeAdapter.InputMode` field (string). Defaults to `""` (no
+  `--input-format` flag emitted; current behavior preserved). Setting
+  `InputMode = "stream-json"` routes `BuildArgs` through a dedicated
+  branch that emits
+  `-p --input-format stream-json --output-format stream-json --verbose`
+  and intentionally drops the positional prompt and `--system-prompt`
+  parameter — per-turn payloads and system context flow over NDJSON
+  stdin in Anthropic's "Streaming Input Mode" (one long-lived
+  `claude -p` process, KV-cache reused across turns until stdin EOF).
+  The runtime that owns the stdin loop, attach fan-out, and session-id
+  handling lives in `go-agent-sessions` (`streamingStdio` kind); this
+  lib only emits the argv shape.
+- `NewClaudeAdapterStreamingStdio()` and
+  `NewClaudeAdapterDevStreamingStdio()` constructors mirror the existing
+  PTY/Bare style.
+- `CodexAdapter.Mode` field (string). Default `""` (or `"exec"`)
+  preserves the existing `codex exec <prompt> --json` single-turn
+  subprocess shape. `Mode = "app-server"` switches `BuildArgs` to emit
+  `["app-server"]` and makes `ParseLine` a pass-through that returns no
+  events: in app-server mode codex speaks JSON-RPC 2.0 over stdio
+  (default `--listen stdio://`); the consumer runtime
+  (`go-agent-sessions` `jsonRpcStdio` kind) owns framing, request /
+  response correlation, and event mapping.
+- `NewCodexAdapterAppServer()` constructor.
+
+### Changed
+
+- Deleted the stale `pty_codex.go` comment that claimed `"Resume is
+  interactive-only in Codex, so we always use single-turn exec."` —
+  confirmed false against codex 0.130.0; superseded by the new
+  app-server lane.
+
+### Compatibility
+
+- Source- and behavior-compatible with v0.16.2. Default zero values for
+  `InputMode` and `Mode` reproduce the v0.16.2 argv byte-for-byte,
+  pinned by the existing `TestClaudeBuildArgs_NonBare_ByteForByteIdentical`
+  and `TestCodexAdapter_BuildArgs` tests plus new
+  `_InputModeAbsentByDefault` and `_ExecMode_ParseLineStillWorks` guards.
+- Positional composite literals to `ClaudeAdapter` / `CodexAdapter`
+  continue to compile because the new fields are appended after existing
+  fields and default to zero values; keyed literals remain preferred
+  per the v0.9.0 caveat.
+- No new module dependencies, no API surface removals, no signature
+  changes to existing constructors.
+
+### Rationale
+
+Five prior portfolio sessions tried to make Mux / Nanite / Clockwork run
+long-lived headless Claude/Codex sessions, all bouncing between
+PTY-driving-the-TUI (unproven, fights the tool) and `--resume <id>`
+subprocess-per-turn chaining (re-injects context every turn). Empirical
+investigation on 2026-05-11 confirmed both vendors ship documented
+long-lived headless modes that nobody had wired:
+
+- Claude: `claude -p --input-format stream-json --output-format
+  stream-json --verbose` — one process, NDJSON over stdin/stdout,
+  KV-cache reused. Anthropic's term: "Streaming Input Mode (Default &
+  Recommended)" in the Agent SDK docs.
+- Codex: `codex app-server` — same engine that backs the official VS
+  Code extension. JSON-RPC 2.0 over stdio. Threads in memory until
+  30-min idle.
+
+This release closes the go-providers argv half of the gap. The runtime
+half ships in `go-agent-sessions` v0.8 (parallel sprint). Full rationale
++ empirical evidence:
+`agent-workspaces/knowledge/portfolio/cli-agent-long-lived-modes.md`.
+
+> **CHANGELOG drift note.** Versions v0.15.0 and v0.16.0–v0.16.2 were
+> tagged + pushed without CHANGELOG entries; see `git log
+> v0.14.0..v0.16.2` for the commit trail (bootdir-related fixes for
+> codex and opencode MCP planting). Captured as a follow-up to write
+> retroactive entries; not addressed in this release to keep scope
+> tight.
+
 ## v0.14.0 — 2026-05-10
 
 ### Added
