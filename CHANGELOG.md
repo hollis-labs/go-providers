@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.17.1 — 2026-05-12
+
+### Fixed
+
+- `CodexAdapter.BootDirSpec` no longer emits `ProjectDirArg = "--cd
+  {{.ProjectDir}}"` in `app-server` mode. `codex app-server` rejects
+  `--cd` (codex 0.130.0 exits 2 with
+  `error: unexpected argument '--cd' found`), so the long-lived
+  JSON-RPC daemon could not be spawned via `AutoPlantBootDir` from
+  go-agent-sessions v0.9.x. App-server now returns
+  `ProjectDirArg = ""`; project access is granted via JSON-RPC
+  `thread/start` parameters at the consumer runtime layer. Exec mode
+  is unchanged. Reproduced from the agent-mux v005-07 lib-tier
+  adoption smoke (`agentsessions: jsonrpc-stdio waiter abnormal …
+  err="exit status 2"`).
+
+### Compatibility
+
+- Patch release; no signature or behavior changes for exec mode.
+  Regression-guarded by the new
+  `TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg` and
+  `TestCodexAdapter_AppServer_BootDirSpec_NoProjectDirArg` tests.
+
 ## v0.17.0 — 2026-05-11
 
 ### Added

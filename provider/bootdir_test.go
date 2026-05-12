@@ -396,6 +396,51 @@ func TestCodexBootDirSpec(t *testing.T) {
 	}
 }
 
+// TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg is a regression
+// guard for the exec-mode (default) branch: BootDirSpec MUST keep emitting
+// `--cd {{.ProjectDir}}` so single-turn `codex exec` invocations continue
+// to receive the project root. Pins behavior alongside the app-server
+// suppression below.
+func TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+	if spec.ProjectDirArg != "--cd {{.ProjectDir}}" {
+		t.Errorf("exec mode ProjectDirArg: want %q, got %q",
+			"--cd {{.ProjectDir}}", spec.ProjectDirArg)
+	}
+}
+
+// TestCodexAdapter_AppServer_BootDirSpec_NoProjectDirArg pins that the
+// app-server adapter suppresses ProjectDirArg. `codex app-server` rejects
+// `--cd` (codex 0.130.0 exits 2 with "unexpected argument '--cd' found"),
+// so the long-lived daemon must spawn without that flag. Project access
+// is granted via JSON-RPC `thread/start` parameters at the consumer
+// runtime layer (go-agent-sessions jsonRpcStdio kind), not via argv.
+func TestCodexAdapter_AppServer_BootDirSpec_NoProjectDirArg(t *testing.T) {
+	a := NewCodexAdapterAppServer()
+	spec := a.BootDirSpec()
+	if spec.ProjectDirArg != "" {
+		t.Errorf("app-server ProjectDirArg: want \"\", got %q (codex app-server rejects --cd)",
+			spec.ProjectDirArg)
+	}
+	// The rest of the spec must still match the exec adapter — CODEX_HOME
+	// isolation, CwdBootDir, and the PlantedFiles set are all still
+	// load-bearing for app-server.
+	if spec.CwdPreference != CwdBootDir {
+		t.Errorf("CwdPreference: want CwdBootDir, got %v", spec.CwdPreference)
+	}
+	foundEnv := false
+	for _, e := range spec.EnvAmendments {
+		if strings.Contains(e, "CODEX_HOME") && strings.Contains(e, "{{.BootDir}}") {
+			foundEnv = true
+		}
+	}
+	if !foundEnv {
+		t.Errorf("expected CODEX_HOME env amendment in app-server spec, got %v",
+			spec.EnvAmendments)
+	}
+}
+
 // TestCodexBootDirSpec_EmptyMCP pins the empty-loopback path: with no
 // MCPLoopbackURL the config.toml renderer returns "" (codex falls back to
 // defaults). The .mcp.json sidecar is exercised by TestRenderMCPJSON_Empty

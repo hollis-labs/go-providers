@@ -27,7 +27,11 @@ import (
 //     codex merges per-spawn config with ~/.codex/config.toml AND uses the
 //     user's ~/.codex/auth.json — both bleed-throughs we want to avoid for
 //     a per-task isolated boot.
-//   - Project access is granted via codex's `--cd <dir>` flag.
+//   - Project access is granted via codex's `--cd <dir>` flag in exec
+//     mode. In app-server mode `--cd` is rejected by the daemon
+//     (codex 0.130.0 exits 2); the consumer runtime grants project
+//     access via JSON-RPC `thread/start` parameters instead, and
+//     BootDirSpec emits ProjectDirArg = "" for that branch.
 //   - AGENTS.md is auto-loaded by the CLI as the system prompt (when codex
 //     finds it at cwd).
 //
@@ -64,6 +68,15 @@ import (
 // as a stdio server block. The legacy .mcp.json sidecar is still planted for
 // cross-tool inspection parity, but Codex itself ignores that file.
 func (a *CodexAdapter) BootDirSpec() BootDirSpec {
+	// In app-server mode the JSON-RPC daemon rejects `--cd <dir>` (codex
+	// 0.130.0 exits 2 with "unexpected argument '--cd' found"). Project
+	// access is granted via JSON-RPC `thread/start` parameters at the
+	// runtime layer instead. Suppress the flag here to keep the long-lived
+	// adapter spawnable; exec mode keeps the existing behavior.
+	projectDirArg := "--cd {{.ProjectDir}}"
+	if a.Mode == "app-server" {
+		projectDirArg = ""
+	}
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
@@ -132,7 +145,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 		},
 		EnvAmendments: []string{"CODEX_HOME={{.BootDir}}"},
 		CwdPreference: CwdBootDir,
-		ProjectDirArg: "--cd {{.ProjectDir}}",
+		ProjectDirArg: projectDirArg,
 		Notes:         "codex MCP config lives in config.toml under [mcp_servers.<name>]; .mcp.json is legacy sidecar only. CODEX_HOME isolates per-task config + auth from ~/.codex/.",
 	}
 }
