@@ -116,23 +116,29 @@ func TestClaudeBuildArgs_PrintMode_DevSkipPermissions(t *testing.T) {
 }
 
 func TestClaudeAdapterConstructors_Defaults(t *testing.T) {
-	if a := NewClaudeAdapter(); a.PTY || a.SkipPermissions || a.Bare {
+	if a := NewClaudeAdapter(); a.PTY || a.SkipPermissions || a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapter: expected zero-value, got %+v", *a)
 	}
-	if a := NewClaudeAdapterDev(); a.PTY || !a.SkipPermissions || a.Bare {
+	if a := NewClaudeAdapterDev(); a.PTY || !a.SkipPermissions || a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapterDev: expected SkipPermissions only, got %+v", *a)
 	}
-	if a := NewClaudeAdapterPTY(); !a.PTY || a.SkipPermissions || a.Bare {
+	if a := NewClaudeAdapterPTY(); !a.PTY || a.SkipPermissions || a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapterPTY: expected PTY only, got %+v", *a)
 	}
-	if a := NewClaudeAdapterDevPTY(); !a.PTY || !a.SkipPermissions || a.Bare {
+	if a := NewClaudeAdapterDevPTY(); !a.PTY || !a.SkipPermissions || a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapterDevPTY: expected PTY+SkipPermissions, got %+v", *a)
 	}
-	if a := NewClaudeAdapterBare(); a.PTY || a.SkipPermissions || !a.Bare {
+	if a := NewClaudeAdapterBare(); a.PTY || a.SkipPermissions || !a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapterBare: expected Bare only, got %+v", *a)
 	}
-	if a := NewClaudeAdapterDevBare(); a.PTY || !a.SkipPermissions || !a.Bare {
+	if a := NewClaudeAdapterDevBare(); a.PTY || !a.SkipPermissions || !a.Bare || a.InputMode != "" {
 		t.Errorf("NewClaudeAdapterDevBare: expected Bare+SkipPermissions, got %+v", *a)
+	}
+	if a := NewClaudeAdapterStreamingStdio(); a.PTY || a.SkipPermissions || a.Bare || a.InputMode != "stream-json" {
+		t.Errorf("NewClaudeAdapterStreamingStdio: expected InputMode=stream-json only, got %+v", *a)
+	}
+	if a := NewClaudeAdapterDevStreamingStdio(); a.PTY || !a.SkipPermissions || a.Bare || a.InputMode != "stream-json" {
+		t.Errorf("NewClaudeAdapterDevStreamingStdio: expected InputMode=stream-json + SkipPermissions, got %+v", *a)
 	}
 }
 
@@ -380,6 +386,116 @@ func TestClaudeBareInjectionPaths(t *testing.T) {
 	got = a.BareInjectionPaths("", "")
 	if got != (ClaudeBareInjection{}) {
 		t.Errorf("BareInjectionPaths(\"\", \"\") = %+v, want zero value", got)
+	}
+}
+
+func TestClaudeBuildArgs_StreamingStdio_Empty(t *testing.T) {
+	a := NewClaudeAdapterStreamingStdio()
+	args := a.BuildArgs("", "", "")
+	want := []string{
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_StreamingStdio_IgnoresPromptAndSystemPrompt(t *testing.T) {
+	// Prompt and systemPrompt must NOT leak into stream-json-input argv.
+	// The contract is that per-turn payloads + system context arrive via
+	// NDJSON over stdin, not via argv.
+	a := NewClaudeAdapterStreamingStdio()
+	args := a.BuildArgs("hello", "you are a helpful assistant", "")
+	want := []string{
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_StreamingStdio_Resume(t *testing.T) {
+	a := NewClaudeAdapterStreamingStdio()
+	args := a.BuildArgs("", "", "sess-123")
+	want := []string{
+		"--resume", "sess-123",
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_StreamingStdio_DevSkipPermissions(t *testing.T) {
+	a := NewClaudeAdapterDevStreamingStdio()
+	args := a.BuildArgs("", "", "")
+	want := []string{
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--dangerously-skip-permissions",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_StreamingStdio_ResumeWithSkipPermissions(t *testing.T) {
+	a := NewClaudeAdapterDevStreamingStdio()
+	args := a.BuildArgs("", "", "sess-abc")
+	want := []string{
+		"--resume", "sess-abc",
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--dangerously-skip-permissions",
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("expected %v, got %v", want, args)
+	}
+}
+
+func TestClaudeBuildArgs_PrintMode_InputModeAbsentByDefault(t *testing.T) {
+	// Pin: when InputMode is unset (default), --input-format must not
+	// appear in print-mode argv. Guards against the InputMode field
+	// accidentally leaking into non-streaming paths.
+	a := NewClaudeAdapter()
+	args := a.BuildArgs("hello", "", "")
+	for _, arg := range args {
+		if arg == "--input-format" {
+			t.Errorf("expected no --input-format with InputMode=\"\"; got %v", args)
+		}
+	}
+}
+
+func TestClaudeBuildArgs_PrintMode_InputModeStreamJsonStripsPrompt(t *testing.T) {
+	// Pin: setting InputMode="stream-json" on a print-mode (non-bare,
+	// non-PTY) adapter routes through the streaming branch and drops the
+	// positional prompt + --system-prompt. This is the contract that
+	// makes NewClaudeAdapterStreamingStdio() work.
+	a := &ClaudeAdapter{InputMode: "stream-json"}
+	args := a.BuildArgs("this prompt should not appear", "this system prompt should not appear", "")
+	for _, arg := range args {
+		if arg == "this prompt should not appear" {
+			t.Errorf("stream-json input mode must not leak positional prompt; got %v", args)
+		}
+		if arg == "this system prompt should not appear" {
+			t.Errorf("stream-json input mode must not leak systemPrompt; got %v", args)
+		}
+		if arg == "--system-prompt" {
+			t.Errorf("stream-json input mode must not emit --system-prompt; got %v", args)
+		}
 	}
 }
 

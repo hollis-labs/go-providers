@@ -68,6 +68,24 @@ type ClaudeAdapter struct {
 	// consumers continue to add --add-dir from BootDirSpec.ProjectDirArg.)
 	ProjectDir string
 
+	// InputMode selects the claude CLI's `--input-format` flag in print
+	// mode. Defaults to "" (no flag emitted, claude defaults to "text").
+	// Values:
+	//   ""            — no --input-format flag emitted (current behavior).
+	//   "stream-json" — emit --input-format stream-json. Pair with print-mode
+	//                   --output-format stream-json to put claude into
+	//                   "Streaming Input Mode" (Anthropic's term): a single
+	//                   long-lived process reads NDJSON `{type:"user",...}`
+	//                   messages from stdin, replies with stream-json over
+	//                   stdout, and reuses its KV-cache across turns until
+	//                   stdin EOF. The runtime that drives this loop lives
+	//                   in go-agent-sessions (streamingStdio kind); this
+	//                   adapter only emits the argv.
+	// Ignored in Bare and PTY modes (those branches don't emit
+	// --input-format). Bare/PTY callers that want streaming input should
+	// use NewClaudeAdapterStreamingStdio() instead.
+	InputMode string
+
 	// ApiKeyHelperPath, when non-empty, is written into the planted
 	// .claude/settings.json as `apiKeyHelper: <path>`. Bare-mode claude
 	// invokes the helper per request: the helper's stdout is consumed as
@@ -136,6 +154,36 @@ func NewClaudeAdapterDevBare() *ClaudeAdapter {
 	return &ClaudeAdapter{Bare: true, SkipPermissions: true}
 }
 
+// NewClaudeAdapterStreamingStdio returns a ClaudeAdapter configured for
+// "Streaming Input Mode" (Anthropic's term in the Agent SDK docs): a
+// single long-lived `claude -p` process that reads NDJSON `{type:"user",...}`
+// messages from stdin, replies with stream-json on stdout, and reuses its
+// KV-cache across turns until stdin EOF. The runtime that owns the stdin
+// loop, attach-fanout, and session-id handling lives in
+// go-agent-sessions (streamingStdio kind); this adapter only emits the
+// argv shape.
+//
+// BuildArgs emits (with cliSessionID == ""):
+//
+//	-p --input-format stream-json --output-format stream-json --verbose
+//
+// With cliSessionID != "", --resume <id> is prepended (recovery /
+// cold-start primitive).
+//
+// The positional prompt and --system-prompt parameter are intentionally
+// dropped in this mode — per-turn payloads and system context flow over
+// stdin, not argv. ApiKeyHelperPath is still settable post-construction.
+func NewClaudeAdapterStreamingStdio() *ClaudeAdapter {
+	return &ClaudeAdapter{InputMode: "stream-json"}
+}
+
+// NewClaudeAdapterDevStreamingStdio returns a streaming-stdio
+// ClaudeAdapter with --dangerously-skip-permissions enabled, for
+// developer-mode long-lived stream-json sessions.
+func NewClaudeAdapterDevStreamingStdio() *ClaudeAdapter {
+	return &ClaudeAdapter{InputMode: "stream-json", SkipPermissions: true}
+}
+
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
@@ -188,10 +236,35 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 		return args
 	}
 
+	// Streaming Input Mode: per-turn payloads arrive as NDJSON
+	// `{type:"user",...}` messages on stdin. The positional prompt and
+	// --system-prompt flag are intentionally omitted — system context flows
+	// in via the first stdin message or via planted CLAUDE.md / settings,
+	// and per-turn prompts flow in via subsequent stdin messages. The
+	// go-agent-sessions streamingStdio runtime owns the stdin loop.
+	if a.InputMode == "stream-json" {
+		args := []string{
+			"-p",
+			"--input-format", "stream-json",
+			"--output-format", "stream-json",
+			"--verbose",
+		}
+		if a.SkipPermissions {
+			args = append(args, "--dangerously-skip-permissions")
+		}
+		if cliSessionID != "" {
+			args = append([]string{"--resume", cliSessionID}, args...)
+		}
+		return args
+	}
+
 	args := []string{
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose",
+	}
+	if a.InputMode != "" {
+		args = append(args, "--input-format", a.InputMode)
 	}
 	if a.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
