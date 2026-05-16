@@ -59,7 +59,11 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 					// via the helper. Empty path leaves
 					// the field unset — bare mode then requires
 					// ANTHROPIC_API_KEY in env.
-					return claudeSettingsStub(a.ApiKeyHelperPath), nil
+					//
+					// a.SkipPermissions threads through as
+					// permissions.defaultMode = bypassPermissions so the
+					// planted settings backstop the CLI flag.
+					return claudeSettingsStub(a.ApiKeyHelperPath, a.SkipPermissions), nil
 				},
 			},
 			{
@@ -143,10 +147,8 @@ func renderClaudeMD(ctx PlantContext) string {
 	return b.String()
 }
 
-// claudeSettingsStub renders the planted .claude/settings.json. The
-// stub prevents the CLI from reading the user's global ~/.claude.json
-// or ~/.claude/settings.json (bare mode disables that auto-discovery
-// already; non-bare consumers benefit from the explicit empty maps).
+// claudeSettingsStub renders the planted .claude/settings.json using
+// the current Claude Code settings schema.
 //
 // apiKeyHelperPath, when non-empty, threads into the stub as
 // `apiKeyHelper: <path>`. Bare-mode claude invokes the helper per
@@ -158,16 +160,24 @@ func renderClaudeMD(ctx PlantContext) string {
 // emits the OAuth access token (`sk-ant-oat01-...`), which
 // authenticates against the API directly (empirically verified).
 //
-// Apps that need a custom approvedTools list or richer mcpServers map
-// can post-process the planted file before spawn — the stub is the
-// minimum-viable shape; apps own everything beyond.
-func claudeSettingsStub(apiKeyHelperPath string) string {
-	stub := map[string]any{
-		"mcpServers":    map[string]any{},
-		"approvedTools": []string{},
-	}
+// bypassPermissions, when true, emits `permissions.defaultMode:
+// "bypassPermissions"` — the current settings-schema equivalent of the
+// --dangerously-skip-permissions CLI flag. It backstops the flag for
+// any consumer that reaches the planted settings.json. The legacy
+// `approvedTools` / `mcpServers` keys are intentionally NOT emitted:
+// current Claude Code ignores both, so writing them pre-approved
+// nothing (the cause of spawned-agent permission-prompt breakage).
+//
+// Apps that need a richer permissions policy (permissions.allow /
+// deny rules) can post-process the planted file before spawn — the
+// stub is the minimum-viable shape; apps own everything beyond.
+func claudeSettingsStub(apiKeyHelperPath string, bypassPermissions bool) string {
+	stub := map[string]any{}
 	if apiKeyHelperPath != "" {
 		stub["apiKeyHelper"] = apiKeyHelperPath
+	}
+	if bypassPermissions {
+		stub["permissions"] = map[string]any{"defaultMode": "bypassPermissions"}
 	}
 	out, _ := json.MarshalIndent(stub, "", "  ")
 	return string(out) + "\n"

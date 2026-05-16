@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## v0.18.0 — 2026-05-16
+
+### Fixed
+
+- `claudeSettingsStub` (the planted `.claude/settings.json`) no longer
+  emits the `approvedTools` and `mcpServers` keys. Current Claude Code
+  ignores both — they are not part of the settings schema — so writing
+  them pre-approved nothing. Spawned agents whose only permission
+  signal was this stub fell back to `default` permission mode and
+  blocked on prompts. The stub now emits the current schema.
+
+### Added
+
+- `ClaudeAdapter.SkipPermissions` now also threads into the planted
+  `.claude/settings.json` as `permissions.defaultMode:
+  "bypassPermissions"` — the settings-schema equivalent of the
+  `--dangerously-skip-permissions` CLI flag. The planted file now
+  backstops the flag for any consumer that reaches settings.json.
+- `ClaudeAdapter.MCPConfigPath` is honored in **all** modes (PTY,
+  streaming-stdio, print) — previously `--mcp-config` was emitted only
+  in bare mode. Loading the MCP config explicitly is not subject to
+  the project-scoped `.mcp.json` "Use this MCP server?" trust prompt
+  that otherwise fires in interactive (PTY) mode, so non-bare
+  consumers can set this to the planted `.mcp.json` to give spawned
+  agents their MCP servers without an approval gate.
+
+### Compatibility
+
+- Minor release. No signature changes on exported types. The unexported
+  `claudeSettingsStub` gained a `bypassPermissions bool` parameter.
+  Behavior change: the planted `.claude/settings.json` shape changed
+  (deprecated keys dropped; `permissions` block added when
+  `SkipPermissions`). `MCPConfigPath` set on a non-bare adapter now
+  emits a flag where it previously did not — a no-op for the default
+  empty value. Regression-guarded by `TestClaudeSettingsStub_BypassPermissions`
+  and `TestClaudeBuildArgs_MCPConfig_NonBare`.
+
 ## v0.17.1 — 2026-05-12
 
 ### Fixed

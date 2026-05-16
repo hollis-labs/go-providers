@@ -44,10 +44,15 @@ type ClaudeAdapter struct {
 	// AppendSystemPromptFile (see BootDirSpec / BareInjectionPaths).
 	Bare bool
 
-	// MCPConfigPath emits --mcp-config <path> when Bare is true and the
-	// field is non-empty. Empty value emits no flag — bare mode then has
-	// zero MCP servers, which is the documented behavior. Ignored when
-	// Bare is false.
+	// MCPConfigPath emits --mcp-config <path> when the field is
+	// non-empty — in every mode (bare, PTY, streaming, print). Loading
+	// the MCP config explicitly is NOT subject to the project-scoped
+	// .mcp.json "Use this MCP server?" trust prompt that otherwise fires
+	// in interactive (PTY) mode, so non-bare consumers set this to the
+	// planted .mcp.json to give spawned agents their MCP servers without
+	// an approval gate. In bare mode it is additionally the only way to
+	// get MCP servers at all (bare disables .mcp.json auto-discovery).
+	// Empty value emits no flag.
 	MCPConfigPath string
 
 	// AppendSystemPromptFile emits --append-system-prompt-file <path>
@@ -230,6 +235,9 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 		if cliSessionID != "" {
 			args = append(args, "--resume", cliSessionID)
 		}
+		if a.MCPConfigPath != "" {
+			args = append(args, "--mcp-config", a.MCPConfigPath)
+		}
 		if a.SkipPermissions {
 			args = append(args, "--dangerously-skip-permissions")
 		}
@@ -249,6 +257,9 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 			"--output-format", "stream-json",
 			"--verbose",
 		}
+		if a.MCPConfigPath != "" {
+			args = append(args, "--mcp-config", a.MCPConfigPath)
+		}
 		if a.SkipPermissions {
 			args = append(args, "--dangerously-skip-permissions")
 		}
@@ -265,6 +276,9 @@ func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []s
 	}
 	if a.InputMode != "" {
 		args = append(args, "--input-format", a.InputMode)
+	}
+	if a.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", a.MCPConfigPath)
 	}
 	if a.SkipPermissions {
 		args = append(args, "--dangerously-skip-permissions")
