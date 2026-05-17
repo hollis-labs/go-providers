@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## v0.19.0 — 2026-05-17
+
+### Added
+
+- `ClaudeAdapter.PermissionMode` — a first-class field for the full
+  Claude Code permission-mode vocabulary (`default`, `acceptEdits`,
+  `plan`, `bypassPermissions`). It threads into the planted
+  `.claude/settings.json` as `permissions.defaultMode`. Previously the
+  stub could only emit `bypassPermissions` (derived from
+  `SkipPermissions`), so consumers that needed `acceptEdits` or `plan`
+  post-processed the planted file after planting. Setting an
+  unrecognized value fails the `.claude/settings.json` `Render`.
+
+### Changed
+
+- The planted `.claude/settings.json` `permissions.defaultMode` value
+  is now resolved by `resolveClaudeDefaultMode`: a non-empty
+  `PermissionMode` wins; otherwise `SkipPermissions == true` still
+  yields `bypassPermissions` (back-compat); otherwise no `permissions`
+  block is planted.
+
+### Compatibility
+
+- Minor release. No signature changes on exported types — `PermissionMode`
+  is a new field with a zero value (`""`) that preserves the prior
+  behavior exactly. The unexported `claudeSettingsStub` signature
+  changed (`bypassPermissions bool` → `defaultMode string`). Regression-
+  guarded by `TestClaudeSettingsStub_PermissionMode` and the existing
+  `TestClaudeSettingsStub_BypassPermissions`.
+
+### Downstream cleanup
+
+- Torque's `internal/runtime/agent/permission_mode.go`
+  `applyPermissionMode` post-processing of the planted settings.json
+  becomes removable once it adopts `ClaudeAdapter.PermissionMode`
+  (CW-20260517-0038). Tether carries an equivalent workaround.
+
 ## v0.18.0 — 2026-05-16
 
 ### Fixed

@@ -60,10 +60,14 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 					// the field unset — bare mode then requires
 					// ANTHROPIC_API_KEY in env.
 					//
-					// a.SkipPermissions threads through as
-					// permissions.defaultMode = bypassPermissions so the
-					// planted settings backstop the CLI flag.
-					return claudeSettingsStub(a.ApiKeyHelperPath, a.SkipPermissions), nil
+					// a.PermissionMode / a.SkipPermissions thread through
+					// as permissions.defaultMode in the planted settings
+					// (see resolveClaudeDefaultMode for the precedence).
+					mode, err := resolveClaudeDefaultMode(a.PermissionMode, a.SkipPermissions)
+					if err != nil {
+						return "", fmt.Errorf("claude bootdir settings: %w", err)
+					}
+					return claudeSettingsStub(a.ApiKeyHelperPath, mode), nil
 				},
 			},
 			{
@@ -160,27 +164,62 @@ func renderClaudeMD(ctx PlantContext) string {
 // emits the OAuth access token (`sk-ant-oat01-...`), which
 // authenticates against the API directly (empirically verified).
 //
-// bypassPermissions, when true, emits `permissions.defaultMode:
-// "bypassPermissions"` — the current settings-schema equivalent of the
-// --dangerously-skip-permissions CLI flag. It backstops the flag for
-// any consumer that reaches the planted settings.json. The legacy
-// `approvedTools` / `mcpServers` keys are intentionally NOT emitted:
-// current Claude Code ignores both, so writing them pre-approved
-// nothing (the cause of spawned-agent permission-prompt breakage).
+// defaultMode, when non-empty, emits `permissions.defaultMode:
+// <defaultMode>` — the Claude Code settings-schema knob for the
+// permission mode (default / acceptEdits / plan / bypassPermissions).
+// It backstops the equivalent CLI flags for any consumer that reaches
+// the planted settings.json. Callers resolve the value via
+// resolveClaudeDefaultMode. The legacy `approvedTools` / `mcpServers`
+// keys are intentionally NOT emitted: current Claude Code ignores
+// both, so writing them pre-approved nothing (the cause of
+// spawned-agent permission-prompt breakage).
 //
 // Apps that need a richer permissions policy (permissions.allow /
 // deny rules) can post-process the planted file before spawn — the
 // stub is the minimum-viable shape; apps own everything beyond.
-func claudeSettingsStub(apiKeyHelperPath string, bypassPermissions bool) string {
+func claudeSettingsStub(apiKeyHelperPath, defaultMode string) string {
 	stub := map[string]any{}
 	if apiKeyHelperPath != "" {
 		stub["apiKeyHelper"] = apiKeyHelperPath
 	}
-	if bypassPermissions {
-		stub["permissions"] = map[string]any{"defaultMode": "bypassPermissions"}
+	if defaultMode != "" {
+		stub["permissions"] = map[string]any{"defaultMode": defaultMode}
 	}
 	out, _ := json.MarshalIndent(stub, "", "  ")
 	return string(out) + "\n"
+}
+
+// claudePermissionModes is the Claude Code settings-schema vocabulary
+// for `permissions.defaultMode`.
+var claudePermissionModes = map[string]bool{
+	"default":           true,
+	"acceptEdits":       true,
+	"plan":              true,
+	"bypassPermissions": true,
+}
+
+// resolveClaudeDefaultMode derives the `permissions.defaultMode` value
+// for the planted .claude/settings.json from a ClaudeAdapter's
+// PermissionMode and SkipPermissions fields.
+//
+// Precedence:
+//   - A non-empty PermissionMode wins. It must be one of the
+//     claudePermissionModes vocabulary; an unrecognized value is an
+//     error (surfaced through the PlantedFile Render).
+//   - Otherwise SkipPermissions == true yields "bypassPermissions" —
+//     the back-compat behavior from before PermissionMode existed.
+//   - Otherwise the empty string: no `permissions` block is planted.
+func resolveClaudeDefaultMode(permissionMode string, skipPermissions bool) (string, error) {
+	if permissionMode != "" {
+		if !claudePermissionModes[permissionMode] {
+			return "", fmt.Errorf("invalid PermissionMode %q (want one of: default, acceptEdits, plan, bypassPermissions)", permissionMode)
+		}
+		return permissionMode, nil
+	}
+	if skipPermissions {
+		return "bypassPermissions", nil
+	}
+	return "", nil
 }
 
 // seedClaudeWorkspaceTrust pre-accepts the workspace trust dialog for the

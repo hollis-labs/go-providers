@@ -147,6 +147,51 @@ func TestClaudeSettingsStub_BypassPermissions(t *testing.T) {
 	}
 }
 
+// TestClaudeSettingsStub_PermissionMode pins that ClaudeAdapter.PermissionMode
+// threads into the planted .claude/settings.json as
+// `permissions.defaultMode`, that it wins over the SkipPermissions
+// back-compat default, and that an unrecognized value fails the Render.
+func TestClaudeSettingsStub_PermissionMode(t *testing.T) {
+	for _, mode := range []string{"default", "acceptEdits", "plan", "bypassPermissions"} {
+		a := NewClaudeAdapter()
+		a.PermissionMode = mode
+		settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+		if err != nil {
+			t.Fatalf("PermissionMode=%q render: %v", mode, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(settings), &got); err != nil {
+			t.Fatalf("PermissionMode=%q: settings.json not valid JSON: %v\ngot:\n%s", mode, err, settings)
+		}
+		perms, ok := got["permissions"].(map[string]any)
+		if !ok || perms["defaultMode"] != mode {
+			t.Errorf("PermissionMode=%q: want permissions.defaultMode=%q, got:\n%s", mode, mode, settings)
+		}
+	}
+
+	// PermissionMode wins over the SkipPermissions back-compat default.
+	dev := NewClaudeAdapterDev() // SkipPermissions = true
+	dev.PermissionMode = "plan"
+	settings, err := dev.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatalf("settings.json not valid JSON: %v\ngot:\n%s", err, settings)
+	}
+	if perms, ok := got["permissions"].(map[string]any); !ok || perms["defaultMode"] != "plan" {
+		t.Errorf("PermissionMode must win over SkipPermissions, want defaultMode=plan, got:\n%s", settings)
+	}
+
+	// An unrecognized value fails the Render rather than planting junk.
+	bad := NewClaudeAdapter()
+	bad.PermissionMode = "yolo"
+	if _, err := bad.BootDirSpec().PlantedFiles[2].Render(PlantContext{}); err == nil {
+		t.Error("PermissionMode=\"yolo\" should fail Render, got nil error")
+	}
+}
+
 // TestClaudeBootDirSpec_ApiKeyHelper_BareAdapterRespects pins that the
 // bare-mode constructors return adapters with the ApiKeyHelperPath
 // field exposed (so consumers can populate it post-construction
