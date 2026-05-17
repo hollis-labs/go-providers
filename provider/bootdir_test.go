@@ -513,9 +513,10 @@ func TestCodexAdapter_AppServer_BootDirSpec_NoProjectDirArg(t *testing.T) {
 }
 
 // TestCodexBootDirSpec_EmptyMCP pins the empty-loopback path: with no
-// MCPLoopbackURL the config.toml renderer returns "" (codex falls back to
-// defaults). The .mcp.json sidecar is exercised by TestRenderMCPJSON_Empty
-// — this test only walks the codex-specific config.toml branch.
+// MCPLoopbackURL the config.toml has no [mcp_servers.*] blocks, but it still
+// carries the approval/sandbox policy header — the headless-codex deadlock
+// fix means the policy is ALWAYS planted. The .mcp.json sidecar is exercised
+// by TestRenderMCPJSON_Empty — this test only walks the config.toml branch.
 func TestCodexBootDirSpec_EmptyMCP(t *testing.T) {
 	a := NewCodexAdapter()
 	spec := a.BootDirSpec()
@@ -526,8 +527,27 @@ func TestCodexBootDirSpec_EmptyMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.toml render: %v", err)
 	}
-	if configTOML != "" {
-		t.Errorf("empty MCPLoopbackURL should produce empty config.toml, got %q", configTOML)
+	if strings.Contains(configTOML, "[mcp_servers.") {
+		t.Errorf("empty MCPLoopbackURL should produce no mcp_servers blocks, got %q", configTOML)
+	}
+	// The policy header must be present even with no MCP servers — this is
+	// the fix: a headless codex with no planted approval_policy falls back
+	// to its interactive default and deadlocks.
+	for _, want := range []string{`approval_policy = "never"`, `sandbox_mode = "workspace-write"`} {
+		if !strings.Contains(configTOML, want) {
+			t.Errorf("config.toml missing %q, got %q", want, configTOML)
+		}
+	}
+}
+
+// TestCodexBootDirSpec_InvalidApprovalPolicy pins that an unrecognized
+// ApprovalPolicy fails the config.toml Render rather than planting a
+// broken/ignored value.
+func TestCodexBootDirSpec_InvalidApprovalPolicy(t *testing.T) {
+	a := &CodexAdapter{ApprovalPolicy: "bogus"}
+	spec := a.BootDirSpec()
+	if _, err := spec.PlantedFiles[2].Render(PlantContext{AgentName: "codex-exec"}); err == nil {
+		t.Error("invalid ApprovalPolicy should fail the config.toml Render")
 	}
 }
 
@@ -636,23 +656,57 @@ func TestReadCodexAuthSource_Missing(t *testing.T) {
 	}
 }
 
-// TestRenderCodexConfigTOML pins the populated and empty branches of the
-// codex TOML emitter.
+// TestRenderCodexConfigTOML pins the policy header (always emitted) plus the
+// loopback and no-MCP branches of the codex TOML emitter.
 func TestRenderCodexConfigTOML(t *testing.T) {
-	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp", muxEntry{})
-	want := "[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
+	got := renderCodexConfigTOML("never", "workspace-write", "http://127.0.0.1:65535/mcp", muxEntry{})
+	want := "approval_policy = \"never\"\nsandbox_mode = \"workspace-write\"\n\n" +
+		"[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
 	if got != want {
 		t.Errorf("populated shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
-	if got := renderCodexConfigTOML("", muxEntry{}); got != "" {
-		t.Errorf("empty URL should produce empty TOML, got %q", got)
+
+	// No MCP servers: the config is no longer empty — the policy header is
+	// always emitted so a headless codex never falls back to its
+	// interactive approval default (the deadlock).
+	noMCP := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{})
+	wantNoMCP := "approval_policy = \"never\"\nsandbox_mode = \"workspace-write\"\n"
+	if noMCP != wantNoMCP {
+		t.Errorf("no-MCP shape mismatch\nwant:\n%s\ngot:\n%s", wantNoMCP, noMCP)
+	}
+}
+
+// TestResolveCodexExecPolicy pins the default-application and validation of
+// CodexAdapter.ApprovalPolicy / SandboxMode.
+func TestResolveCodexExecPolicy(t *testing.T) {
+	approval, sandbox, err := resolveCodexExecPolicy("", "")
+	if err != nil {
+		t.Fatalf("default resolve: %v", err)
+	}
+	if approval != "never" || sandbox != "workspace-write" {
+		t.Errorf("defaults = (%q, %q), want (never, workspace-write)", approval, sandbox)
+	}
+
+	approval, sandbox, err = resolveCodexExecPolicy("on-request", "danger-full-access")
+	if err != nil {
+		t.Fatalf("explicit resolve: %v", err)
+	}
+	if approval != "on-request" || sandbox != "danger-full-access" {
+		t.Errorf("explicit = (%q, %q)", approval, sandbox)
+	}
+
+	if _, _, err := resolveCodexExecPolicy("yolo", ""); err == nil {
+		t.Error("invalid ApprovalPolicy should error")
+	}
+	if _, _, err := resolveCodexExecPolicy("", "wide-open"); err == nil {
+		t.Error("invalid SandboxMode should error")
 	}
 }
 
 // TestRenderCodexConfigTOML_LoopbackPlusMux pins the load-bearing dual-entry
 // shape for Codex: loopback HTTP plus stdio mux in config.toml.
 func TestRenderCodexConfigTOML_LoopbackPlusMux(t *testing.T) {
-	got := renderCodexConfigTOML("http://127.0.0.1:65535/mcp", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", "http://127.0.0.1:65535/mcp", muxEntry{
 		Command: "/path/to/mux",
 		Args: []string{
 			"mcp",
@@ -668,7 +722,10 @@ func TestRenderCodexConfigTOML_LoopbackPlusMux(t *testing.T) {
 			"EMPTY",
 		},
 	})
-	want := `[mcp_servers.loopback]
+	want := `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.loopback]
 url = "http://127.0.0.1:65535/mcp"
 
 [mcp_servers.mux]
@@ -686,11 +743,14 @@ args = ["mcp", "--proxy", "--servers=vanta,clockwork,cerberus", "--token", "loca
 
 // TestRenderCodexConfigTOML_MuxOnly pins the mux-only branch.
 func TestRenderCodexConfigTOML_MuxOnly(t *testing.T) {
-	got := renderCodexConfigTOML("", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
 		Command: "/path/to/mux",
 		Args:    []string{"mcp", "--proxy"},
 	})
-	want := `[mcp_servers.mux]
+	want := `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.mux]
 command = "/path/to/mux"
 args = ["mcp", "--proxy"]
 `
@@ -702,10 +762,13 @@ args = ["mcp", "--proxy"]
 // TestRenderCodexConfigTOML_MuxOnly_EmptyArgs pins that stdio mux entries emit
 // a stable empty args array rather than omitting the line entirely.
 func TestRenderCodexConfigTOML_MuxOnly_EmptyArgs(t *testing.T) {
-	got := renderCodexConfigTOML("", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
 		Command: "/path/to/mux",
 	})
-	want := `[mcp_servers.mux]
+	want := `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.mux]
 command = "/path/to/mux"
 args = []
 `
@@ -717,7 +780,7 @@ args = []
 // TestRenderCodexConfigTOML_MuxEnvKeysQuoted pins that env keys are quoted in
 // TOML and empty keys are skipped, preventing dotted keys or invalid syntax.
 func TestRenderCodexConfigTOML_MuxEnvKeysQuoted(t *testing.T) {
-	got := renderCodexConfigTOML("", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
 		Command: "/path/to/mux",
 		Env: []string{
 			"MUX.AUTH.MODE=stdio",

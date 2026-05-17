@@ -14,7 +14,8 @@ import (
 //	<bootDir>/
 //	├── AGENTS.md           # system context (auto-loaded by Codex on cwd)
 //	├── boot.md             # task kickoff content
-//	├── config.toml         # codex config (MCP loopback) — load-bearing
+//	├── config.toml         # codex config (approval/sandbox policy + MCP
+//	                        # loopback) — load-bearing
 //	├── auth.json           # ChatGPT/API auth, copied from user's $CODEX_HOME
 //	└── .mcp.json           # legacy claude-shape sidecar — NOT read by codex,
 //	                        # kept for cross-tool inspection sanity (analogous
@@ -97,7 +98,11 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: "config.toml",
 				Render: func(ctx PlantContext) (string, error) {
-					return renderCodexConfigTOML(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					approval, sandbox, err := resolveCodexExecPolicy(a.ApprovalPolicy, a.SandboxMode)
+					if err != nil {
+						return "", err
+					}
+					return renderCodexConfigTOML(approval, sandbox, ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 				// Mode 0o600: config.toml embeds the per-task MCP loopback
 				// URL. Treat as secret-ish (matches the .mcp.json policy).
@@ -150,27 +155,67 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	}
 }
 
-// renderCodexConfigTOML emits the codex config.toml blocks for the per-task
-// MCP servers. Empty loopback + empty mux → empty config (codex falls back to
-// defaults, which is fine for the no-MCP test path).
+// codexApprovalPolicies is codex's `approval_policy` config vocabulary.
+var codexApprovalPolicies = map[string]bool{
+	"untrusted":  true,
+	"on-failure": true,
+	"on-request": true,
+	"never":      true,
+}
+
+// codexSandboxModes is codex's `sandbox_mode` config vocabulary.
+var codexSandboxModes = map[string]bool{
+	"read-only":          true,
+	"workspace-write":    true,
+	"danger-full-access": true,
+}
+
+// resolveCodexExecPolicy validates a CodexAdapter's ApprovalPolicy / SandboxMode
+// and applies the headless-safe defaults for empty values. The defaults are
+// "never" / "workspace-write" — NOT codex's own interactive defaults — because
+// a BootDirSpec materializes a headless per-task boot with no human at a TTY;
+// see the CodexAdapter field godoc. An unrecognized value is an error,
+// surfaced through the config.toml PlantedFile Render.
+func resolveCodexExecPolicy(approvalPolicy, sandboxMode string) (approval, sandbox string, err error) {
+	approval = approvalPolicy
+	if approval == "" {
+		approval = "never"
+	}
+	if !codexApprovalPolicies[approval] {
+		return "", "", fmt.Errorf("invalid CodexAdapter.ApprovalPolicy %q (want one of: untrusted, on-failure, on-request, never)", approvalPolicy)
+	}
+	sandbox = sandboxMode
+	if sandbox == "" {
+		sandbox = "workspace-write"
+	}
+	if !codexSandboxModes[sandbox] {
+		return "", "", fmt.Errorf("invalid CodexAdapter.SandboxMode %q (want one of: read-only, workspace-write, danger-full-access)", sandboxMode)
+	}
+	return approval, sandbox, nil
+}
+
+// renderCodexConfigTOML emits the full codex config.toml: the approval/sandbox
+// policy header followed by the per-task MCP server blocks.
+//
+// The policy header (`approval_policy` / `sandbox_mode`) is ALWAYS emitted —
+// it is the fix for the headless-codex deadlock, where a codex with no planted
+// approval policy falls back to its interactive default and blocks forever
+// waiting for an approval no one can give. Top-level TOML keys must precede
+// any `[table]` header, so the policy lines come first.
 //
 // The loopback transport is "streamable_http" in codex's terminology and is
 // configured via `url = "..."`. Stdio servers use `command = "..."` plus
 // `args = [...]` and optional `[mcp_servers.<name>.env]` key/value pairs.
-func renderCodexConfigTOML(loopbackURL string, mux muxEntry) string {
-	if loopbackURL == "" && !mux.present() {
-		return ""
-	}
+func renderCodexConfigTOML(approvalPolicy, sandboxMode, loopbackURL string, mux muxEntry) string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "approval_policy = %q\n", approvalPolicy)
+	fmt.Fprintf(&b, "sandbox_mode = %q\n", sandboxMode)
 	if loopbackURL != "" {
-		b.WriteString("[mcp_servers.loopback]\n")
+		b.WriteString("\n[mcp_servers.loopback]\n")
 		fmt.Fprintf(&b, "url = %q\n", loopbackURL)
 	}
 	if mux.present() {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("[mcp_servers.mux]\n")
+		b.WriteString("\n[mcp_servers.mux]\n")
 		fmt.Fprintf(&b, "command = %q\n", mux.Command)
 		fmt.Fprintf(&b, "args = %s\n", tomlStringArray(mux.Args))
 		if len(mux.Env) > 0 {

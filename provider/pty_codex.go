@@ -31,6 +31,46 @@ type CodexAdapter struct {
 	// (single-turn subprocess). "app-server" → `codex app-server`
 	// (long-lived JSON-RPC daemon over stdio).
 	Mode string
+
+	// ApprovalPolicy sets `approval_policy` in the planted config.toml
+	// (see BootDirSpec). It is the codex equivalent of
+	// ClaudeAdapter.PermissionMode — a first-class knob for codex's
+	// approval vocabulary:
+	//
+	//	""             — resolves to "never" (the headless-safe default).
+	//	"untrusted"    — prompt before running anything not on the trusted
+	//	                 list.
+	//	"on-failure"   — run in the sandbox; prompt only if a command fails.
+	//	"on-request"   — the model decides when to escalate for approval.
+	//	"never"        — never prompt for approval.
+	//
+	// The default is "never" — NOT codex's own interactive default —
+	// because BootDirSpec materializes a HEADLESS per-task boot dir with
+	// no human at a TTY. A codex that prompts for approval under a headless
+	// runtime (codex app-server emits a JSON-RPC approval request) blocks
+	// forever. "never" + a writable SandboxMode is the orchestrated-run
+	// equivalent of codex's `--full-auto`.
+	//
+	// An unrecognized value makes the config.toml Render fail.
+	ApprovalPolicy string
+
+	// SandboxMode sets `sandbox_mode` in the planted config.toml. Codex's
+	// filesystem/network sandbox vocabulary:
+	//
+	//	""                   — resolves to "workspace-write" (default).
+	//	"read-only"          — the agent may read but not write or run
+	//	                       network commands.
+	//	"workspace-write"    — the agent may write within its workspace
+	//	                       (and /tmp); network still gated.
+	//	"danger-full-access" — no sandbox.
+	//
+	// The default is "workspace-write": an orchestrated agent that cannot
+	// write its workspace cannot do work. Pair it with ApprovalPolicy —
+	// "never" approval over a "read-only" sandbox would let codex run but
+	// silently fail every write.
+	//
+	// An unrecognized value makes the config.toml Render fail.
+	SandboxMode string
 }
 
 func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }

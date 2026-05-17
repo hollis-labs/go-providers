@@ -213,11 +213,13 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 | Adapter | Status | Layout |
 |---|---|---|
 | claude | concrete | `CLAUDE.md` + `boot.md` + `.claude/settings.json` + `.mcp.json`, cwd = bootDir, `--add-dir {{.ProjectDir}}` |
-| codex | concrete | `AGENTS.md` + `boot.md` + `.mcp.json`, cwd = bootDir, `--cd {{.ProjectDir}}` (verify per Notes) |
+| codex | concrete | `AGENTS.md` + `boot.md` + `config.toml` + `auth.json` + `.mcp.json`, cwd = bootDir, `--cd {{.ProjectDir}}` (exec mode) |
 | opencode | concrete | `agents/<name>.md` + `agents.json` + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir {{.ProjectDir}}` |
 | gemini, copilot, aider, junie, kiro, qwen | stub | zero-value spec; `Notes` describes the probe needed |
 
 `AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
+
+The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` header, controlled by `CodexAdapter.ApprovalPolicy` / `CodexAdapter.SandboxMode` (the codex analogue of `ClaudeAdapter.PermissionMode`). The defaults are `never` / `workspace-write` — NOT codex's interactive defaults — because a `BootDirSpec` is a headless boot with no TTY: a codex that prompts for approval under a headless runtime (codex `app-server` emits a JSON-RPC approval request) blocks forever.
 
 ### Long-lived headless modes
 

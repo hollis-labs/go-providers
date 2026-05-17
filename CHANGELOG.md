@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## v0.20.0 — 2026-05-17
+
+### Added
+
+- `CodexAdapter.ApprovalPolicy` and `CodexAdapter.SandboxMode` — first-class
+  fields for codex's `approval_policy` / `sandbox_mode` config vocabulary, the
+  codex analogue of `ClaudeAdapter.PermissionMode`. They thread into the
+  planted `config.toml`. An unrecognized value fails the `config.toml`
+  `Render`.
+
+### Changed
+
+- The codex `BootDirSpec` `config.toml` now **always** emits an
+  `approval_policy` / `sandbox_mode` header (previously it emitted only
+  `[mcp_servers.*]` blocks, and nothing at all when there were no MCP
+  servers). The defaults are `never` / `workspace-write` — deliberately NOT
+  codex's interactive defaults.
+
+### Fixed
+
+- **Headless-codex approval deadlock.** A `BootDirSpec` materializes a
+  headless per-task boot with no human at a TTY. With no `approval_policy`
+  planted, codex fell back to its interactive default and prompted for
+  approval before running any tool — and under the `app-server` runtime that
+  prompt is a JSON-RPC approval request no one answers, so the run hung
+  forever. Planting `approval_policy = "never"` (with a writable
+  `sandbox_mode`) makes a headless codex non-interactive by default — the
+  orchestrated-run equivalent of `--full-auto`. Pairs with the
+  `go-agent-sessions` v0.9.5 fix that stops the runtime from dropping any
+  server-initiated request that does slip through.
+
 ## v0.19.0 — 2026-05-17
 
 ### Added
