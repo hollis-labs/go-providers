@@ -58,8 +58,12 @@ func TestClaudeBootDirSpec(t *testing.T) {
 	}
 
 	settings, _ := spec.PlantedFiles[2].Render(pctx)
-	if !strings.Contains(settings, `"mcpServers"`) {
-		t.Error(".claude/settings.json should contain mcpServers stub")
+	if strings.Contains(settings, "approvedTools") || strings.Contains(settings, "mcpServers") {
+		t.Errorf(".claude/settings.json must not emit the deprecated approvedTools/mcpServers keys\ngot:\n%s", settings)
+	}
+	var settingsObj map[string]any
+	if err := json.Unmarshal([]byte(settings), &settingsObj); err != nil {
+		t.Errorf(".claude/settings.json is not valid JSON: %v\ngot:\n%s", err, settings)
 	}
 
 	mcpJSON, _ := spec.PlantedFiles[3].Render(pctx)
@@ -112,12 +116,34 @@ func TestClaudeBootDirSpec_ApiKeyHelper_Set(t *testing.T) {
 	if !strings.Contains(settings, want) {
 		t.Errorf("settings.json should contain %s\ngot:\n%s", want, settings)
 	}
-	// Sanity: the existing keys still ride along.
-	if !strings.Contains(settings, `"mcpServers"`) {
-		t.Errorf("settings.json lost mcpServers stub when apiKeyHelper added\ngot:\n%s", settings)
+	// The deprecated approvedTools / mcpServers keys must NOT ride along.
+	if strings.Contains(settings, "approvedTools") || strings.Contains(settings, "mcpServers") {
+		t.Errorf("settings.json must not emit deprecated approvedTools/mcpServers keys\ngot:\n%s", settings)
 	}
-	if !strings.Contains(settings, `"approvedTools"`) {
-		t.Errorf("settings.json lost approvedTools stub when apiKeyHelper added\ngot:\n%s", settings)
+}
+
+// TestClaudeSettingsStub_BypassPermissions pins that a SkipPermissions
+// adapter plants `permissions.defaultMode: bypassPermissions` (current
+// settings schema) and that the default adapter plants neither that nor
+// the deprecated keys.
+func TestClaudeSettingsStub_BypassPermissions(t *testing.T) {
+	dev := NewClaudeAdapterDev()
+	settings, err := dev.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatalf("settings.json not valid JSON: %v\ngot:\n%s", err, settings)
+	}
+	perms, ok := got["permissions"].(map[string]any)
+	if !ok || perms["defaultMode"] != "bypassPermissions" {
+		t.Errorf("dev adapter settings.json: want permissions.defaultMode=bypassPermissions, got:\n%s", settings)
+	}
+
+	plain, _ := NewClaudeAdapter().BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if strings.Contains(plain, "permissions") {
+		t.Errorf("non-skip adapter must not emit a permissions block, got:\n%s", plain)
 	}
 }
 

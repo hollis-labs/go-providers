@@ -65,6 +65,30 @@ func TestClaudeBuildArgs_PTY_ResumeAndSkipPermissions(t *testing.T) {
 	assertNoPrintModeFlags(t, args)
 }
 
+// TestClaudeBuildArgs_MCPConfig_NonBare pins that MCPConfigPath emits
+// `--mcp-config <path>` in PTY, streaming-stdio, and print modes — not
+// just bare mode. Loading the planted .mcp.json explicitly skips the
+// project-scoped MCP trust prompt that otherwise fires in PTY mode.
+func TestClaudeBuildArgs_MCPConfig_NonBare(t *testing.T) {
+	cases := map[string]*ClaudeAdapter{
+		"pty":       {PTY: true, MCPConfigPath: ".mcp.json"},
+		"streaming": {InputMode: "stream-json", MCPConfigPath: ".mcp.json"},
+		"print":     {MCPConfigPath: ".mcp.json"},
+	}
+	for name, a := range cases {
+		args := a.BuildArgs("hello", "", "")
+		idx := slices.Index(args, "--mcp-config")
+		if idx < 0 || idx+1 >= len(args) || args[idx+1] != ".mcp.json" {
+			t.Errorf("%s mode: expected `--mcp-config .mcp.json` in args, got %v", name, args)
+		}
+	}
+	// Empty MCPConfigPath emits no flag (unchanged default behavior).
+	plain := (&ClaudeAdapter{PTY: true}).BuildArgs("", "", "")
+	if slices.Contains(plain, "--mcp-config") {
+		t.Errorf("empty MCPConfigPath must not emit --mcp-config, got %v", plain)
+	}
+}
+
 func TestClaudeBuildArgs_PTY_IgnoresPromptAndSystemPrompt(t *testing.T) {
 	// Prompt and systemPrompt must NOT leak into PTY-mode args. The contract
 	// is that per-turn payloads arrive over PTY stdin and system prompts
