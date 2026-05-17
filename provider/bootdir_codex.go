@@ -102,7 +102,12 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 					if err != nil {
 						return "", err
 					}
-					return renderCodexConfigTOML(approval, sandbox, ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					base := renderCodexConfigTOML(approval, sandbox, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))
+					extra, err := renderCodexMCPServers(ctx.MCPServers)
+					if err != nil {
+						return "", err
+					}
+					return base + extra, nil
 				},
 				// Mode 0o600: config.toml embeds the per-task MCP loopback
 				// URL. Treat as secret-ish (matches the .mcp.json policy).
@@ -244,6 +249,81 @@ func tomlStringArray(values []string) string {
 		quoted = append(quoted, fmt.Sprintf("%q", v))
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// codexReservedMCPNames are the [mcp_servers.<name>] keys renderCodexConfigTOML
+// already emits from MCPLoopbackURL / the Mux* fields. An MCPServerSpec may
+// not reuse one — a duplicate TOML table is invalid and codex rejects it.
+var codexReservedMCPNames = map[string]bool{"loopback": true, "mux": true}
+
+// validMCPServerName reports whether name is a safe bare TOML table key:
+// non-empty and limited to [A-Za-z0-9_-]. Anything else would need TOML
+// quoting and is rejected up front to keep the planted config simple.
+func validMCPServerName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// renderCodexMCPServers emits a [mcp_servers.<name>] block for each extra
+// MCP server in PlantContext.MCPServers, in slice order, for appending after
+// renderCodexConfigTOML's output (top-level keys already precede all tables,
+// so appending more tables stays valid TOML).
+//
+// codex has no .mcp.json sidecar — a consumer's own MCP server must be
+// co-rendered into the single config.toml. An invalid spec (empty/reserved/
+// non-simple name, duplicate name, or not exactly one transport) returns an
+// error so the misconfiguration fails the config.toml Render rather than
+// planting a broken file.
+func renderCodexMCPServers(servers []MCPServerSpec) (string, error) {
+	var b strings.Builder
+	seen := make(map[string]bool, len(servers))
+	for _, s := range servers {
+		switch {
+		case !validMCPServerName(s.Name):
+			return "", fmt.Errorf("MCPServerSpec: invalid name %q (want non-empty [A-Za-z0-9_-]+)", s.Name)
+		case codexReservedMCPNames[s.Name]:
+			return "", fmt.Errorf("MCPServerSpec %q: name is reserved — loopback/mux come from MCPLoopbackURL/Mux*", s.Name)
+		case seen[s.Name]:
+			return "", fmt.Errorf("MCPServerSpec %q: duplicate name", s.Name)
+		}
+		seen[s.Name] = true
+
+		hasHTTP, hasStdio := s.HTTPURL != "", s.Command != ""
+		if hasHTTP == hasStdio {
+			return "", fmt.Errorf("MCPServerSpec %q: set exactly one of HTTPURL or Command", s.Name)
+		}
+
+		fmt.Fprintf(&b, "\n[mcp_servers.%s]\n", s.Name)
+		if hasHTTP {
+			fmt.Fprintf(&b, "url = %q\n", s.HTTPURL)
+			continue
+		}
+		fmt.Fprintf(&b, "command = %q\n", s.Command)
+		fmt.Fprintf(&b, "args = %s\n", tomlStringArray(s.Args))
+		if len(s.Env) > 0 {
+			fmt.Fprintf(&b, "\n[mcp_servers.%s.env]\n", s.Name)
+			for _, kv := range s.Env {
+				key, value, ok := strings.Cut(kv, "=")
+				if !ok {
+					value = ""
+				}
+				if key == "" {
+					continue
+				}
+				fmt.Fprintf(&b, "%q = %q\n", key, value)
+			}
+		}
+	}
+	return b.String(), nil
 }
 
 // readCodexAuthSource reads the user's codex auth.json bytes for replication

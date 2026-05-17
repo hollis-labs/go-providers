@@ -153,6 +153,46 @@ type PlantContext struct {
 	// an object-shaped env). Malformed entries (no "=") are emitted
 	// verbatim; the spawned CLI's MCP client decides what to do.
 	MuxEnv []string
+
+	// MCPServers carries additional MCP servers to plant beyond the
+	// per-task loopback (MCPLoopbackURL) and the mux aggregator (Mux*).
+	//
+	// Consumed by the codex config.toml renderer. codex has no .mcp.json
+	// sidecar — every MCP server it sees must be co-rendered into the
+	// single config.toml — so a consumer's own server (e.g. Nanite's
+	// `nanite mcp`) cannot be added by writing a separate file; it has to
+	// ride here so config.toml stays single-owner. claude and opencode
+	// keep their MCP servers in a dedicated .mcp.json / opencode.json a
+	// consumer can extend directly, so this field does not affect them.
+	//
+	// Empty / nil → no extra entries (back-compat: planted config stays
+	// byte-identical for callers that don't populate this field).
+	MCPServers []MCPServerSpec
+}
+
+// MCPServerSpec describes one additional MCP server to plant into a
+// provider's MCP configuration (see PlantContext.MCPServers). Exactly one
+// transport must be set: HTTPURL for a streamable-HTTP server, or Command
+// for a stdio server.
+type MCPServerSpec struct {
+	// Name is the server's key in the planted config — its
+	// [mcp_servers.<Name>] table. Required. Must match [A-Za-z0-9_-]+.
+	// The names "loopback" and "mux" are reserved (those entries come
+	// from MCPLoopbackURL and the Mux* fields); reusing one is an error.
+	Name string
+
+	// HTTPURL is the streamable-HTTP endpoint. Set this XOR Command.
+	HTTPURL string
+
+	// Command is the stdio server executable. Set this XOR HTTPURL.
+	Command string
+
+	// Args is the stdio server argv, excluding Command. Command only.
+	Args []string
+
+	// Env is the stdio server environment as "KEY=VALUE" strings.
+	// Command only.
+	Env []string
 }
 
 // CwdPreference declares the spawned process's working directory.

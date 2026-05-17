@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## v0.21.0 — 2026-05-17
+
+### Added
+
+- `PlantContext.MCPServers` (`[]MCPServerSpec`) — a slot for arbitrary
+  additional MCP servers beyond the per-task loopback (`MCPLoopbackURL`) and
+  the mux aggregator (`Mux*`). Each `MCPServerSpec` is a name plus one
+  transport: `HTTPURL` (streamable-HTTP) or `Command` (+ `Args` / `Env`,
+  stdio).
+
+### Changed
+
+- The codex `config.toml` renderer now emits a `[mcp_servers.<name>]` block
+  for each `PlantContext.MCPServers` entry, after the loopback / mux blocks.
+  codex has **no `.mcp.json` sidecar** — every MCP server it sees must be
+  co-rendered into the single `config.toml` — so a consumer's own server
+  (e.g. Nanite's `nanite mcp`) previously could not be added without
+  post-processing the planted file. `MCPServers` keeps `config.toml`
+  single-owner. The names `loopback` and `mux` are reserved; an invalid
+  spec (empty/reserved/non-`[A-Za-z0-9_-]` name, duplicate name, or not
+  exactly one transport) fails the `config.toml` `Render`.
+- Back-compat: with `MCPServers` empty the planted `config.toml` is
+  byte-identical to v0.20.0. claude `.mcp.json` and opencode `opencode.json`
+  are unaffected — those providers keep a dedicated MCP-config file a
+  consumer can extend directly.
+
 ## v0.20.0 — 2026-05-17
 
 ### Added

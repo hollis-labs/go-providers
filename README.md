@@ -221,6 +221,8 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 
 The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` header, controlled by `CodexAdapter.ApprovalPolicy` / `CodexAdapter.SandboxMode` (the codex analogue of `ClaudeAdapter.PermissionMode`). The defaults are `never` / `workspace-write` — NOT codex's interactive defaults — because a `BootDirSpec` is a headless boot with no TTY: a codex that prompts for approval under a headless runtime (codex `app-server` emits a JSON-RPC approval request) blocks forever.
 
+codex reads its MCP servers from `config.toml [mcp_servers.*]` — it has no `.mcp.json` sidecar — so every MCP server it sees has to be co-rendered into that one file. Beyond the per-task loopback (`PlantContext.MCPLoopbackURL`) and the mux aggregator (`PlantContext.Mux*`), a consumer adds its own servers via `PlantContext.MCPServers` (`[]MCPServerSpec` — name + an HTTP-URL or stdio command). The codex `config.toml` renderer emits a `[mcp_servers.<name>]` block for each, so `config.toml` stays single-owner and no consumer post-processes the planted file. The names `loopback` and `mux` are reserved.
+
 ### Long-lived headless modes
 
 Two adapter shapes target vendor-documented long-lived headless lifecycles. Both emit argv only; the runtime that owns the I/O loop, session-id handling, and attach fan-out lives upstream in `go-agent-sessions`.

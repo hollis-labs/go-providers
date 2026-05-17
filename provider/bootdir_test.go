@@ -551,6 +551,89 @@ func TestCodexBootDirSpec_InvalidApprovalPolicy(t *testing.T) {
 	}
 }
 
+// TestRenderCodexMCPServers covers the http + stdio shapes and ordering of
+// the extra-MCP-server blocks (PlantContext.MCPServers).
+func TestRenderCodexMCPServers(t *testing.T) {
+	got, err := renderCodexMCPServers([]MCPServerSpec{
+		{Name: "nanite", Command: "nanite", Args: []string{"mcp", "--stdio"}, Env: []string{"NANITE_TOKEN=abc"}},
+		{Name: "remote-tools", HTTPURL: "http://127.0.0.1:7000/mcp"},
+	})
+	if err != nil {
+		t.Fatalf("renderCodexMCPServers: %v", err)
+	}
+	want := `
+[mcp_servers.nanite]
+command = "nanite"
+args = ["mcp", "--stdio"]
+
+[mcp_servers.nanite.env]
+"NANITE_TOKEN" = "abc"
+
+[mcp_servers.remote-tools]
+url = "http://127.0.0.1:7000/mcp"
+`
+	if got != want {
+		t.Errorf("shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+
+	if got, err := renderCodexMCPServers(nil); err != nil || got != "" {
+		t.Errorf("nil servers = (%q, %v), want (\"\", nil)", got, err)
+	}
+}
+
+// TestRenderCodexMCPServers_Invalid pins the rejection cases — a bad spec
+// fails the render rather than planting a broken config.toml.
+func TestRenderCodexMCPServers_Invalid(t *testing.T) {
+	cases := map[string][]MCPServerSpec{
+		"empty name":      {{HTTPURL: "http://x/mcp"}},
+		"bad name chars":  {{Name: "has space", HTTPURL: "http://x/mcp"}},
+		"reserved mux":    {{Name: "mux", Command: "x"}},
+		"reserved loopbk": {{Name: "loopback", HTTPURL: "http://x/mcp"}},
+		"duplicate name":  {{Name: "a", Command: "x"}, {Name: "a", Command: "y"}},
+		"no transport":    {{Name: "a"}},
+		"both transports": {{Name: "a", HTTPURL: "http://x/mcp", Command: "x"}},
+	}
+	for label, servers := range cases {
+		if _, err := renderCodexMCPServers(servers); err == nil {
+			t.Errorf("%s: want error, got nil", label)
+		}
+	}
+}
+
+// TestCodexBootDirSpec_MCPServers pins that PlantContext.MCPServers flows into
+// the planted config.toml alongside the approval header and the loopback
+// entry — config.toml stays single-owner, no consumer post-processing.
+func TestCodexBootDirSpec_MCPServers(t *testing.T) {
+	a := NewCodexAdapter()
+	spec := a.BootDirSpec()
+	ctx := PlantContext{
+		AgentName:      "codex-exec",
+		MCPLoopbackURL: "http://127.0.0.1:9000/mcp",
+		MCPServers: []MCPServerSpec{
+			{Name: "nanite", Command: "nanite", Args: []string{"mcp"}},
+		},
+	}
+	configTOML, err := spec.PlantedFiles[2].Render(ctx)
+	if err != nil {
+		t.Fatalf("config.toml render: %v", err)
+	}
+	for _, want := range []string{
+		`approval_policy = "never"`,
+		`[mcp_servers.loopback]`,
+		`[mcp_servers.nanite]`,
+		`command = "nanite"`,
+	} {
+		if !strings.Contains(configTOML, want) {
+			t.Errorf("config.toml missing %q\ngot:\n%s", want, configTOML)
+		}
+	}
+
+	bad := PlantContext{AgentName: "codex-exec", MCPServers: []MCPServerSpec{{Name: "mux", Command: "x"}}}
+	if _, err := spec.PlantedFiles[2].Render(bad); err == nil {
+		t.Error("reserved MCP server name should fail the config.toml Render")
+	}
+}
+
 // TestOpencodeBootDirSpec_PlantedFileModes pins PlantedFile.Mode for the
 // opencode spec: .mcp.json carries the per-task loopback URL and gets 0o600;
 // other planted files leave Mode unset (caller falls back to 0o644).
