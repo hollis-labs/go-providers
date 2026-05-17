@@ -104,6 +104,24 @@ per request and its first line of stdout is consumed as the bearer
 token. Use this for OAuth-via-keychain auth or any other
 per-environment secret store.
 
+### Permission mode
+
+`ClaudeAdapter.PermissionMode` sets `permissions.defaultMode` in the
+planted `.claude/settings.json` — the full Claude Code vocabulary:
+`default`, `acceptEdits`, `plan`, `bypassPermissions`. Set it before
+iterating `BootDirSpec().PlantedFiles`:
+
+```go
+adapter := provider.NewClaudeAdapter()
+adapter.PermissionMode = "acceptEdits"
+```
+
+When `PermissionMode` is empty the back-compat behavior holds:
+`SkipPermissions == true` still plants `bypassPermissions`, and
+otherwise no `permissions` block is planted. A non-empty
+`PermissionMode` wins over that default; an unrecognized value fails
+the planted-file render.
+
 ## API Overview
 
 ### Core interface (`provider/provider.go`)

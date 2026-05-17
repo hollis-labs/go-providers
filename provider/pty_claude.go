@@ -19,6 +19,32 @@ type ClaudeAdapter struct {
 	// Only set when developer_mode is enabled; never set for production.
 	SkipPermissions bool
 
+	// PermissionMode sets `permissions.defaultMode` in the planted
+	// `.claude/settings.json` (see BootDirSpec). It is a first-class knob
+	// for the full Claude Code permission-mode vocabulary:
+	//
+	//	""                  — no override. If SkipPermissions is true the
+	//	                      planted file still emits
+	//	                      `bypassPermissions` for back-compat;
+	//	                      otherwise no `permissions` block is planted.
+	//	"default"           — standard prompt-on-each-tool behavior,
+	//	                      emitted explicitly.
+	//	"acceptEdits"       — auto-accept file edits, prompt for the rest.
+	//	"plan"              — plan mode (read-only; no edits or commands).
+	//	"bypassPermissions" — skip all permission prompts (settings-schema
+	//	                      equivalent of --dangerously-skip-permissions).
+	//
+	// When PermissionMode is non-empty it wins over the SkipPermissions
+	// back-compat default for the planted settings.json. SkipPermissions
+	// independently controls the --dangerously-skip-permissions CLI flag
+	// in BuildArgs; PermissionMode does not touch argv. Setting an
+	// unrecognized value makes the .claude/settings.json Render fail.
+	//
+	// This field exists so consumers no longer post-process the planted
+	// settings.json to plant `acceptEdits` / `plan` (the workaround
+	// Torque and Tether carried before go-providers exposed it).
+	PermissionMode string
+
 	// PTY signals the consumer runtime spawns claude as a long-lived PTY
 	// (interactive TUI) rather than a per-turn subprocess. When true,
 	// BuildArgs omits the print-mode flags (-p, --output-format, --verbose,
