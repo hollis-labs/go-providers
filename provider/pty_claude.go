@@ -45,6 +45,25 @@ type ClaudeAdapter struct {
 	// Torque and Tether carried before go-providers exposed it).
 	PermissionMode string
 
+	// AdditionalDirectories lists absolute directories the claude agent
+	// may access beyond its working directory. Each entry becomes a
+	// member of `permissions.additionalDirectories` in the planted
+	// `.claude/settings.json`.
+	//
+	// Why this exists: a BootDirSpec materializes claude's cwd as a
+	// throwaway per-task tempdir. claude treats that cwd as its
+	// workspace and gates file access outside it; a claude agent asked
+	// to write into a real project path is therefore confined to its
+	// boot dir. AdditionalDirectories is claude's analogue of codex's
+	// CodexAdapter.WritableRoots — it widens the accessible set to the
+	// directories the task needs (the settings-file form of the
+	// `--add-dir` CLI flag).
+	//
+	// Empty / nil → no `additionalDirectories` key is emitted and the
+	// planted settings.json is byte-identical to before this field
+	// existed.
+	AdditionalDirectories []string
+
 	// PTY signals the consumer runtime spawns claude as a long-lived PTY
 	// (interactive TUI) rather than a per-turn subprocess. When true,
 	// BuildArgs omits the print-mode flags (-p, --output-format, --verbose,
