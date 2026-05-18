@@ -102,7 +102,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 					if err != nil {
 						return "", err
 					}
-					base := renderCodexConfigTOML(approval, sandbox, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))
+					base := renderCodexConfigTOML(approval, sandbox, a.WritableRoots, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))
 					extra, err := renderCodexMCPServers(ctx.MCPServers)
 					if err != nil {
 						return "", err
@@ -200,7 +200,8 @@ func resolveCodexExecPolicy(approvalPolicy, sandboxMode string) (approval, sandb
 }
 
 // renderCodexConfigTOML emits the full codex config.toml: the approval/sandbox
-// policy header followed by the per-task MCP server blocks.
+// policy header, the optional `[sandbox_workspace_write]` table, and the
+// per-task MCP server blocks.
 //
 // The policy header (`approval_policy` / `sandbox_mode`) is ALWAYS emitted —
 // it is the fix for the headless-codex deadlock, where a codex with no planted
@@ -208,13 +209,24 @@ func resolveCodexExecPolicy(approvalPolicy, sandboxMode string) (approval, sandb
 // waiting for an approval no one can give. Top-level TOML keys must precede
 // any `[table]` header, so the policy lines come first.
 //
+// writableRoots, when non-empty, emits a `[sandbox_workspace_write]` table
+// with a `writable_roots` array — the directories codex's "workspace-write"
+// sandbox may write to beyond the boot dir cwd. It is emitted right after the
+// policy header (before the MCP tables) for readability; codex only honors it
+// under sandbox_mode "workspace-write". Empty → the table is omitted and the
+// rendered config is byte-identical to before this parameter existed.
+//
 // The loopback transport is "streamable_http" in codex's terminology and is
 // configured via `url = "..."`. Stdio servers use `command = "..."` plus
 // `args = [...]` and optional `[mcp_servers.<name>.env]` key/value pairs.
-func renderCodexConfigTOML(approvalPolicy, sandboxMode, loopbackURL string, mux muxEntry) string {
+func renderCodexConfigTOML(approvalPolicy, sandboxMode string, writableRoots []string, loopbackURL string, mux muxEntry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "approval_policy = %q\n", approvalPolicy)
 	fmt.Fprintf(&b, "sandbox_mode = %q\n", sandboxMode)
+	if len(writableRoots) > 0 {
+		b.WriteString("\n[sandbox_workspace_write]\n")
+		fmt.Fprintf(&b, "writable_roots = %s\n", tomlStringArray(writableRoots))
+	}
 	if loopbackURL != "" {
 		b.WriteString("\n[mcp_servers.loopback]\n")
 		fmt.Fprintf(&b, "url = %q\n", loopbackURL)

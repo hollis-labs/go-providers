@@ -192,6 +192,63 @@ func TestClaudeSettingsStub_PermissionMode(t *testing.T) {
 	}
 }
 
+// TestClaudeSettingsStub_AdditionalDirectories pins that
+// ClaudeAdapter.AdditionalDirectories threads into the planted
+// .claude/settings.json as `permissions.additionalDirectories`, that the
+// `permissions` object is emitted even with no defaultMode set, and that
+// an empty list leaves the planted file byte-identical to before.
+func TestClaudeSettingsStub_AdditionalDirectories(t *testing.T) {
+	// AdditionalDirectories alone (no PermissionMode) still emits a
+	// permissions block carrying just additionalDirectories.
+	a := NewClaudeAdapter()
+	a.AdditionalDirectories = []string{"/Users/x/dev", "/tmp/work"}
+	settings, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatalf("settings.json not valid JSON: %v\ngot:\n%s", err, settings)
+	}
+	perms, ok := got["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("want a permissions block, got:\n%s", settings)
+	}
+	dirs, ok := perms["additionalDirectories"].([]any)
+	if !ok || len(dirs) != 2 || dirs[0] != "/Users/x/dev" || dirs[1] != "/tmp/work" {
+		t.Errorf("want additionalDirectories=[/Users/x/dev /tmp/work], got:\n%s", settings)
+	}
+	if _, hasMode := perms["defaultMode"]; hasMode {
+		t.Errorf("no PermissionMode set — defaultMode must be absent, got:\n%s", settings)
+	}
+
+	// Combined with PermissionMode: both keys present under permissions.
+	b := NewClaudeAdapter()
+	b.PermissionMode = "acceptEdits"
+	b.AdditionalDirectories = []string{"/srv/data"}
+	settings, err = b.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("combined render: %v", err)
+	}
+	got = nil
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatalf("combined settings.json not valid JSON: %v\ngot:\n%s", err, settings)
+	}
+	perms, _ = got["permissions"].(map[string]any)
+	if perms["defaultMode"] != "acceptEdits" {
+		t.Errorf("want defaultMode=acceptEdits alongside additionalDirectories, got:\n%s", settings)
+	}
+	if dirs, _ := perms["additionalDirectories"].([]any); len(dirs) != 1 || dirs[0] != "/srv/data" {
+		t.Errorf("want additionalDirectories=[/srv/data], got:\n%s", settings)
+	}
+
+	// Empty list + no mode → no permissions block at all (back-compat).
+	plain, _ := NewClaudeAdapter().BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if strings.Contains(plain, "permissions") {
+		t.Errorf("empty AdditionalDirectories must not emit a permissions block, got:\n%s", plain)
+	}
+}
+
 // TestClaudeBootDirSpec_ApiKeyHelper_BareAdapterRespects pins that the
 // bare-mode constructors return adapters with the ApiKeyHelperPath
 // field exposed (so consumers can populate it post-construction
@@ -742,7 +799,7 @@ func TestReadCodexAuthSource_Missing(t *testing.T) {
 // TestRenderCodexConfigTOML pins the policy header (always emitted) plus the
 // loopback and no-MCP branches of the codex TOML emitter.
 func TestRenderCodexConfigTOML(t *testing.T) {
-	got := renderCodexConfigTOML("never", "workspace-write", "http://127.0.0.1:65535/mcp", muxEntry{})
+	got := renderCodexConfigTOML("never", "workspace-write", nil, "http://127.0.0.1:65535/mcp", muxEntry{})
 	want := "approval_policy = \"never\"\nsandbox_mode = \"workspace-write\"\n\n" +
 		"[mcp_servers.loopback]\nurl = \"http://127.0.0.1:65535/mcp\"\n"
 	if got != want {
@@ -752,10 +809,36 @@ func TestRenderCodexConfigTOML(t *testing.T) {
 	// No MCP servers: the config is no longer empty — the policy header is
 	// always emitted so a headless codex never falls back to its
 	// interactive approval default (the deadlock).
-	noMCP := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{})
+	noMCP := renderCodexConfigTOML("never", "workspace-write", nil, "", muxEntry{})
 	wantNoMCP := "approval_policy = \"never\"\nsandbox_mode = \"workspace-write\"\n"
 	if noMCP != wantNoMCP {
 		t.Errorf("no-MCP shape mismatch\nwant:\n%s\ngot:\n%s", wantNoMCP, noMCP)
+	}
+}
+
+// TestRenderCodexConfigTOML_WritableRoots pins the [sandbox_workspace_write]
+// table: emitted (after the policy header, before any MCP table) when
+// writableRoots is non-empty, omitted entirely when empty.
+func TestRenderCodexConfigTOML_WritableRoots(t *testing.T) {
+	got := renderCodexConfigTOML("never", "workspace-write",
+		[]string{"/Users/x/dev", "/tmp/work"}, "http://127.0.0.1:65535/mcp", muxEntry{})
+	want := `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["/Users/x/dev", "/tmp/work"]
+
+[mcp_servers.loopback]
+url = "http://127.0.0.1:65535/mcp"
+`
+	if got != want {
+		t.Errorf("writable-roots shape mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+
+	// Empty roots → no table, byte-identical to the pre-field output.
+	bare := renderCodexConfigTOML("never", "workspace-write", nil, "", muxEntry{})
+	if strings.Contains(bare, "sandbox_workspace_write") {
+		t.Errorf("empty writableRoots must not emit the table, got:\n%s", bare)
 	}
 }
 
@@ -789,7 +872,7 @@ func TestResolveCodexExecPolicy(t *testing.T) {
 // TestRenderCodexConfigTOML_LoopbackPlusMux pins the load-bearing dual-entry
 // shape for Codex: loopback HTTP plus stdio mux in config.toml.
 func TestRenderCodexConfigTOML_LoopbackPlusMux(t *testing.T) {
-	got := renderCodexConfigTOML("never", "workspace-write", "http://127.0.0.1:65535/mcp", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", nil, "http://127.0.0.1:65535/mcp", muxEntry{
 		Command: "/path/to/mux",
 		Args: []string{
 			"mcp",
@@ -826,7 +909,7 @@ args = ["mcp", "--proxy", "--servers=vanta,clockwork,cerberus", "--token", "loca
 
 // TestRenderCodexConfigTOML_MuxOnly pins the mux-only branch.
 func TestRenderCodexConfigTOML_MuxOnly(t *testing.T) {
-	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", nil, "", muxEntry{
 		Command: "/path/to/mux",
 		Args:    []string{"mcp", "--proxy"},
 	})
@@ -845,7 +928,7 @@ args = ["mcp", "--proxy"]
 // TestRenderCodexConfigTOML_MuxOnly_EmptyArgs pins that stdio mux entries emit
 // a stable empty args array rather than omitting the line entirely.
 func TestRenderCodexConfigTOML_MuxOnly_EmptyArgs(t *testing.T) {
-	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", nil, "", muxEntry{
 		Command: "/path/to/mux",
 	})
 	want := `approval_policy = "never"
@@ -863,7 +946,7 @@ args = []
 // TestRenderCodexConfigTOML_MuxEnvKeysQuoted pins that env keys are quoted in
 // TOML and empty keys are skipped, preventing dotted keys or invalid syntax.
 func TestRenderCodexConfigTOML_MuxEnvKeysQuoted(t *testing.T) {
-	got := renderCodexConfigTOML("never", "workspace-write", "", muxEntry{
+	got := renderCodexConfigTOML("never", "workspace-write", nil, "", muxEntry{
 		Command: "/path/to/mux",
 		Env: []string{
 			"MUX.AUTH.MODE=stdio",

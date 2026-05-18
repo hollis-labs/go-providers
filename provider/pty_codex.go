@@ -71,6 +71,25 @@ type CodexAdapter struct {
 	//
 	// An unrecognized value makes the config.toml Render fail.
 	SandboxMode string
+
+	// WritableRoots lists additional absolute directories the codex
+	// sandbox may write to, beyond the boot dir cwd and /tmp. Each entry
+	// becomes a member of `writable_roots` in the planted config.toml's
+	// `[sandbox_workspace_write]` table.
+	//
+	// Why this exists: under SandboxMode "workspace-write" codex's OS
+	// sandbox confines writes to the workspace cwd. A BootDirSpec
+	// materializes that cwd as a throwaway per-task tempdir, so a codex
+	// agent asked to write into a real project path (the operator's repo,
+	// an inbox dir) is silently blocked — it can only write its own boot
+	// dir. WritableRoots widens the sandbox to the directories the task
+	// actually needs without dropping to "danger-full-access".
+	//
+	// Only meaningful under SandboxMode "workspace-write" (codex ignores
+	// the table under "read-only" / "danger-full-access"). Empty / nil →
+	// no `[sandbox_workspace_write]` table is emitted and the planted
+	// config.toml is byte-identical to before this field existed.
+	WritableRoots []string
 }
 
 func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## v0.22.0 — 2026-05-18
+
+### Added
+
+- `CodexAdapter.WritableRoots` (`[]string`) — additional absolute
+  directories the codex sandbox may write to beyond the boot dir cwd.
+  Non-empty values render a `[sandbox_workspace_write]` table with a
+  `writable_roots` array in the planted `config.toml`. Under
+  `SandboxMode "workspace-write"` codex confines writes to the workspace
+  cwd; when that cwd is a throwaway boot dir, an agent cannot write a
+  real project path. `WritableRoots` widens the sandbox without dropping
+  to `danger-full-access`.
+- `ClaudeAdapter.AdditionalDirectories` (`[]string`) — directories the
+  claude agent may access beyond its cwd workspace. Non-empty values
+  render `permissions.additionalDirectories` in the planted
+  `.claude/settings.json` (the settings-file form of `--add-dir`). The
+  claude analogue of `CodexAdapter.WritableRoots`.
+
+### Changed
+
+- The codex `config.toml` renderer emits a `[sandbox_workspace_write]`
+  table (after the `approval_policy` / `sandbox_mode` header, before any
+  `[mcp_servers.*]` table) when `CodexAdapter.WritableRoots` is non-empty.
+- The claude `.claude/settings.json` renderer emits the `permissions`
+  object when EITHER `PermissionMode` or `AdditionalDirectories` is set
+  (previously only `PermissionMode`).
+- Back-compat: with both new fields empty, the planted `config.toml` and
+  `.claude/settings.json` are byte-identical to v0.21.0.
+
 ## v0.21.0 — 2026-05-17
 
 ### Added

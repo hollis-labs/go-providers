@@ -67,7 +67,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 					if err != nil {
 						return "", fmt.Errorf("claude bootdir settings: %w", err)
 					}
-					return claudeSettingsStub(a.ApiKeyHelperPath, mode), nil
+					return claudeSettingsStub(a.ApiKeyHelperPath, mode, a.AdditionalDirectories), nil
 				},
 			},
 			{
@@ -174,16 +174,29 @@ func renderClaudeMD(ctx PlantContext) string {
 // both, so writing them pre-approved nothing (the cause of
 // spawned-agent permission-prompt breakage).
 //
+// additionalDirectories, when non-empty, emits
+// `permissions.additionalDirectories: [...]` — the directories claude
+// may access beyond its cwd workspace (the settings-file form of
+// `--add-dir`). The `permissions` object is emitted when EITHER
+// defaultMode or additionalDirectories is set.
+//
 // Apps that need a richer permissions policy (permissions.allow /
 // deny rules) can post-process the planted file before spawn — the
 // stub is the minimum-viable shape; apps own everything beyond.
-func claudeSettingsStub(apiKeyHelperPath, defaultMode string) string {
+func claudeSettingsStub(apiKeyHelperPath, defaultMode string, additionalDirectories []string) string {
 	stub := map[string]any{}
 	if apiKeyHelperPath != "" {
 		stub["apiKeyHelper"] = apiKeyHelperPath
 	}
-	if defaultMode != "" {
-		stub["permissions"] = map[string]any{"defaultMode": defaultMode}
+	if defaultMode != "" || len(additionalDirectories) > 0 {
+		permissions := map[string]any{}
+		if defaultMode != "" {
+			permissions["defaultMode"] = defaultMode
+		}
+		if len(additionalDirectories) > 0 {
+			permissions["additionalDirectories"] = additionalDirectories
+		}
+		stub["permissions"] = permissions
 	}
 	out, _ := json.MarshalIndent(stub, "", "  ")
 	return string(out) + "\n"
