@@ -141,7 +141,7 @@ the planted-file render.
 - `CLIAdapter` interface and `CLIConfig` struct (`cli_adapter.go`) — abstraction for spawning a CLI tool.
 - `PTYBridge` / `NewPTYBridge` / `NewPTYBridgeWithAdapter` (`pty.go`, non-Windows build tag) — wraps a CLI in a pseudo-terminal.
 - `SubprocessBridge` / `NewSubprocessBridge` (`subprocess.go`) — wraps a CLI using plain stdin/stdout pipes (all platforms).
-- Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `AiderAdapter`, `CopilotAdapter`, `JunieAdapter`, `KiroAdapter`, `OpencodeAdapter`, `QwenAdapter`. Each ships `New…Adapter()` plus PTY/Dev/Bare variants where applicable. `ClaudeAdapter` additionally ships `NewClaudeAdapterStreamingStdio()` / `NewClaudeAdapterDevStreamingStdio()` for vendor-documented long-lived NDJSON-over-stdin sessions; `CodexAdapter` ships `NewCodexAdapterAppServer()` for long-lived JSON-RPC-over-stdio sessions. See [Long-lived headless modes](#long-lived-headless-modes).
+- Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `AiderAdapter`, `CopilotAdapter`, `JunieAdapter`, `KiroAdapter`, `OpencodeAdapter`, `QwenAdapter`. Each ships `New…Adapter()` plus PTY/Dev/Bare variants where applicable. `ClaudeAdapter` additionally ships `NewClaudeAdapterStreamingStdio()` / `NewClaudeAdapterDevStreamingStdio()` for vendor-documented long-lived NDJSON-over-stdin sessions; `CodexAdapter` ships `NewCodexAdapterAppServer()` for long-lived JSON-RPC-over-stdio sessions; `OpencodeAdapter` ships `NewOpencodeAdapterServeHTTP()` for long-lived HTTP/SSE sessions. See [Long-lived headless modes](#long-lived-headless-modes).
 
 ### Per-line typed events (`provider/events/`)
 
@@ -225,7 +225,7 @@ codex reads its MCP servers from `config.toml [mcp_servers.*]` — it has no `.m
 
 ### Long-lived headless modes
 
-Two adapter shapes target vendor-documented long-lived headless lifecycles. Both emit argv only; the runtime that owns the I/O loop, session-id handling, and attach fan-out lives upstream in `go-agent-sessions`.
+Three adapter shapes target vendor-documented long-lived headless lifecycles. They emit argv only; the runtime that owns the I/O loop, session-id handling, and attach fan-out lives upstream in `go-agent-sessions`.
 
 **Claude — `streamingStdio`** (Anthropic calls it "Streaming Input Mode"):
 
@@ -247,7 +247,17 @@ adapter.BuildArgs("", "", "")
 
 One long-lived `codex app-server` process speaking JSON-RPC 2.0 over stdio (default `--listen stdio://`). Same engine that backs OpenAI's official VS Code extension. Threads live in memory until 30-min idle; `thread/start` and `thread/resume` are JSON-RPC methods, not CLI flags — so all per-turn params are intentionally dropped from `BuildArgs`. `ParseLine` returns no events in this mode; the consumer runtime owns JSON-RPC framing, request/response correlation, and event mapping.
 
-The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` field (`CodexAdapter`) are public for callers that want to compose these flags onto custom adapter configurations. Default zero values preserve the existing print-mode / exec-mode behavior byte-for-byte.
+**Opencode — `serve-http`**:
+
+```go
+adapter := provider.NewOpencodeAdapterServeHTTP()
+adapter.BuildArgs("", "", "")
+// → ["serve", "--port", "0", "--hostname", "127.0.0.1"]
+```
+
+One long-lived `opencode serve` process exposes opencode's HTTP API and server-sent event stream. Session creation, message POSTs, event mapping, health checks, and shutdown are runtime concerns owned by `go-agent-sessions` (`ServeHTTP` kind), so the prompt, system prompt, and session id parameters are intentionally dropped from `BuildArgs`.
+
+The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` fields (`CodexAdapter`, `OpencodeAdapter`) are public for callers that want to compose these flags onto custom adapter configurations. Default zero values preserve the existing print-mode / exec-mode / run-mode behavior byte-for-byte.
 
 ### Reliability primitives
 
