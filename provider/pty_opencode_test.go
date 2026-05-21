@@ -13,6 +13,16 @@ func TestOpencodeAdapter_Name(t *testing.T) {
 	}
 }
 
+func TestNewOpencodeAdapterServeHTTP(t *testing.T) {
+	a := NewOpencodeAdapterServeHTTP()
+	if a.Mode != "serve-http" {
+		t.Fatalf("Mode = %q, want serve-http", a.Mode)
+	}
+	args := a.BuildArgs("ignored prompt", "ignored system", "ses_ignored")
+	expected := []string{"serve", "--port", "0", "--hostname", "127.0.0.1"}
+	assertArgsEqual(t, args, expected)
+}
+
 func TestOpencodeAdapter_BuildArgs(t *testing.T) {
 	t.Run("agent plus prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review"}
@@ -46,6 +56,13 @@ func TestOpencodeAdapter_BuildArgs(t *testing.T) {
 		a := NewOpencodeAdapter()
 		args := a.BuildArgs("fix the bug", "", "")
 		expected := []string{"run", "--agent", "", "fix the bug"}
+		assertArgsEqual(t, args, expected)
+	})
+
+	t.Run("serve http ignores prompt and session params", func(t *testing.T) {
+		a := &OpencodeAdapter{Mode: "serve-http", Agent: "ignored", Model: "ignored", Dir: "ignored"}
+		args := a.BuildArgs("fix the bug", "system", "ses_123")
+		expected := []string{"serve", "--port", "0", "--hostname", "127.0.0.1"}
 		assertArgsEqual(t, args, expected)
 	})
 }
@@ -86,6 +103,17 @@ func TestOpencodeAdapter_ParseLine(t *testing.T) {
 		}
 		if events[0].Content != "Applied the patch\n" {
 			t.Errorf("expected content %q, got %q", "Applied the patch\n", events[0].Content)
+		}
+	})
+
+	t.Run("serve http diagnostics are ignored", func(t *testing.T) {
+		a := NewOpencodeAdapterServeHTTP()
+		events, err := a.ParseLine([]byte("opencode server listening on http://127.0.0.1:4096"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 0 {
+			t.Fatalf("expected 0 events, got %d", len(events))
 		}
 	})
 }
