@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Docs
+
+- `OpencodeAdapter`'s doc comment (`provider/pty_opencode.go`) no longer
+  claims "the bridge synthesizes llmtypes.EventDone on clean process exit" —
+  no such synthesis exists anywhere in this package. The real synthesis (as
+  of `agentkit` v0.5.0) lives one layer up, in the *consuming*
+  `agentkit/agentsessions` subprocess-per-turn adapter runtime, not here.
+  Doc-only change; `ParseLine`'s actual behavior (EventDelta-only, never a
+  terminal event, for the default run mode) is unchanged. No version bump —
+  nothing behavioral changed in this package.
+
 ## v0.24.0 — 2026-08-21
 
 ### Fixed

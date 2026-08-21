@@ -22,9 +22,24 @@ import (
 //     adapter.
 //
 // Turn boundary: opencode emits plain text on stdout with no structured
-// completion event. ParseLine emits llmtypes.EventDelta per non-empty line and never
-// emits llmtypes.EventDone/llmtypes.EventError directly; the bridge synthesizes llmtypes.EventDone on
-// clean process exit.
+// completion event. ParseLine emits llmtypes.EventDelta per non-empty line
+// and never emits llmtypes.EventDone/llmtypes.EventError directly.
+//
+// For the default (run) mode, driven through go-agentkit's agentsessions
+// subprocess-per-turn adapter runtime (agentkit/agentsessions/from_adapter.go,
+// NewFromAdapter's default Caps{} shape), the consuming session — not this
+// adapter — synthesizes a terminal llmtypes.StreamEvent once the spawned
+// process itself exits: llmtypes.EventDone on a clean exit, EventError
+// otherwise. That synthesis lives in agentsessions' adapterSession.SendInput/
+// synthesizeTerminalEvent (agentkit >= v0.5.0), not in this package — a
+// consumer driving this adapter through some other harness that doesn't
+// perform that synthesis will see exactly what ParseLine emits above: deltas
+// only, no terminal event, ever.
+//
+// For "serve-http" mode, turn completion is signaled a different way
+// entirely — see NewOpencodeAdapterServeHTTP's doc comment and the consumer
+// runtime's own session.idle/session.error SSE handling; this ParseLine
+// method returns no events at all in that mode (see below).
 type OpencodeAdapter struct {
 	// Mode selects the argv shape. "" or "run" → `opencode run`
 	// (single-turn subprocess). "serve-http" → `opencode serve`
