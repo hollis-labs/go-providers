@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.24.0 — 2026-08-21
+
+### Fixed
+
+- `CodexAdapter.BuildArgs`'s exec-mode argv now includes
+  `--skip-git-repo-check`. Every real `codex exec` invocation from a
+  BootDirSpec-planted boot dir (always a throwaway, non-git tempdir) was
+  failing 100% of the time — the real `codex` CLI's own trust gate refuses
+  to run non-interactively outside a git repo / trusted directory
+  ("Not inside a trusted directory and --skip-git-repo-check was not
+  specified"), confirmed against a real `codex-cli 0.147.0` binary. The
+  flag only widens which directories codex is willing to start in; it does
+  not touch the sandbox (`approval_policy` / `sandbox_mode` in the planted
+  `config.toml` remain the mechanism gating what codex may do once
+  running), so it's safe to pass unconditionally. `app-server` mode's
+  argv and JSON-RPC `thread/start` protocol have no equivalent flag/gate —
+  confirmed unaffected by direct JSON-RPC round-trip against the real
+  binary in a non-git tempdir — and is unchanged.
+
 ## v0.22.0 — 2026-05-18
 
 ### Added

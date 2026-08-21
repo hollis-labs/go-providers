@@ -132,6 +132,30 @@ func TestCodexAdapter_BuildArgs(t *testing.T) {
 	if args[2] != "--json" {
 		t.Errorf("expected --json flag, got %s", args[2])
 	}
+	if args[3] != "--skip-git-repo-check" {
+		t.Errorf("expected --skip-git-repo-check flag, got %s", args[3])
+	}
+}
+
+func TestCodexAdapter_BuildArgs_ExecMode_SkipsGitRepoCheck(t *testing.T) {
+	// Pin: exec mode always runs against a throwaway, non-git BootDirSpec
+	// tempdir. Without --skip-git-repo-check the real codex CLI refuses to
+	// run non-interactively ("Not inside a trusted directory and
+	// --skip-git-repo-check was not specified") on every single turn —
+	// confirmed against a real codex-cli 0.147.0 binary. This must never
+	// regress.
+	a := NewCodexAdapter()
+	args := a.BuildArgs("prompt", "system", "")
+	found := false
+	for _, arg := range args {
+		if arg == "--skip-git-repo-check" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --skip-git-repo-check in exec-mode argv, got %v", args)
+	}
 }
 
 func TestCodexAdapter_Defaults(t *testing.T) {
@@ -162,7 +186,7 @@ func TestCodexAdapter_AppServer_BuildArgs_IgnoresAllParams(t *testing.T) {
 		case "prompt that should not appear",
 			"system that should not appear",
 			"sess-that-should-not-appear",
-			"exec", "--json", "--resume":
+			"exec", "--json", "--resume", "--skip-git-repo-check":
 			t.Errorf("app-server mode leaked exec-mode arg %q: full args=%v", arg, args)
 		}
 	}

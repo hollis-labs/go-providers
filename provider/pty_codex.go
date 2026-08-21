@@ -115,7 +115,18 @@ func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []st
 	}
 	// Exec mode (default): single-turn `codex exec <prompt> --json`.
 	// System prompt is file-based (AGENTS.md in sandbox dir), not a flag.
-	return []string{"exec", prompt, "--json"}
+	//
+	// --skip-git-repo-check is required: BootDirSpec always plants a fresh
+	// throwaway tempdir (never a git repo) as the codex cwd, and codex's
+	// own CLI-level trust gate refuses to run non-interactively outside a
+	// trusted/git directory ("Not inside a trusted directory and
+	// --skip-git-repo-check was not specified", confirmed against a real
+	// codex-cli 0.147.0 binary). The flag only widens "which directories
+	// codex is willing to start in" — it does not touch the sandbox
+	// (approval_policy/sandbox_mode in the planted config.toml remain the
+	// mechanism that gates what codex is allowed to *do* once running), so
+	// it's safe to pass unconditionally here.
+	return []string{"exec", prompt, "--json", "--skip-git-repo-check"}
 }
 
 func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
