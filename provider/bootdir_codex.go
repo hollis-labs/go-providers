@@ -98,16 +98,9 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: "config.toml",
 				Render: func(ctx PlantContext) (string, error) {
-					approval, sandbox, err := resolveCodexExecPolicy(a.ApprovalPolicy, a.SandboxMode)
-					if err != nil {
-						return "", err
-					}
-					base := renderCodexConfigTOML(approval, sandbox, a.WritableRoots, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))
-					extra, err := renderCodexMCPServers(ctx.MCPServers)
-					if err != nil {
-						return "", err
-					}
-					return base + extra, nil
+					// Delegated so this closure and ConfigDocument cannot
+					// drift: the planted file is the accessor's output.
+					return a.ConfigDocument(ctx)
 				},
 				// Mode 0o600: config.toml embeds the per-task MCP loopback
 				// URL. Treat as secret-ish (matches the .mcp.json policy).
@@ -158,6 +151,50 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 		ProjectDirArg: projectDirArg,
 		Notes:         "codex MCP config lives in config.toml under [mcp_servers.<name>]; .mcp.json is legacy sidecar only. CODEX_HOME isolates per-task config + auth from ~/.codex/.",
 	}
+}
+
+// ConfigDocument returns the config.toml this adapter plants: the
+// approval_policy / sandbox_mode header, the [sandbox_workspace_write]
+// writable_roots table when WritableRoots is set, and every
+// [mcp_servers.*] block the context asks for.
+//
+// It is the codex counterpart to ClaudeAdapter.SettingsDocument: the
+// planted content under a name rather than a positional index into
+// PlantedFiles, and callable without assembling a plant. Rendering the
+// file through the BootDirSpec is equally supported and returns the
+// same text — this is a more direct route to it, not a safer one.
+//
+// It takes a PlantContext rather than loose arguments because that is
+// already the per-plant input set for this file: MCPLoopbackURL, the
+// Mux* fields and MCPServers all land here, while ApprovalPolicy,
+// SandboxMode and WritableRoots come off the adapter.
+//
+// It returns text, not a document, and the asymmetry with
+// SettingsDocument is real: codex's config has no in-memory
+// intermediate anywhere in this package, it is built as TOML directly.
+// So a consumer adding MCP servers supplies PlantContext.MCPServers,
+// which is the sanctioned path — config.toml is single-owner by design,
+// and the name and duplicate validation behind that field is what keeps
+// two [mcp_servers.<name>] tables, which codex rejects, out of the
+// planted file. Appending to the returned string is possible (every
+// top-level key precedes the first table, so further [table] blocks
+// stay valid TOML) but nothing validates what is appended, including
+// against the blocks already in it.
+//
+// The error reports an invalid ApprovalPolicy or SandboxMode, or a
+// malformed MCPServerSpec, unwrapped, exactly as the Render surfaces
+// them.
+func (a *CodexAdapter) ConfigDocument(ctx PlantContext) (string, error) {
+	approval, sandbox, err := resolveCodexExecPolicy(a.ApprovalPolicy, a.SandboxMode)
+	if err != nil {
+		return "", err
+	}
+	base := renderCodexConfigTOML(approval, sandbox, a.WritableRoots, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))
+	extra, err := renderCodexMCPServers(ctx.MCPServers)
+	if err != nil {
+		return "", err
+	}
+	return base + extra, nil
 }
 
 // codexApprovalPolicies is codex's `approval_policy` config vocabulary.

@@ -321,3 +321,105 @@ func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet(t *testing.T) {
 		t.Errorf("projects[%s] not seeded; got %v", resolved, projects)
 	}
 }
+
+// TestClaudeSettingsDocument_WritesNothing is the inversion of
+// TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet: the same
+// adapter, the same home directory, the same content — but reached
+// through ClaudeAdapter.SettingsDocument, which must leave HOME
+// completely untouched.
+//
+// The Render closure is not the hazard here; its trust seed is gated on
+// ctx.BootDir and the sibling test above pins that gate. What this
+// guards is the accessor's own structure: it takes no PlantContext, so
+// there is no bootDir it could ever seed from, and no caller who can
+// get it wrong by forgetting the gate. That is what makes it safe to
+// call from anywhere, which is the property a consumer holding it
+// depends on.
+//
+// The second half re-runs the Render with a bootDir to prove the guard
+// is meaningful: if the trust write ever stopped happening, the first
+// half would pass for the wrong reason.
+func TestClaudeSettingsDocument_WritesNothing(t *testing.T) {
+	homeDir := t.TempDir()
+	setHomeForTest(t, homeDir)
+
+	a := NewClaudeAdapterDev()
+	a.AdditionalDirectories = []string{"/Users/x/dev"}
+
+	doc, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	if len(doc) == 0 {
+		t.Error("SettingsDocument returned an empty document")
+	}
+
+	// Nothing at all — not ~/.claude.json, not a leftover seed tempfile.
+	entries, err := os.ReadDir(homeDir)
+	if err != nil {
+		t.Fatalf("read home: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("SettingsDocument touched HOME: %v", names)
+	}
+
+	if _, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{BootDir: t.TempDir()}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".claude.json")); err != nil {
+		t.Fatalf("the trust write this test inverts no longer happens: %v", err)
+	}
+}
+
+// TestClaudeSettingsDocument_IgnoresOperatorConfig is the read half of
+// the guard above, which counts HOME entries and so sees writes only.
+//
+// A blanket "reads no files" cannot be pinned from inside the process
+// without intercepting syscalls, so this pins the read that would
+// actually matter: the document must not depend on the operator's own
+// claude configuration. A HOME populated the way a real machine has it
+// — a ~/.claude.json with trust state, a user-level
+// ~/.claude/settings.json carrying a different permission policy — must
+// produce the same document as an empty one.
+func TestClaudeSettingsDocument_IgnoresOperatorConfig(t *testing.T) {
+	a := &ClaudeAdapter{
+		PermissionMode:        "acceptEdits",
+		AdditionalDirectories: []string{"/Users/x/dev"},
+	}
+
+	emptyHome := t.TempDir()
+	setHomeForTest(t, emptyHome)
+	clean, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+
+	populated := t.TempDir()
+	setHomeForTest(t, populated)
+	if err := os.WriteFile(filepath.Join(populated, ".claude.json"),
+		[]byte(`{"oauthAccount":"user@example.com","projects":{"/somewhere":{"hasTrustDialogAccepted":true}}}`), 0o600); err != nil {
+		t.Fatalf("seed ~/.claude.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(populated, ".claude"), 0o700); err != nil {
+		t.Fatalf("mkdir ~/.claude: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(populated, ".claude", "settings.json"),
+		[]byte(`{"apiKeyHelper":"/operator/helper","permissions":{"defaultMode":"bypassPermissions","allow":["Bash"]}}`), 0o600); err != nil {
+		t.Fatalf("seed ~/.claude/settings.json: %v", err)
+	}
+
+	withConfig, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+
+	cleanJSON, _ := json.Marshal(clean)
+	withJSON, _ := json.Marshal(withConfig)
+	if string(cleanJSON) != string(withJSON) {
+		t.Errorf("the document depends on the operator's config\nempty HOME:     %s\npopulated HOME: %s", cleanJSON, withJSON)
+	}
+}

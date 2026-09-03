@@ -1320,3 +1320,282 @@ func TestCodexBootDirSpec_MuxEntry(t *testing.T) {
 		t.Error("mux command missing")
 	}
 }
+
+// TestClaudeSettingsDocument_MatchesPlantedFile pins the single-source
+// invariant behind ClaudeAdapter.SettingsDocument: the accessor's
+// document, marshaled the way its godoc says (two-space indent plus a
+// trailing newline), IS the planted .claude/settings.json — byte for
+// byte, across the knobs that shape it. A second implementation that
+// merely agrees today would pass the eyeball test and drift later;
+// this fails the moment the two diverge.
+func TestClaudeSettingsDocument_MatchesPlantedFile(t *testing.T) {
+	// HOME redirected even though these render with a zero PlantContext,
+	// which the BootDir gate makes side-effect free: if that gate ever
+	// regresses, the blast radius should be a tempdir, not the
+	// developer's real ~/.claude.json.
+	setHomeForTest(t, t.TempDir())
+	cases := map[string]*ClaudeAdapter{
+		"zero value":  NewClaudeAdapter(),
+		"dev":         NewClaudeAdapterDev(),
+		"bare":        NewClaudeAdapterBare(),
+		"api helper":  {ApiKeyHelperPath: "/tmp/akh"},
+		"permissions": {PermissionMode: "acceptEdits"},
+		"add dirs":    {AdditionalDirectories: []string{"/Users/x/dev", "/tmp/work"}},
+		"everything": {
+			ApiKeyHelperPath:      "/tmp/akh",
+			PermissionMode:        "plan",
+			SkipPermissions:       true,
+			AdditionalDirectories: []string{"/srv/data"},
+		},
+	}
+	for name, a := range cases {
+		t.Run(name, func(t *testing.T) {
+			planted, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			doc, err := a.SettingsDocument()
+			if err != nil {
+				t.Fatalf("SettingsDocument: %v", err)
+			}
+			out, err := json.MarshalIndent(doc, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal document: %v", err)
+			}
+			if got := string(out) + "\n"; got != planted {
+				t.Errorf("document != planted file\ndocument:\n%s\nplanted:\n%s", got, planted)
+			}
+		})
+	}
+}
+
+// TestClaudeSettingsDocument_AdditionalDirectories confirms the
+// additionalDirectories knob reaches the document itself (not just the
+// rendered bytes) — it is the field cairn reads back before merging, so
+// its presence in the map is the contract, not an implementation
+// detail of the JSON encoding.
+func TestClaudeSettingsDocument_AdditionalDirectories(t *testing.T) {
+	a := &ClaudeAdapter{AdditionalDirectories: []string{"/Users/x/dev", "/tmp/work"}}
+	doc, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	perms, ok := doc["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("want a permissions block, got %#v", doc)
+	}
+	dirs, ok := perms["additionalDirectories"].([]string)
+	if !ok || len(dirs) != 2 || dirs[0] != "/Users/x/dev" || dirs[1] != "/tmp/work" {
+		t.Errorf("additionalDirectories: got %#v", perms["additionalDirectories"])
+	}
+	if _, present := perms["defaultMode"]; present {
+		t.Errorf("no PermissionMode set — defaultMode must be absent, got %#v", perms)
+	}
+}
+
+// TestClaudeSettingsDocument_MutationIsCallerLocal pins the godoc
+// promise that the returned map is unshared: cairn merges into it, and
+// a map cached on the adapter would leak one caller's policy into the
+// next plant.
+func TestClaudeSettingsDocument_MutationIsCallerLocal(t *testing.T) {
+	// HOME redirected even though these render with a zero PlantContext,
+	// which the BootDir gate makes side-effect free: if that gate ever
+	// regresses, the blast radius should be a tempdir, not the
+	// developer's real ~/.claude.json.
+	setHomeForTest(t, t.TempDir())
+	a := &ClaudeAdapter{
+		PermissionMode:        "plan",
+		AdditionalDirectories: []string{"/Users/x/dev", "/tmp/work"},
+	}
+	first, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	first["permissions"] = map[string]any{"allow": []string{"Bash"}}
+	first["mergedByCaller"] = true
+
+	second, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	if _, leaked := second["mergedByCaller"]; leaked {
+		t.Errorf("caller's key leaked into a later document: %#v", second)
+	}
+	perms, _ := second["permissions"].(map[string]any)
+	if perms == nil || perms["defaultMode"] != "plan" {
+		t.Errorf("permissions clobbered by an earlier caller: %#v", second["permissions"])
+	}
+
+	// The slice inside the document, not just the map around it: without
+	// the defensive copy in claudeSettingsDocument this writes straight
+	// through into a.AdditionalDirectories, and a consumer merging a
+	// policy would silently rewrite the adapter it asked.
+	third, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	dirs := third["permissions"].(map[string]any)["additionalDirectories"].([]string)
+	dirs[0] = "/etc"
+	if a.AdditionalDirectories[0] != "/Users/x/dev" {
+		t.Errorf("write through the returned slice reached the adapter: %v", a.AdditionalDirectories)
+	}
+	fourth, err := a.SettingsDocument()
+	if err != nil {
+		t.Fatalf("SettingsDocument: %v", err)
+	}
+	if got := fourth["permissions"].(map[string]any)["additionalDirectories"].([]string); got[0] != "/Users/x/dev" {
+		t.Errorf("a later document inherited the earlier caller's write: %v", got)
+	}
+
+	planted, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(planted, "mergedByCaller") {
+		t.Errorf("caller's merge reached the planted file:\n%s", planted)
+	}
+}
+
+// TestClaudeSettingsDocument_InvalidPermissionMode confirms the
+// accessor rejects the same value the Render rejects, so a consumer
+// that validates through the accessor cannot be surprised at plant
+// time.
+func TestClaudeSettingsDocument_InvalidPermissionMode(t *testing.T) {
+	// HOME redirected even though these render with a zero PlantContext,
+	// which the BootDir gate makes side-effect free: if that gate ever
+	// regresses, the blast radius should be a tempdir, not the
+	// developer's real ~/.claude.json.
+	setHomeForTest(t, t.TempDir())
+	bad := &ClaudeAdapter{PermissionMode: "yolo"}
+	if _, err := bad.SettingsDocument(); err == nil {
+		t.Error("expected an error for an invalid PermissionMode")
+	}
+	if _, err := bad.BootDirSpec().PlantedFiles[2].Render(PlantContext{}); err == nil {
+		t.Error("Render disagrees with SettingsDocument about an invalid PermissionMode")
+	}
+}
+
+// TestCodexConfigDocument_MatchesPlantedFile pins CodexAdapter.ConfigDocument
+// against golden text, then pins the planted config.toml against the same
+// golden.
+//
+// Golden rather than a document-vs-planted comparison: the config.toml
+// Render closure is `return a.ConfigDocument(ctx)`, so comparing the two
+// compares a function with itself and cannot fail — an appended corruption
+// passes it, and passes the pre-existing strings.Contains assertions too.
+// The golden is what actually holds the bytes still; the second assertion
+// is then what keeps the closure delegating.
+func TestCodexConfigDocument_MatchesPlantedFile(t *testing.T) {
+	type tc struct {
+		name string
+		a    *CodexAdapter
+		ctx  PlantContext
+		want string
+	}
+	for _, c := range []tc{
+		{
+			name: "defaults",
+			a:    &CodexAdapter{},
+			ctx:  PlantContext{},
+			want: `approval_policy = "never"
+sandbox_mode = "workspace-write"
+`,
+		},
+		{
+			name: "writable roots",
+			a:    &CodexAdapter{WritableRoots: []string{"/Users/x/dev/proj", "/tmp/work"}},
+			ctx:  PlantContext{},
+			want: `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["/Users/x/dev/proj", "/tmp/work"]
+`,
+		},
+		{
+			name: "policy + writable roots + loopback + mux + extra servers",
+			a: &CodexAdapter{
+				ApprovalPolicy: "on-request",
+				SandboxMode:    "workspace-write",
+				WritableRoots:  []string{"/srv/data"},
+			},
+			ctx: PlantContext{
+				MCPLoopbackURL: "http://127.0.0.1:65535/mcp",
+				MuxCommand:     "/path/to/mux",
+				MuxArgs:        []string{"mcp", "--proxy"},
+				MuxEnv:         []string{"MUX_TOKEN=abc"},
+				MCPServers: []MCPServerSpec{
+					{Name: "nanite", Command: "/usr/local/bin/nanite", Args: []string{"mcp"}},
+				},
+			},
+			want: `approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["/srv/data"]
+
+[mcp_servers.loopback]
+url = "http://127.0.0.1:65535/mcp"
+
+[mcp_servers.mux]
+command = "/path/to/mux"
+args = ["mcp", "--proxy"]
+
+[mcp_servers.mux.env]
+"MUX_TOKEN" = "abc"
+
+[mcp_servers.nanite]
+command = "/usr/local/bin/nanite"
+args = ["mcp"]
+`,
+		},
+		{
+			name: "app-server mode",
+			a:    &CodexAdapter{Mode: "app-server"},
+			ctx:  PlantContext{MCPLoopbackURL: "http://lp:1"},
+			want: `approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.loopback]
+url = "http://lp:1"
+`,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc, err := c.a.ConfigDocument(c.ctx)
+			if err != nil {
+				t.Fatalf("ConfigDocument: %v", err)
+			}
+			if doc != c.want {
+				t.Errorf("ConfigDocument shape mismatch\nwant:\n%s\ngot:\n%s", c.want, doc)
+			}
+
+			planted, err := c.a.BootDirSpec().PlantedFiles[2].Render(c.ctx)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if planted != c.want {
+				t.Errorf("planted config.toml shape mismatch\nwant:\n%s\ngot:\n%s", c.want, planted)
+			}
+		})
+	}
+}
+
+// TestCodexConfigDocument_Errors confirms the accessor rejects exactly
+// what the Render rejects — an invalid policy value and a malformed
+// MCPServerSpec — rather than returning a half-valid config.
+func TestCodexConfigDocument_Errors(t *testing.T) {
+	bad := &CodexAdapter{SandboxMode: "wide-open"}
+	if _, err := bad.ConfigDocument(PlantContext{}); err == nil {
+		t.Error("expected an error for an invalid SandboxMode")
+	}
+	if _, err := bad.BootDirSpec().PlantedFiles[2].Render(PlantContext{}); err == nil {
+		t.Error("Render disagrees with ConfigDocument about an invalid SandboxMode")
+	}
+
+	a := &CodexAdapter{}
+	ctx := PlantContext{MCPServers: []MCPServerSpec{{Name: "loopback", HTTPURL: "http://x"}}}
+	if _, err := a.ConfigDocument(ctx); err == nil {
+		t.Error("expected an error for a reserved MCP server name")
+	}
+}

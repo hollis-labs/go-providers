@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+### Added
+
+- `ClaudeAdapter.SettingsDocument() (map[string]any, error)` — the
+  planted `.claude/settings.json` (`apiKeyHelper`,
+  `permissions.defaultMode`, `permissions.additionalDirectories`) as a
+  document to merge into rather than bytes to parse. Rendering the file
+  through the `BootDirSpec` was already supported and yields the same
+  content — the trust seed in that closure is gated on
+  `ctx.BootDir`, per `PlantedFile.Render`'s contract, so a zero
+  `PlantContext` renders the settings and touches nothing. What the
+  accessor changes is the shape of the answer and how it is reached:
+  the document instead of encoded JSON, a name instead of a positional
+  index into `PlantedFiles`, and no gate for the caller to honor, since
+  it takes no `PlantContext` and so cannot seed anything whatever it is
+  passed. Encoding it as `json.MarshalIndent(doc, "", "  ")` plus a
+  trailing newline reproduces the planted file byte for byte. The map
+  and the `additionalDirectories` slice within it are built fresh per
+  call, so neither merging into the document nor writing through that
+  slice reaches back into the adapter. No arguments: every input is
+  already a field on the adapter.
+- `CodexAdapter.ConfigDocument(PlantContext) (string, error)` — the
+  planted `config.toml` (the `approval_policy` / `sandbox_mode` header,
+  the `[sandbox_workspace_write]` `writable_roots` table, and every
+  `[mcp_servers.*]` block) under a name rather than a positional index,
+  callable without assembling a plant. It takes a `PlantContext`
+  because that is already the per-plant input set for this file.
+  Unlike the claude settings it returns text, not a document: codex's
+  config has no in-memory intermediate anywhere in this package, it is
+  built as TOML directly. A consumer adding MCP servers therefore
+  supplies `PlantContext.MCPServers` — `config.toml` is single-owner by
+  design and that field's name/duplicate validation is what keeps two
+  `[mcp_servers.<name>]` tables, which codex rejects, out of the file.
+  Appending to the returned string stays valid TOML but nothing
+  validates what is appended.
+
+### Changed
+
+- Both `PlantedFile.Render` closures now delegate to the new accessors,
+  so each planted file has exactly one implementation and the accessor
+  cannot drift from what gets written. Internally `claudeSettingsStub`
+  is split into `claudeSettingsDocument` (builds the map) and
+  `marshalClaudeSettings` (decides the on-disk encoding). The claude
+  trust seed stays in the Render closure, where the plant is.
+- Additive only: no exported signature or behavior changed, the planted
+  `.claude/settings.json` and `config.toml` are byte-identical, and the
+  Render error messages are unchanged (the accessors return the
+  underlying validation errors unwrapped so the closures keep their own
+  prefixes).
+
 ### Docs
 
 - `OpencodeAdapter`'s doc comment (`provider/pty_opencode.go`) no longer

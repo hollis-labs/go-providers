@@ -15,7 +15,7 @@ import (
 //	<bootDir>/
 //	├── CLAUDE.md           # system context (auto-loaded by Claude on cwd)
 //	├── boot.md             # task kickoff content (referenced via Boot @./boot.md)
-//	├── .claude/settings.json   # stub to avoid global ~/.claude.json bleed
+//	├── .claude/settings.json   # settings overrides; avoids ~/.claude.json bleed
 //	└── .mcp.json           # MCP loopback config
 //
 // Spawn invariants: cwd = bootDir; project access via
@@ -41,7 +41,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 					// Side effect, gated on PlantContext.BootDir: seed a
 					// per-bootdir trust marker in ~/.claude.json so the
 					// claude CLI doesn't fire its first-run workspace
-					// trust dialog on PTY spawn. The stub itself only
+					// trust dialog on PTY spawn. The settings file only
 					// covers tool/MCP overrides — trust state lives in
 					// the user-global config keyed by the realpath of
 					// cwd (probed empirically; see CHANGELOG v0.8.2).
@@ -54,20 +54,16 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 							return "", fmt.Errorf("claude bootdir trust seed: %w", err)
 						}
 					}
-					// a.ApiKeyHelperPath threads through into the planted
-					// settings.json so bare-mode claude can resolve auth
-					// via the helper. Empty path leaves
-					// the field unset — bare mode then requires
-					// ANTHROPIC_API_KEY in env.
-					//
-					// a.PermissionMode / a.SkipPermissions thread through
-					// as permissions.defaultMode in the planted settings
-					// (see resolveClaudeDefaultMode for the precedence).
-					mode, err := resolveClaudeDefaultMode(a.PermissionMode, a.SkipPermissions)
+					// The document itself comes from SettingsDocument so
+					// this closure and that accessor cannot drift: the
+					// planted bytes are the accessor's map, marshaled.
+					// The error prefix stays here because the accessor is
+					// also called outside any plant.
+					doc, err := a.SettingsDocument()
 					if err != nil {
 						return "", fmt.Errorf("claude bootdir settings: %w", err)
 					}
-					return claudeSettingsStub(a.ApiKeyHelperPath, mode, a.AdditionalDirectories), nil
+					return marshalClaudeSettings(doc), nil
 				},
 			},
 			{
@@ -80,6 +76,47 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 		CwdPreference: CwdBootDir,
 		ProjectDirArg: "--add-dir {{.ProjectDir}}",
 	}
+}
+
+// SettingsDocument returns the .claude/settings.json document this
+// adapter plants, as a value to merge into rather than bytes to parse.
+//
+// Rendering the file through the BootDirSpec is equally supported and
+// yields the same content: the trust seed inside that closure is gated
+// on ctx.BootDir, per PlantedFile.Render's contract, so a zero
+// PlantContext renders the settings and touches nothing. What this
+// accessor changes is the shape of the answer and how it is reached —
+// the document itself instead of encoded JSON, under a name instead of
+// a positional index into PlantedFiles, and with no gate for the caller
+// to honor, since it takes no PlantContext and so cannot seed anything
+// whatever it is passed.
+//
+// It takes no arguments because the document has no inputs beyond the
+// adapter: ApiKeyHelperPath, PermissionMode / SkipPermissions and
+// AdditionalDirectories are all fields, and PlantContext contributes
+// nothing to this file (only to the trust seed, which is not part of
+// the document).
+//
+// A document because merging is the point — the permissions.allow /
+// deny policy this package deliberately leaves to apps is added by the
+// caller. Encoding the result the way the planted file is encoded,
+//
+//	out, err := json.MarshalIndent(doc, "", "  ")  // then append "\n"
+//
+// reproduces that file byte for byte. The map, and the
+// additionalDirectories slice within it, are built fresh per call, so
+// neither merging into the document nor writing through that slice can
+// reach back into the adapter.
+//
+// The error reports an invalid PermissionMode — the same failure the
+// Render surfaces — returned unwrapped so the Render keeps owning its
+// own message prefix.
+func (a *ClaudeAdapter) SettingsDocument() (map[string]any, error) {
+	mode, err := resolveClaudeDefaultMode(a.PermissionMode, a.SkipPermissions)
+	if err != nil {
+		return nil, err
+	}
+	return claudeSettingsDocument(a.ApiKeyHelperPath, mode, a.AdditionalDirectories), nil
 }
 
 // ClaudeBareInjection bundles the four CLI flag values for bare-mode
@@ -151,10 +188,10 @@ func renderClaudeMD(ctx PlantContext) string {
 	return b.String()
 }
 
-// claudeSettingsStub renders the planted .claude/settings.json using
-// the current Claude Code settings schema.
+// claudeSettingsDocument builds the planted .claude/settings.json as an
+// in-memory document, using the current Claude Code settings schema.
 //
-// apiKeyHelperPath, when non-empty, threads into the stub as
+// apiKeyHelperPath, when non-empty, threads into the document as
 // `apiKeyHelper: <path>`. Bare-mode claude invokes the helper per
 // request and consumes its first line of stdout as the bearer token.
 // This knob exists so subscription users (no
@@ -181,12 +218,13 @@ func renderClaudeMD(ctx PlantContext) string {
 // defaultMode or additionalDirectories is set.
 //
 // Apps that need a richer permissions policy (permissions.allow /
-// deny rules) can post-process the planted file before spawn — the
-// stub is the minimum-viable shape; apps own everything beyond.
-func claudeSettingsStub(apiKeyHelperPath, defaultMode string, additionalDirectories []string) string {
-	stub := map[string]any{}
+// deny rules) merge into ClaudeAdapter.SettingsDocument's copy, or
+// post-process the planted file before spawn — this is the
+// minimum-viable shape; apps own everything beyond.
+func claudeSettingsDocument(apiKeyHelperPath, defaultMode string, additionalDirectories []string) map[string]any {
+	doc := map[string]any{}
 	if apiKeyHelperPath != "" {
-		stub["apiKeyHelper"] = apiKeyHelperPath
+		doc["apiKeyHelper"] = apiKeyHelperPath
 	}
 	if defaultMode != "" || len(additionalDirectories) > 0 {
 		permissions := map[string]any{}
@@ -194,11 +232,27 @@ func claudeSettingsStub(apiKeyHelperPath, defaultMode string, additionalDirector
 			permissions["defaultMode"] = defaultMode
 		}
 		if len(additionalDirectories) > 0 {
-			permissions["additionalDirectories"] = additionalDirectories
+			// Copied, not aliased: the caller's slice is usually
+			// ClaudeAdapter.AdditionalDirectories, and SettingsDocument
+			// hands this map to consumers who merge into it. Sharing the
+			// backing array would let one of them rewrite the adapter's
+			// field through it.
+			dirs := make([]string, len(additionalDirectories))
+			copy(dirs, additionalDirectories)
+			permissions["additionalDirectories"] = dirs
 		}
-		stub["permissions"] = permissions
+		doc["permissions"] = permissions
 	}
-	out, _ := json.MarshalIndent(stub, "", "  ")
+	return doc
+}
+
+// marshalClaudeSettings encodes a settings document as the planted
+// file's bytes. Separate from claudeSettingsDocument so the on-disk
+// encoding — two-space indent, trailing newline — is decided in exactly
+// one place, and a consumer that merged into the document can reproduce
+// the planted file byte for byte.
+func marshalClaudeSettings(doc map[string]any) string {
+	out, _ := json.MarshalIndent(doc, "", "  ")
 	return string(out) + "\n"
 }
 
