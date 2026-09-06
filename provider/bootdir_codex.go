@@ -16,7 +16,7 @@ import (
 //	├── boot.md             # task kickoff content
 //	├── config.toml         # codex config (approval/sandbox policy + MCP
 //	                        # loopback) — load-bearing
-//	├── auth.json           # ChatGPT/API auth, copied from user's $CODEX_HOME
+//	├── auth.json           # ChatGPT/API auth, prepared explicitly when needed
 //	└── .mcp.json           # legacy claude-shape sidecar — NOT read by codex,
 //	                        # kept for cross-tool inspection sanity (analogous
 //	                        # to opencode's bootdir keeping the same plant)
@@ -49,11 +49,11 @@ import (
 //
 // Auth: codex stores auth in $CODEX_HOME/auth.json (ChatGPT login or API
 // key). When CODEX_HOME points at the bootdir, codex looks ONLY at
-// <bootDir>/auth.json — so we copy the user's ~/.codex/auth.json into the
-// bootdir at plant time. If the user isn't logged in (no source auth.json),
-// the Render returns "" and the bootdir gets an empty auth.json file;
-// codex will then fail at dispatch time with "Not logged in" which surfaces
-// correctly through the stderr sidecar.
+// <bootDir>/auth.json. Pure BootDirSpec rendering now emits an empty
+// placeholder; callers that require Codex auth should call PrepareRuntime with
+// EffectCodexAuthJSON and a CredentialResolver before process start. The old
+// ambient copy behavior is available only through
+// PlantContext.LegacyAllowHostEffects.
 //
 // File-mode plumbing: auth.json (OAuth tokens / API keys), config.toml
 // (loopback URL), and .mcp.json (loopback URL sidecar) all carry per-task
@@ -109,17 +109,13 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: "auth.json",
 				Render: func(ctx PlantContext) (string, error) {
-					// Read the user's ~/.codex/auth.json (or $CODEX_HOME/auth.json
-					// if CODEX_HOME is set in the parent env) and return its
-					// content. The caller's WriteFile honors PlantedFile.Mode
-					// (0o600 below) so the planted auth.json is not world-
-					// readable.
-					//
-					// Empty content + (false, nil) if the user isn't logged in —
-					// codex will surface "Not logged in" at dispatch time. A
-					// non-NotExist read error (e.g. permission denied) bubbles
-					// up so the operator sees an actionable message instead of
-					// a misleading "Not logged in" downstream.
+					// Legacy compatibility path. New runtime preparation must
+					// call PrepareRuntime with a caller-provided resolver so
+					// auth lookup is authorized and never falls back to ambient
+					// CODEX_HOME/HOME by accident.
+					if !ctx.LegacyAllowHostEffects {
+						return "", nil
+					}
 					content, _, err := readCodexAuthSource()
 					if err != nil {
 						return "", err

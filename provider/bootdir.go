@@ -24,7 +24,9 @@ import "os"
 //
 // EnvAmendments and ProjectDirArg may contain {{.BootDir}} and
 // {{.ProjectDir}} placeholders; apps perform the substitution at spawn
-// time. The lib does not perform IO.
+// time. The core spec does not perform IO. Legacy render-time host effects
+// are disabled unless PlantContext.LegacyAllowHostEffects is set; new
+// callers should use PrepareRuntime instead.
 type BootDirSpec struct {
 	// PlantedFiles is a list of files the app should write into the
 	// boot dir before spawning. Filenames are relative to the boot
@@ -67,13 +69,10 @@ type PlantedFile struct {
 	// the spawn). A nil Render is permitted — apps may skip the file
 	// or render their own content.
 	//
-	// Render is normally pure, but adapters MAY perform environment
-	// setup keyed on PlantContext.BootDir (e.g. seeding user-global
-	// CLI state so the spawned process doesn't prompt on first run).
-	// Such side effects MUST be gated on `ctx.BootDir != ""` so callers
-	// that invoke Render for content-only purposes (unit tests, dry
-	// runs) don't pollute global state. The content return value
-	// remains the file payload either way.
+	// Render is normally pure. Existing compatibility callers may opt into
+	// legacy setup keyed on PlantContext.LegacyAllowHostEffects, but new
+	// execution paths should call PrepareRuntime so credential and host
+	// mutation policy is explicit and runs before process start.
 	Render func(ctx PlantContext) (string, error)
 	// Mode is the file mode for the planted file. Zero value falls back
 	// to 0o644. Set to 0o600 (or stricter) for sensitive files like auth
@@ -104,10 +103,17 @@ type PlantContext struct {
 	// BootDir is the absolute path to the per-task tempdir the app is
 	// materializing. Apps populate it from their bootdir factory.
 	// Empty during pure render-only paths (e.g. unit tests of file
-	// content) — adapter Render closures that key environment seeding
-	// on the bootdir (see PlantedFile.Render) MUST gate the side effect
-	// on `BootDir != ""` so render stays pure when the field is unset.
+	// content). BootDir alone never authorizes host mutation or credential
+	// lookup.
 	BootDir string
+
+	// LegacyAllowHostEffects enables pre-M07 compatibility behavior in
+	// BootDirSpec Render closures: Claude may seed workspace trust under
+	// HOME and Codex may copy auth.json from the ambient CODEX_HOME/HOME.
+	// Leave false for pure projection/materialization. New callers should
+	// use PrepareRuntime with an explicit PreparationPolicy and
+	// CredentialResolver instead.
+	LegacyAllowHostEffects bool
 
 	// MuxCommand is the absolute path to a Mux (or other aggregating)
 	// stdio MCP binary the spawned agent should also reach, alongside

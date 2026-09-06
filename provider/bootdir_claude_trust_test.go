@@ -291,16 +291,37 @@ func TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWhenBootDirEmpty(t *testing.
 	}
 }
 
-// TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet confirms the
-// closure seeds ~/.claude.json when ctx.BootDir is provided. End-to-end
-// behavior validation that the spec actually wires the helper.
-func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet(t *testing.T) {
+// TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWithoutLegacyOptIn confirms
+// BootDir alone no longer authorizes host mutation.
+func TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWithoutLegacyOptIn(t *testing.T) {
 	homeDir := t.TempDir()
 	bootDir := t.TempDir()
 	setHomeForTest(t, homeDir)
 
 	spec := NewClaudeAdapter().BootDirSpec()
 	settings, err := spec.PlantedFiles[2].Render(PlantContext{BootDir: bootDir})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if settings == "" {
+		t.Error("Render returned empty settings.json")
+	}
+
+	cfgPath := filepath.Join(homeDir, ".claude.json")
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Fatalf("HOME/.claude.json was created without legacy opt-in; err=%v", err)
+	}
+}
+
+// TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWithLegacyOptIn confirms the
+// compatibility path is still available only when explicitly requested.
+func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWithLegacyOptIn(t *testing.T) {
+	homeDir := t.TempDir()
+	bootDir := t.TempDir()
+	setHomeForTest(t, homeDir)
+
+	spec := NewClaudeAdapter().BootDirSpec()
+	settings, err := spec.PlantedFiles[2].Render(PlantContext{BootDir: bootDir, LegacyAllowHostEffects: true})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -322,10 +343,7 @@ func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet(t *testing.T) {
 	}
 }
 
-// TestClaudeSettingsDocument_WritesNothing is the inversion of
-// TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet: the same
-// adapter, the same home directory, the same content — but reached
-// through ClaudeAdapter.SettingsDocument, which must leave HOME
+// TestClaudeSettingsDocument_WritesNothing verifies the accessor leaves HOME
 // completely untouched.
 //
 // The Render closure is not the hazard here; its trust seed is gated on
@@ -335,10 +353,6 @@ func TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWhenBootDirSet(t *testing.T) {
 // get it wrong by forgetting the gate. That is what makes it safe to
 // call from anywhere, which is the property a consumer holding it
 // depends on.
-//
-// The second half re-runs the Render with a bootDir to prove the guard
-// is meaningful: if the trust write ever stopped happening, the first
-// half would pass for the wrong reason.
 func TestClaudeSettingsDocument_WritesNothing(t *testing.T) {
 	homeDir := t.TempDir()
 	setHomeForTest(t, homeDir)
@@ -367,7 +381,7 @@ func TestClaudeSettingsDocument_WritesNothing(t *testing.T) {
 		t.Errorf("SettingsDocument touched HOME: %v", names)
 	}
 
-	if _, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{BootDir: t.TempDir()}); err != nil {
+	if _, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{BootDir: t.TempDir(), LegacyAllowHostEffects: true}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(homeDir, ".claude.json")); err != nil {

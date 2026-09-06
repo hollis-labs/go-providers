@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // BootDirSpec for the Claude Code CLI.
@@ -38,14 +39,10 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: ".claude/settings.json",
 				Render: func(ctx PlantContext) (string, error) {
-					// Side effect, gated on PlantContext.BootDir: seed a
-					// per-bootdir trust marker in ~/.claude.json so the
-					// claude CLI doesn't fire its first-run workspace
-					// trust dialog on PTY spawn. The settings file only
-					// covers tool/MCP overrides — trust state lives in
-					// the user-global config keyed by the realpath of
-					// cwd (probed empirically; see CHANGELOG v0.8.2).
-					if ctx.BootDir != "" {
+					// Legacy compatibility effect, gated by explicit
+					// caller opt-in. New runtime paths should call
+					// PrepareRuntime before process start instead.
+					if ctx.LegacyAllowHostEffects && ctx.BootDir != "" {
 						home, err := os.UserHomeDir()
 						if err != nil {
 							return "", fmt.Errorf("claude bootdir trust seed: home dir: %w", err)
@@ -311,11 +308,9 @@ func resolveClaudeDefaultMode(permissionMode string, skipPermissions bool) (stri
 // the projects map is created. If it exists but is malformed JSON, this
 // returns an error rather than overwriting the user's config.
 //
-// Concurrency: ~/.claude.json may be written by other claude processes.
-// This function does read-modify-rename without a lock; in the rare case
-// of a concurrent write, the bootdir's trust entry could be clobbered and
-// the dialog would fire on next spawn. Mitigation is filed as a follow-up;
-// the surface here is intentionally narrow (only one key under projects).
+// Concurrency: the read-modify-rename is guarded by a best-effort lock file
+// beside ~/.claude.json so concurrent preparations in this package do not
+// clobber one another.
 //
 // Cleanup: this function does not remove the projects[bootdir] entry. The
 // bootdir tempdir is removed by the consumer at session teardown; the
@@ -323,6 +318,12 @@ func resolveClaudeDefaultMode(permissionMode string, skipPermissions bool) (stri
 // If accumulation becomes an issue, consumers can sweep entries whose path
 // matches the bootdir prefix on startup.
 func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
+	return withClaudeConfigLock(homeDir, func() error {
+		return seedClaudeWorkspaceTrustLocked(homeDir, bootDir)
+	})
+}
+
+func seedClaudeWorkspaceTrustLocked(homeDir, bootDir string) error {
 	if homeDir == "" {
 		return fmt.Errorf("homeDir is empty")
 	}
@@ -427,6 +428,121 @@ func seedClaudeWorkspaceTrust(homeDir, bootDir string) error {
 	}
 	cleanupTmp = false
 	return nil
+}
+
+func removeClaudeWorkspaceTrust(homeDir, bootDir string) error {
+	return withClaudeConfigLock(homeDir, func() error {
+		return removeClaudeWorkspaceTrustLocked(homeDir, bootDir)
+	})
+}
+
+func removeClaudeWorkspaceTrustLocked(homeDir, bootDir string) error {
+	if homeDir == "" {
+		return fmt.Errorf("homeDir is empty")
+	}
+	if bootDir == "" {
+		return fmt.Errorf("bootDir is empty")
+	}
+	resolved, err := filepath.EvalSymlinks(bootDir)
+	if err != nil {
+		abs, absErr := filepath.Abs(bootDir)
+		if absErr != nil {
+			return fmt.Errorf("resolve bootDir: %w (also: %v)", err, absErr)
+		}
+		resolved = abs
+	}
+
+	cfgPath := filepath.Join(homeDir, ".claude.json")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", cfgPath, err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("parse %s: %w", cfgPath, err)
+	}
+	projects, ok := cfg["projects"].(map[string]any)
+	if !ok {
+		if _, present := cfg["projects"]; present {
+			return fmt.Errorf("%s: top-level `projects` is not a JSON object (%T) — refusing to overwrite", cfgPath, cfg["projects"])
+		}
+		return nil
+	}
+	entry, ok := projects[resolved].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if !isPreparationOnlyClaudeTrustEntry(entry) {
+		return nil
+	}
+	delete(projects, resolved)
+
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", cfgPath, err)
+	}
+	tmp, err := os.CreateTemp(homeDir, ".claude.json.cleanup-*")
+	if err != nil {
+		return fmt.Errorf("create temp for %s: %w", cfgPath, err)
+	}
+	tmpName := tmp.Name()
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp %s: %w", tmpName, err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temp %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, cfgPath); err != nil {
+		return fmt.Errorf("rename %s -> %s: %w", tmpName, cfgPath, err)
+	}
+	cleanupTmp = false
+	return nil
+}
+
+func isPreparationOnlyClaudeTrustEntry(entry map[string]any) bool {
+	if len(entry) != 2 {
+		return false
+	}
+	trust, trustOK := entry["hasTrustDialogAccepted"].(bool)
+	onboard, onboardOK := entry["hasCompletedProjectOnboarding"].(bool)
+	return trustOK && trust && onboardOK && onboard
+}
+
+func withClaudeConfigLock(homeDir string, fn func() error) error {
+	if homeDir == "" {
+		return fn()
+	}
+	lockPath := filepath.Join(homeDir, ".claude.json.lock")
+	var lock *os.File
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		lock, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) || time.Now().After(deadline) {
+			return fmt.Errorf("acquire %s: %w", lockPath, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_ = lock.Close()
+	defer os.Remove(lockPath)
+	return fn()
 }
 
 // muxEntry captures the planted Mux-stdio MCP entry inputs in a single

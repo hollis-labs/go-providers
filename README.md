@@ -54,7 +54,11 @@ func main() {
         content, _ := pf.Render(pctx)
         dst := filepath.Join(bootDir, pf.RelPath)
         os.MkdirAll(filepath.Dir(dst), 0o755)
-        os.WriteFile(dst, []byte(content), 0o644)
+        mode := pf.Mode
+        if mode == 0 {
+            mode = 0o644
+        }
+        os.WriteFile(dst, []byte(content), mode)
     }
 
     // 3. Wire bare-mode flag values from the planted layout.
@@ -204,6 +208,7 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
     for _, pf := range spec.PlantedFiles {
         content, err := pf.Render(pctx)
         // apps materialize: filepath.Join(bootDir, pf.RelPath), content
+        // honor pf.Mode, using 0644 only when pf.Mode is zero
     }
     // apps substitute {{.BootDir}} / {{.ProjectDir}} in spec.EnvAmendments + spec.ProjectDirArg
     cwd := spec.SpawnWorkdir(bootDir, projectDir) // honors CwdPreference
@@ -218,6 +223,88 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 | gemini, copilot, aider, junie, kiro, qwen | stub | zero-value spec; `Notes` describes the probe needed |
 
 `AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
+
+### Pure provider projections
+
+`ProviderProjection` is the provider-owned handoff for shared materialization. It returns relative files, file modes, byte content, structured argv/env conventions, cwd/config-root selection, and explicit runtime-effect descriptors without importing `agentkit`, reading credentials, writing a real home directory, trusting a workspace, or starting a provider process.
+
+```go
+ctx := provider.PlantContext{
+    SystemPrompt:   "You are the task agent.",
+    BootContent:    "Read @./boot.md and start.",
+    AgentName:      "worker",
+    MCPLoopbackURL: "http://127.0.0.1:60000/mcp",
+}
+proj, err := provider.NewCodexAdapter().ProviderProjection(ctx, provider.ProjectionOptions{
+    Skills: []provider.SkillPackage{{
+        Name: "repo-test",
+        Files: []provider.SkillFile{
+            {RelPath: "SKILL.md", Content: []byte("---\nname: repo-test\ndescription: Run repo tests\n---\n")},
+            {RelPath: "scripts/run.sh", Content: []byte("#!/bin/sh\ngo test ./...\n"), Mode: 0o755},
+        },
+    }},
+    RequiredFeatures: []provider.ProviderFeature{
+        provider.FeatureInstructions,
+        provider.FeatureNativeConfig,
+        provider.FeatureMCP,
+        provider.FeatureSkillTrees,
+    },
+})
+if err != nil {
+    // Unsupported required capabilities return an UnsupportedFeatureError
+    // with diagnostics instead of silently dropping caller intent.
+}
+binding, err := proj.ResolveLaunch(provider.ProjectionRoots{
+    BootRoot:    "/tmp/boot root",
+    ProjectRoot: "/tmp/project root",
+}, "implement the task")
+```
+
+The current M06 capability matrix is available from `ProviderCapabilityMatrix()`:
+
+| Provider / mode | Fixture version | Projected here | Explicit later |
+|---|---:|---|---|
+| Claude bare/print/PTY/streaming | 2.1.263 | `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, `.claude/skills/<name>/...`, structured argv roots | credential helper execution, workspace trust, hooks, commands, subagents |
+| Codex exec/app-server | 0.153.4 | `AGENTS.md`, `config.toml`, `.mcp.json` mirror, `.agents/skills/<name>/...`, structured `CODEX_HOME`/argv roots | `auth.json` credential materialization, hooks, custom subagents |
+| OpenCode run/serve-http | 1.15.6 | `agents/<name>.md`, `agents.json`, `opencode.json`, `.mcp.json` mirror, `.opencode/skills/<name>/...`, structured `OPENCODE_CONFIG_DIR`/argv roots | provider auth, commands, subagents |
+
+`ProviderProjection` keeps `ProjectRoot`, `BootRoot`, `ConfigRoot`, `StateRoot`, `ScratchRoot`, and process cwd distinct. `LaunchConvention.Argv` is a list of typed arguments, and `EnvDelta` carries set/prepend/append/unset plus precedence, so paths with spaces or non-ASCII characters are never split through a shell string.
+
+### Explicit runtime preparation
+
+Pure projection only declares required runtime effects. It never reads `HOME`, copies `CODEX_HOME/auth.json`, seeds Claude trust, or starts a provider. Callers decide which effects are required immediately before launch and pass the policy and secret resolver that make those effects legal.
+
+```go
+proj, _ := provider.NewCodexAdapter().ProviderProjection(provider.PlantContext{
+    AgentName: "worker",
+}, provider.ProjectionOptions{})
+
+result, err := provider.PrepareRuntime(ctx, provider.RuntimePreparationRequest{
+    Projection: proj,
+    Roots: provider.ProjectionRoots{
+        BootRoot:    bootDir,
+        ProjectRoot: projectDir,
+    },
+    Policy: provider.PreparationPolicy{
+        AllowCredentials: true,
+        AllowCleanup:    true,
+    },
+    CredentialResolver: provider.CredentialResolverFunc(func(ctx context.Context, req provider.CredentialRequest) (provider.Credential, error) {
+        // Caller-controlled source: a vault, OS keychain, test fixture, or
+        // approved file path. go-providers never falls back to ambient auth.
+        return provider.Credential{Bytes: fakeOrResolvedAuthJSON, Mode: 0o600}, nil
+    }),
+    RequiredEffects: []provider.ProviderEffectKind{provider.EffectCodexAuthJSON},
+})
+if err != nil {
+    // Required but unauthorized or unavailable effects fail here, before spawn.
+}
+defer result.Cleanup(ctx)
+```
+
+Claude workspace trust uses the same preparation surface with `EffectClaudeWorkspaceTrust`, `PreparationPolicy.AllowHostMutation`, a caller-supplied synthetic or real `HomeDir`, and `Roots.BootRoot`. The cleanup handle removes only the session-owned trust entry; unrelated Claude config and project keys are preserved. Secret-bearing preparation results expose only `"<redacted>"` metadata and restrictive file modes.
+
+`BootDirSpec` remains available for older apps. Its render functions are pure by default; setting `PlantContext.LegacyAllowHostEffects` opts into the pre-M07 compatibility behavior where Claude may seed `~/.claude.json` and Codex may read ambient auth during render. New callers should prefer `ProviderProjection` plus `PrepareRuntime`.
 
 The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` header, controlled by `CodexAdapter.ApprovalPolicy` / `CodexAdapter.SandboxMode` (the codex analogue of `ClaudeAdapter.PermissionMode`). The defaults are `never` / `workspace-write` — NOT codex's interactive defaults — because a `BootDirSpec` is a headless boot with no TTY: a codex that prompts for approval under a headless runtime (codex `app-server` emits a JSON-RPC approval request) blocks forever.
 

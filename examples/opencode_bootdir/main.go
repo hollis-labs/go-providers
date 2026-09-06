@@ -72,7 +72,11 @@ func main() {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			log.Fatalf("mkdir for %s: %v", pf.RelPath, err)
 		}
-		if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+		mode := pf.Mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		if err := os.WriteFile(dst, []byte(content), mode.Perm()); err != nil {
 			log.Fatalf("write %s: %v", pf.RelPath, err)
 		}
 	}
