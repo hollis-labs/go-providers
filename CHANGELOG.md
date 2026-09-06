@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.26.0 — 2026-09-06
+
+### Added
+
+- Pure provider projections for Claude, Codex and OpenCode: files and trees,
+  executable modes, provider configuration and exact launch bindings without
+  credential reads, workspace trust changes or process launch.
+- Explicit runtime-preparation requests and results for caller-approved
+  credential and trust effects, with capability diagnostics and validation.
+
+### Changed
+
+- Existing boot-directory adapters delegate to the shared projection and
+  preparation contracts while retaining their compatibility entry points.
+
 ## v0.25.0 — 2026-09-02
 
 ### Added
