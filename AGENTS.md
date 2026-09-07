@@ -4,8 +4,8 @@ One `Provider` interface over CLI-bridge adapters (Claude Code, Codex, Gemini
 CLI, Aider, Copilot, Junie, Kiro, Opencode, Qwen) driven through PTY or plain
 subprocess, plus the cross-cutting adapter primitives: registry, boot-dir
 specs, cost monitoring, scope guarding, progress-loop detection, typed per-line
-events and a decorator pipeline. Since v0.11.0 it is CLI/PTY-only — it does not
-own LLM contracts, rate budgets, or any direct HTTP chat or embedding path.
+events and a decorator pipeline. It is CLI/PTY-only — it does not own LLM
+contracts, rate budgets, or any direct HTTP chat or embedding path.
 
 ## Start Here
 
@@ -36,10 +36,9 @@ Smoke tests that spawn a real CLI are env-gated (`CLAUDE_PTY_SMOKE`,
 
 ## Boundaries
 
-Since v0.11.0 the shared model types live in `go-llm-types` and the provider
-contracts and rate-budget primitives in `go-llm-contracts`. Reintroducing an
-HTTP chat or embedding adapter here reverses a deliberate split — this library
-bridges CLIs.
+The shared model types live in `go-llm-types` and the provider contracts and
+rate-budget primitives in `go-llm-contracts`. Reintroducing an HTTP chat or
+embedding adapter here reverses a deliberate split — this library bridges CLIs.
 
 Boot-dir specs write real files into a real directory for a real CLI, so the
 "no side effect" cases are load-bearing: an empty boot dir must produce no
