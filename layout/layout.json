@@ -1,0 +1,290 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "provider": "claude",
+      "concern": "instructions",
+      "root": "boot",
+      "rel": "CLAUDE.md",
+      "cwd": "boot",
+      "unprobed": "instruction file auto-load is a model-visible effect Step 0 does not measure (no model call)"
+    },
+    {
+      "provider": "claude",
+      "mode": "claude-bare",
+      "concern": "instructions",
+      "root": "boot",
+      "rel": "CLAUDE.md",
+      "flag": "--append-system-prompt-file",
+      "cwd": "boot",
+      "unprobed": "--bare skips CLAUDE.md discovery; the flag delivers it (model-visible, not measured)"
+    },
+    {
+      "provider": "claude",
+      "concern": "boot",
+      "root": "boot",
+      "rel": "boot.md",
+      "unprobed": "kick-off content read by the launcher, not discovered by the harness"
+    },
+    {
+      "provider": "claude",
+      "concern": "mcp",
+      "root": "boot",
+      "rel": ".mcp.json",
+      "file_mode": 384,
+      "flag": "--mcp-config",
+      "cwd": "boot",
+      "probe": [
+        "CFG1",
+        "CFG4"
+      ],
+      "note": "read from cwd by convention (CFG1) and by --mcp-config \u003cfile\u003e (CFG4)"
+    },
+    {
+      "provider": "claude",
+      "concern": "native-config",
+      "root": "boot",
+      "rel": ".claude/settings.json",
+      "cwd": "boot",
+      "probe": [
+        "CFG1"
+      ],
+      "note": "read from cwd .claude/settings.json in -p mode; --add-dir loads neither settings nor .mcp.json (CFG3)"
+    },
+    {
+      "provider": "claude",
+      "mode": "claude-bare",
+      "concern": "native-config",
+      "root": "boot",
+      "rel": ".claude/settings.json",
+      "flag": "--settings",
+      "cwd": "boot",
+      "probe": [
+        "CFG2"
+      ],
+      "note": "--bare skips cwd discovery, so the file is passed explicitly"
+    },
+    {
+      "provider": "claude",
+      "concern": "skills",
+      "root": "boot",
+      "rel": ".claude/skills",
+      "form": "dir",
+      "cwd": "boot",
+      "probe": [
+        "C1",
+        "C2"
+      ],
+      "note": "\u003ccwd\u003e/.claude/skills/\u003cname\u003e/SKILL.md; flat \u003cname\u003e.md is not read"
+    },
+    {
+      "provider": "claude",
+      "mode": "claude-bare",
+      "concern": "skills",
+      "root": "boot",
+      "rel": ".claude/skills",
+      "form": "dir",
+      "flag": "--add-dir",
+      "cwd": "boot",
+      "probe": [
+        "C4",
+        "C5"
+      ],
+      "note": "--bare reads no cwd or user skills (C4); only \u003c--add-dir dir\u003e/.claude/skills (C5), so the boot root must itself be --add-dir'ed when skills are projected"
+    },
+    {
+      "provider": "claude",
+      "concern": "project-dir",
+      "root": "project",
+      "flag": "--add-dir",
+      "cwd": "boot",
+      "probe": [
+        "C3",
+        "C5"
+      ],
+      "note": "extra directory, not a working root; accepted in every mode. The built-in launch convention passes it in claude-bare only (AK adds it for the other modes)"
+    },
+    {
+      "provider": "codex",
+      "concern": "instructions",
+      "root": "boot",
+      "rel": "AGENTS.md",
+      "cwd": "boot",
+      "probe": [
+        "CFG2",
+        "CFG3"
+      ],
+      "note": "AGENTS.md is read from cwd and from $CODEX_HOME"
+    },
+    {
+      "provider": "codex",
+      "concern": "boot",
+      "root": "boot",
+      "rel": "boot.md",
+      "unprobed": "kick-off content read by the launcher, not discovered by the harness"
+    },
+    {
+      "provider": "codex",
+      "concern": "native-config",
+      "root": "boot",
+      "rel": "config.toml",
+      "file_mode": 384,
+      "env": {
+        "CODEX_HOME": "boot"
+      },
+      "cwd": "boot",
+      "probe": [
+        "CFG2",
+        "CFG3"
+      ],
+      "note": "$CODEX_HOME/config.toml. A .codex/config.toml under a redirected HOME also works (CFG4) but is not this convention; a project .codex/config.toml was not applied (untrusted, CFG1)"
+    },
+    {
+      "provider": "codex",
+      "concern": "auth",
+      "root": "boot",
+      "rel": "auth.json",
+      "file_mode": 384,
+      "env": {
+        "CODEX_HOME": "boot"
+      },
+      "cwd": "boot",
+      "unprobed": "credential placeholder resolved by runtime preparation; no credential is used by Step 0"
+    },
+    {
+      "provider": "codex",
+      "concern": "mcp",
+      "root": "boot",
+      "rel": ".mcp.json",
+      "file_mode": 384,
+      "unprobed": "mirror for operators; Codex reads MCP servers from config.toml, not this file"
+    },
+    {
+      "provider": "codex",
+      "concern": "skills",
+      "root": "boot",
+      "rel": "skills",
+      "form": "dir",
+      "env": {
+        "CODEX_HOME": "boot"
+      },
+      "cwd": "boot",
+      "probe": [
+        "X2",
+        "X3",
+        "X4"
+      ],
+      "note": "$CODEX_HOME/skills/\u003cname\u003e/SKILL.md survives with and without --cd \u003cproject\u003e; \u003cboot\u003e/.agents/skills does not survive --cd (X2 vs X3), and singular skill/ and flat .md are never read"
+    },
+    {
+      "provider": "codex",
+      "mode": "codex-exec",
+      "concern": "project-dir",
+      "root": "project",
+      "flag": "--cd",
+      "probe": [
+        "X3"
+      ],
+      "note": "--cd is the working root (codex -C), not an extra directory; app-server takes the project root over JSON-RPC instead"
+    },
+    {
+      "provider": "opencode",
+      "concern": "instructions",
+      "root": "boot",
+      "rel": "agents/{agent}.md",
+      "env": {
+        "OPENCODE_CONFIG_DIR": "boot"
+      },
+      "cwd": "project",
+      "unprobed": "agent prompt file is model-visible only; Step 0 does not measure it"
+    },
+    {
+      "provider": "opencode",
+      "concern": "agents",
+      "root": "boot",
+      "rel": "agents.json",
+      "env": {
+        "OPENCODE_CONFIG_DIR": "boot"
+      },
+      "cwd": "project",
+      "unprobed": "agent registry sidecar; Step 0 does not measure it"
+    },
+    {
+      "provider": "opencode",
+      "concern": "native-config",
+      "root": "boot",
+      "rel": "opencode.json",
+      "env": {
+        "OPENCODE_CONFIG_DIR": "boot"
+      },
+      "cwd": "project",
+      "probe": [
+        "CFG2"
+      ],
+      "note": "$OPENCODE_CONFIG_DIR/opencode.json is merged with project and user config"
+    },
+    {
+      "provider": "opencode",
+      "concern": "boot",
+      "root": "boot",
+      "rel": "boot.md",
+      "unprobed": "kick-off content read by the launcher, not discovered by the harness"
+    },
+    {
+      "provider": "opencode",
+      "concern": "mcp",
+      "root": "boot",
+      "rel": ".mcp.json",
+      "file_mode": 384,
+      "unprobed": "mirror for operators; OpenCode reads MCP servers from opencode.json"
+    },
+    {
+      "provider": "opencode",
+      "concern": "skills",
+      "root": "boot",
+      "rel": "skills",
+      "form": "dir",
+      "env": {
+        "OPENCODE_CONFIG_DIR": "boot"
+      },
+      "cwd": "project",
+      "probe": [
+        "O2"
+      ],
+      "note": "$OPENCODE_CONFIG_DIR/skills/\u003cname\u003e/SKILL.md (singular skill/ also read; flat .md is not)"
+    },
+    {
+      "provider": "opencode",
+      "concern": "skills",
+      "root": "boot",
+      "rel": ".opencode/skills",
+      "form": "dir",
+      "cwd": "boot",
+      "probe": [
+        "O2",
+        "O3"
+      ],
+      "note": "alias, valid only when cwd == boot (O3); NOT scanned under $OPENCODE_CONFIG_DIR when cwd is the project (O2)"
+    },
+    {
+      "provider": "opencode",
+      "mode": "opencode-run",
+      "concern": "project-dir",
+      "root": "project",
+      "flag": "--dir",
+      "unprobed": "flag is exercised by a real run, which needs a model call"
+    },
+    {
+      "provider": "opencode",
+      "mode": "opencode-serve-http",
+      "concern": "runtime",
+      "root": "project",
+      "flag": "serve",
+      "aliases": [
+        "serve-http",
+        "http-sse"
+      ],
+      "unprobed": "wire token for the HTTP runtime, not a harness discovery path; canonical spelling serve-http, http-sse is the public runtimeevents value and is never renamed here"
+    }
+  ]
+}

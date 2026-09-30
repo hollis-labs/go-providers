@@ -72,35 +72,35 @@ const AgentPlaceholder = "{agent}"
 // and the flag, environment and working directory that make the harness find
 // it.
 type Entry struct {
-	Provider Provider
-	Mode     Mode // "" = every mode
-	Concern  Concern
+	Provider Provider `json:"provider"`
+	Mode     Mode     `json:"mode,omitempty"` // "" = every mode
+	Concern  Concern  `json:"concern"`
 
-	Root     Root   // relative to which launch root
-	Rel      string // path under Root; for skills, the directory that holds <name>/SKILL.md
-	Form     Form   // skills only
-	FileMode uint32 // 0 = default
+	Root     Root   `json:"root"`                // relative to which launch root
+	Rel      string `json:"rel,omitempty"`       // path under Root; for skills, the directory that holds <name>/SKILL.md
+	Form     Form   `json:"form,omitempty"`      // skills only
+	FileMode uint32 `json:"file_mode,omitempty"` // 0 = default
 
 	// Flag is the argv flag that carries the path (or the Root itself for
 	// skills and project-dir rows). Empty when the harness finds the file by
 	// convention alone.
-	Flag string
+	Flag string `json:"flag,omitempty"`
 	// Env are environment variables the harness needs, value = a Root name.
-	Env map[string]string
+	Env map[string]string `json:"env,omitempty"`
 	// CWD is the root the process must be started in for the row to hold.
-	CWD Root
+	CWD Root `json:"cwd,omitempty"`
 
 	// Aliases are other spellings of the same thing (informational).
-	Aliases []string
+	Aliases []string `json:"aliases,omitempty"`
 	// Probe lists Step 0 probe ids (for example "C2") of this provider whose
 	// measured result justifies the row.
-	Probe []string
+	Probe []string `json:"probe,omitempty"`
 	// Unprobed explains why the row has no probe id: it is a path the
 	// package writes but Step 0 does not measure. Exactly one of Probe and
 	// Unprobed is set.
-	Unprobed string
+	Unprobed string `json:"unprobed,omitempty"`
 	// Note is human-readable context rendered into docs/LAYOUT.md.
-	Note string
+	Note string `json:"note,omitempty"`
 }
 
 // Table returns a copy of the one table, in stable order.
