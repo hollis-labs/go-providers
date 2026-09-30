@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-Anticipated as v0.27.0 (minor: skill-path behaviour change). Not tagged.
+## v0.27.0 — 2026-09-29
 
 ### Added
 
