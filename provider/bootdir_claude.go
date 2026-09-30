@@ -545,7 +545,7 @@ func withClaudeConfigLock(homeDir string, fn func() error) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	_ = lock.Close()
-	defer os.Remove(lockPath)
+	defer func() { _ = os.Remove(lockPath) }()
 	return fn()
 }
 

@@ -536,7 +536,7 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool
 }
 
 func codexLaunchConvention(mode ProviderMode) LaunchConvention {
-	args := []ArgTemplate{}
+	var args []ArgTemplate
 	if mode == ModeCodexAppServer {
 		args = []ArgTemplate{{Kind: ArgLiteral, Value: "app-server"}}
 	} else {
@@ -562,7 +562,7 @@ func codexLaunchConvention(mode ProviderMode) LaunchConvention {
 }
 
 func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName string) LaunchConvention {
-	args := []ArgTemplate{}
+	var args []ArgTemplate
 	if mode == ModeOpencodeServeHTTP {
 		args = []ArgTemplate{
 			{Kind: ArgLiteral, Value: layoutEntry(ProviderOpencode, mode, layout.Runtime).Flag},
