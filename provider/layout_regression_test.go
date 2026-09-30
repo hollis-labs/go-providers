@@ -20,17 +20,11 @@ var updateLayoutGolden = flag.Bool("update-layout-golden", false, "rewrite provi
 // pre-layout code before provider was edited.
 func regressionCases() []struct {
 	name string
-	a    interface {
-		ProjectionProvider
-		BootDirSpec() BootDirSpec
-	}
+	a    projectingAdapter
 } {
 	return []struct {
 		name string
-		a    interface {
-			ProjectionProvider
-			BootDirSpec() BootDirSpec
-		}
+		a    projectingAdapter
 	}{
 		{"claude-print", &ClaudeAdapter{}},
 		{"claude-print-skip-permissions", &ClaudeAdapter{SkipPermissions: true}},
