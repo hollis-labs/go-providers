@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.29.0 — 2026-09-30
+
+### Added
+
+- `AntigravityAdapter` for the Antigravity CLI (`agy`, verified against 1.2.7):
+  one subprocess per turn, `agy --output-format stream-json [--conversation
+  <id>] -p=<prompt>`, with `--model`, `--effort`, `--agent`, `--add-dir` and a
+  permission posture (`bypass` → `--dangerously-skip-permissions`,
+  `accept-edits`/`plan` → `--mode`). `ParseLine` maps init → session id,
+  text_delta → delta, each agent step's usage → usage, tool steps → tool use,
+  result → done/error; `ParseLineEvents` adds tool results and
+  `events.PermissionDenied` for auto-denied approvals. Fixtures in
+  `provider/testdata/antigravity`.
+- Antigravity layout rows, capability-matrix row, `ProviderProjection` and
+  `BootDirSpec`: workspace-only projection into `<boot>/.agents`
+  (`plugins/tether/{plugin.json,mcp_config.json}` for MCP, `skills/`) plus
+  `AGENTS.md`, cwd = boot, project via `--add-dir`. agy's global
+  `~/.gemini/config` is shared with the desktop app and never written.
+- Optional adapter extensions and sentinels: `SessionResumeVerifier` (a resume
+  that reports a different id lost the requested session; agy replaces an
+  unknown conversation silently instead of failing), `Preflighter`,
+  `AuthFailureClassifier` and `ErrProviderNotAuthenticated`. Typed events
+  `events.SessionLost` and `events.PermissionDenied` (both non-terminal).
+
 ## v0.28.0 — 2026-09-30
 
 ### Added

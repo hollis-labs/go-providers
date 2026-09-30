@@ -6,9 +6,10 @@ import "sort"
 type Provider string
 
 const (
-	Claude   Provider = "claude"
-	Codex    Provider = "codex"
-	OpenCode Provider = "opencode"
+	Claude      Provider = "claude"
+	Codex       Provider = "codex"
+	OpenCode    Provider = "opencode"
+	Antigravity Provider = "antigravity"
 )
 
 // Mode is the string value of a provider.ProviderMode. The empty Mode means
@@ -25,6 +26,7 @@ const (
 	ModeCodexAppServer       Mode = "codex-app-server"
 	ModeOpenCodeRun          Mode = "opencode-run"
 	ModeOpenCodeServeHTTP    Mode = "opencode-serve-http"
+	ModeAntigravityPrint     Mode = "antigravity-print"
 )
 
 // Root names the directory an Entry is relative to. The values mirror the

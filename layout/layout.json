@@ -274,6 +274,55 @@
         "http-sse"
       ],
       "unprobed": "wire token for the HTTP runtime, not a harness discovery path; canonical spelling serve-http, http-sse is the public runtimeevents value and is never renamed here"
+    },
+    {
+      "provider": "antigravity",
+      "concern": "instructions",
+      "root": "boot",
+      "rel": "AGENTS.md",
+      "cwd": "boot",
+      "unprobed": "verified live against agy 1.2.7: \u003ccwd\u003e/AGENTS.md and the --add-dir project's own AGENTS.md both apply; not in the Step 0 golden"
+    },
+    {
+      "provider": "antigravity",
+      "concern": "boot",
+      "root": "boot",
+      "rel": "boot.md",
+      "unprobed": "kick-off content read by the launcher, not discovered by the harness"
+    },
+    {
+      "provider": "antigravity",
+      "concern": "native-config",
+      "root": "boot",
+      "rel": ".agents/plugins/tether/plugin.json",
+      "cwd": "boot",
+      "unprobed": "verified live against agy 1.2.7: a workspace plugin under \u003ccwd\u003e/.agents/plugins/\u003cname\u003e/ is discovered and enabled by default; plugin.json is its marker"
+    },
+    {
+      "provider": "antigravity",
+      "concern": "mcp",
+      "root": "boot",
+      "rel": ".agents/plugins/tether/mcp_config.json",
+      "file_mode": 384,
+      "cwd": "boot",
+      "unprobed": "verified live against agy 1.2.7: the plugin's servers are spawned (cwd = the plugin dir) and exposed as \u003cplugin\u003e_\u003cserver\u003e; tool schemas are cached under ~/.gemini/antigravity-cli/mcp/\u003cplugin\u003e_\u003cserver\u003e/, so names must be stable per server"
+    },
+    {
+      "provider": "antigravity",
+      "concern": "skills",
+      "root": "boot",
+      "rel": ".agents/skills",
+      "form": "dir",
+      "cwd": "boot",
+      "unprobed": "verified live against agy 1.2.7: \u003ccwd\u003e/.agents/skills/\u003cname\u003e/SKILL.md loads and shadows a global ~/.gemini/config/skills/\u003cname\u003e"
+    },
+    {
+      "provider": "antigravity",
+      "mode": "antigravity-print",
+      "concern": "project-dir",
+      "root": "project",
+      "flag": "--add-dir",
+      "unprobed": "verified live against agy 1.2.7: an --add-dir project is readable and its AGENTS.md applies"
     }
   ]
 }

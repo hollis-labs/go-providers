@@ -13,15 +13,17 @@ func TestProviderCapabilityMatrix_M06(t *testing.T) {
 	var _ ProjectionProvider = NewClaudeAdapter()
 	var _ ProjectionProvider = NewCodexAdapter()
 	var _ ProjectionProvider = NewOpencodeAdapter()
+	var _ ProjectionProvider = NewAntigravityAdapter()
 
 	rows := ProviderCapabilityMatrix()
-	if len(rows) != 8 {
-		t.Fatalf("matrix row count: want 8, got %d", len(rows))
+	if len(rows) != 9 {
+		t.Fatalf("matrix row count: want 9, got %d", len(rows))
 	}
 	want := map[ProviderID][]ProviderMode{
-		ProviderClaude:   {ModeClaudePrint, ModeClaudeBare, ModeClaudePTY, ModeClaudeStreamingStdio},
-		ProviderCodex:    {ModeCodexExec, ModeCodexAppServer},
-		ProviderOpencode: {ModeOpencodeRun, ModeOpencodeServeHTTP},
+		ProviderClaude:      {ModeClaudePrint, ModeClaudeBare, ModeClaudePTY, ModeClaudeStreamingStdio},
+		ProviderCodex:       {ModeCodexExec, ModeCodexAppServer},
+		ProviderOpencode:    {ModeOpencodeRun, ModeOpencodeServeHTTP},
+		ProviderAntigravity: {ModeAntigravityPrint},
 	}
 	for provider, modes := range want {
 		for _, mode := range modes {

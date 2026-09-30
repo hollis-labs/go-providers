@@ -87,7 +87,7 @@ func TestTableEveryEntryIsJustified(t *testing.T) {
 func TestTableShape(t *testing.T) {
 	for i, e := range layout.Table() {
 		switch e.Provider {
-		case layout.Claude, layout.Codex, layout.OpenCode:
+		case layout.Claude, layout.Codex, layout.OpenCode, layout.Antigravity:
 		default:
 			t.Errorf("row %d: unknown provider %q", i, e.Provider)
 		}

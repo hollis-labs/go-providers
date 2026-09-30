@@ -42,3 +42,14 @@ Where each agent CLI reads its files, skills and config, relative to which launc
 | all | skills | boot | `.opencode/skills` | dir |  |  |  | boot |  | O2, O3 | alias, valid only when cwd == boot (O3); NOT scanned under $OPENCODE_CONFIG_DIR when cwd is the project (O2) |
 | opencode-run | project-dir | project |  |  |  | `--dir` |  |  |  | none | Unprobed: flag is exercised by a real run, which needs a model call. |
 | opencode-serve-http | runtime | project |  |  |  | `serve` |  |  | serve-http, http-sse | none | Unprobed: wire token for the HTTP runtime, not a harness discovery path; canonical spelling serve-http, http-sse is the public runtimeevents value and is never renamed here. |
+
+## antigravity
+
+| mode | concern | root | rel | form | file mode | flag | env | cwd | aliases | probe | note |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| all | instructions | boot | `AGENTS.md` |  |  |  |  | boot |  | none | Unprobed: verified live against agy 1.2.7: &lt;cwd&gt;/AGENTS.md and the --add-dir project's own AGENTS.md both apply; not in the Step 0 golden. |
+| all | boot | boot | `boot.md` |  |  |  |  |  |  | none | Unprobed: kick-off content read by the launcher, not discovered by the harness. |
+| all | native-config | boot | `.agents/plugins/tether/plugin.json` |  |  |  |  | boot |  | none | Unprobed: verified live against agy 1.2.7: a workspace plugin under &lt;cwd&gt;/.agents/plugins/&lt;name&gt;/ is discovered and enabled by default; plugin.json is its marker. |
+| all | mcp | boot | `.agents/plugins/tether/mcp_config.json` |  | 0600 |  |  | boot |  | none | Unprobed: verified live against agy 1.2.7: the plugin's servers are spawned (cwd = the plugin dir) and exposed as &lt;plugin&gt;_&lt;server&gt;; tool schemas are cached under ~/.gemini/antigravity-cli/mcp/&lt;plugin&gt;_&lt;server&gt;/, so names must be stable per server. |
+| all | skills | boot | `.agents/skills` | dir |  |  |  | boot |  | none | Unprobed: verified live against agy 1.2.7: &lt;cwd&gt;/.agents/skills/&lt;name&gt;/SKILL.md loads and shadows a global ~/.gemini/config/skills/&lt;name&gt;. |
+| antigravity-print | project-dir | project |  |  |  | `--add-dir` |  |  |  | none | Unprobed: verified live against agy 1.2.7: an --add-dir project is readable and its AGENTS.md applies. |

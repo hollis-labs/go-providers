@@ -80,4 +80,27 @@ var table = []Entry{
 	{Provider: OpenCode, Mode: ModeOpenCodeServeHTTP, Concern: Runtime, Root: RootProject, Rel: "", Flag: "serve",
 		Aliases:  []string{"serve-http", "http-sse"},
 		Unprobed: "wire token for the HTTP runtime, not a harness discovery path; canonical spelling serve-http, http-sse is the public runtimeevents value and is never renamed here"},
+
+	// ---- Antigravity (agy). Launch: cwd = boot, project via --add-dir. ----
+	// agy has no config-dir variable: its global config is ~/.gemini/config,
+	// shared with the Antigravity desktop app, and relocating HOME relocates
+	// the credentials too. Everything projected therefore lives in the
+	// workspace customization root <cwd>/.agents, which agy discovers by
+	// walking from cwd (no .git needed). Global MCP servers and skills under
+	// ~/.gemini/config still load alongside; a workspace skill shadows a
+	// global one of the same name. Rows were verified live against agy 1.2.7
+	// (go-providers testdata/antigravity; Tether CW-20260930-0107), not by the
+	// Step 0 harness probe.
+	{Provider: Antigravity, Concern: Instructions, Root: RootBoot, Rel: "AGENTS.md", CWD: RootBoot,
+		Unprobed: "verified live against agy 1.2.7: <cwd>/AGENTS.md and the --add-dir project's own AGENTS.md both apply; not in the Step 0 golden"},
+	{Provider: Antigravity, Concern: Boot, Root: RootBoot, Rel: "boot.md",
+		Unprobed: "kick-off content read by the launcher, not discovered by the harness"},
+	{Provider: Antigravity, Concern: NativeConfig, Root: RootBoot, Rel: ".agents/plugins/tether/plugin.json", CWD: RootBoot,
+		Unprobed: "verified live against agy 1.2.7: a workspace plugin under <cwd>/.agents/plugins/<name>/ is discovered and enabled by default; plugin.json is its marker"},
+	{Provider: Antigravity, Concern: MCP, Root: RootBoot, Rel: ".agents/plugins/tether/mcp_config.json", FileMode: 0o600, CWD: RootBoot,
+		Unprobed: "verified live against agy 1.2.7: the plugin's servers are spawned (cwd = the plugin dir) and exposed as <plugin>_<server>; tool schemas are cached under ~/.gemini/antigravity-cli/mcp/<plugin>_<server>/, so names must be stable per server"},
+	{Provider: Antigravity, Concern: Skills, Root: RootBoot, Rel: ".agents/skills", Form: FormDir, CWD: RootBoot,
+		Unprobed: "verified live against agy 1.2.7: <cwd>/.agents/skills/<name>/SKILL.md loads and shadows a global ~/.gemini/config/skills/<name>"},
+	{Provider: Antigravity, Mode: ModeAntigravityPrint, Concern: ProjectDir, Root: RootProject, Flag: "--add-dir",
+		Unprobed: "verified live against agy 1.2.7: an --add-dir project is readable and its AGENTS.md applies"},
 }
