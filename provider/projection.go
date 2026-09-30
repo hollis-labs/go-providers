@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 // ProviderID names a provider layout family without importing any runtime
@@ -117,28 +119,28 @@ func ProviderCapabilityMatrix() []ProviderCapabilityRow {
 		{
 			Provider:      ProviderCodex,
 			Mode:          ModeCodexExec,
-			TestedVersion: "0.153.4",
+			TestedVersion: "0.154.0",
 			Features:      codexFeatures,
 			Notes:         "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
 		},
 		{
 			Provider:      ProviderCodex,
 			Mode:          ModeCodexAppServer,
-			TestedVersion: "0.153.4",
+			TestedVersion: "0.154.0",
 			Features:      codexFeatures,
 			Notes:         "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
 		},
 		{
 			Provider:      ProviderOpencode,
 			Mode:          ModeOpencodeRun,
-			TestedVersion: "1.15.6",
+			TestedVersion: "1.18.30",
 			Features:      opencodeFeatures,
 			Notes:         "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
 		},
 		{
 			Provider:      ProviderOpencode,
 			Mode:          ModeOpencodeServeHTTP,
-			TestedVersion: "1.15.6",
+			TestedVersion: "1.18.30",
 			Features:      opencodeFeatures,
 			Notes:         "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
 		},
@@ -149,7 +151,7 @@ func claudeCapabilityRow(mode ProviderMode, features map[string]string) Provider
 	return ProviderCapabilityRow{
 		Provider:      ProviderClaude,
 		Mode:          mode,
-		TestedVersion: "2.1.263",
+		TestedVersion: "2.1.285",
 		Features:      features,
 		Notes:         "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
 	}
@@ -193,6 +195,9 @@ type ProjectionRoots struct {
 type SkillPackage struct {
 	Name  string
 	Files []SkillFile
+	// Hash optionally pins the package content as "sha256:<hex>" (see
+	// TreeHash). When set, projection fails if the files do not hash to it.
+	Hash string
 }
 
 // SkillFile is one file inside a SkillPackage. RelPath is package-relative.
@@ -343,21 +348,23 @@ func (e *UnsupportedFeatureError) Error() string {
 // ProviderProjection renders a pure projection for a Claude adapter.
 func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
 	mode := claudeProjectionMode(a)
+	pid := ProviderClaude
 	files := []ProjectedFile{
-		{RelPath: "CLAUDE.md", Content: []byte(renderClaudeMD(ctx)), Role: "instructions"},
-		{RelPath: "boot.md", Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: ".mcp.json", Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: 0o600, Role: "mcp"},
+		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(renderClaudeMD(ctx)), Role: "instructions"},
+		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp"},
 	}
 	doc, err := a.SettingsDocument()
 	if err != nil {
 		return ProviderProjection{}, err
 	}
 	files = append(files, ProjectedFile{
-		RelPath: ".claude/settings.json",
+		RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
 		Content: []byte(marshalClaudeSettings(doc)),
 		Role:    "native-config",
 	})
-	skillFiles, err := projectSkillPackages(".claude/skills", opts.Skills)
+	skillPrefix, _ := skillRootFor(pid, mode)
+	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
@@ -367,9 +374,9 @@ func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOpti
 		Mode:     mode,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   claudeLaunchConvention(a, mode),
+		Launch:   claudeLaunchConvention(a, mode, len(opts.Skills) > 0),
 		Effects: []ProviderEffect{
-			{Kind: EffectClaudeCredentialHelper, Destination: ".claude/settings.json", Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
+			{Kind: EffectClaudeCredentialHelper, Destination: layoutRel(pid, mode, layout.NativeConfig, ""), Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
 			{Kind: EffectClaudeWorkspaceTrust, Reason: "workspace trust seeding mutates host state and is handled by explicit preparation"},
 		},
 	}
@@ -386,14 +393,16 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 	if err != nil {
 		return ProviderProjection{}, err
 	}
+	pid := ProviderCodex
 	files := []ProjectedFile{
-		{RelPath: "AGENTS.md", Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
-		{RelPath: "boot.md", Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: "config.toml", Content: []byte(config), Mode: 0o600, Role: "native-config"},
-		{RelPath: "auth.json", Mode: 0o600, Role: "credential-placeholder"},
-		{RelPath: ".mcp.json", Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: 0o600, Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
+		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, mode, layout.NativeConfig, ""), Content: []byte(config), Mode: layoutFileMode(pid, mode, layout.NativeConfig), Role: "native-config"},
+		{RelPath: layoutRel(pid, mode, layout.Auth, ""), Mode: layoutFileMode(pid, mode, layout.Auth), Role: "credential-placeholder"},
+		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp-mirror"},
 	}
-	skillFiles, err := projectSkillPackages(".agents/skills", opts.Skills)
+	skillPrefix, _ := skillRootFor(pid, mode)
+	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
@@ -405,7 +414,7 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 		Files:    sortProjectedFiles(files),
 		Launch:   codexLaunchConvention(mode),
 		Effects: []ProviderEffect{
-			{Kind: EffectCodexAuthJSON, Destination: "auth.json", Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
+			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, mode, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
 		},
 	}
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)
@@ -424,14 +433,16 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 	if agentName == "" {
 		agentName = "default"
 	}
+	pid := ProviderOpencode
 	files := []ProjectedFile{
-		{RelPath: "agents/" + agentName + ".md", Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
-		{RelPath: "agents.json", Content: []byte(renderOpencodeAgentsJSON(agentName)), Role: "native-config"},
-		{RelPath: "opencode.json", Content: []byte(renderOpencodeJSON(agentName, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
-		{RelPath: "boot.md", Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: ".mcp.json", Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: 0o600, Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, mode, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
+		{RelPath: layoutRel(pid, mode, layout.Agents, agentName), Content: []byte(renderOpencodeAgentsJSON(agentName)), Role: "native-config"},
+		{RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(agentName, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
+		{RelPath: layoutRel(pid, mode, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, mode, layout.MCP, agentName), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp-mirror"},
 	}
-	skillFiles, err := projectSkillPackages(".opencode/skills", opts.Skills)
+	skillPrefix, _ := skillRootFor(pid, mode)
+	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
@@ -462,11 +473,13 @@ func claudeProjectionMode(a *ClaudeAdapter) ProviderMode {
 	}
 }
 
-func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode) LaunchConvention {
+func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool) LaunchConvention {
+	const pid = ProviderClaude
+	mcpArg := layoutFileArg(pid, mode, layout.MCP)
 	args := []ArgTemplate{}
 	switch mode {
 	case ModeClaudePTY:
-		args = append(args, ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: ".mcp.json", Value: "--mcp-config", OmitEmpty: true})
+		args = append(args, mcpArg)
 	case ModeClaudeStreamingStdio:
 		args = append(args,
 			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
@@ -476,7 +489,7 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode) LaunchConventio
 			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
 		)
-		args = append(args, ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: ".mcp.json", Value: "--mcp-config", OmitEmpty: true})
+		args = append(args, mcpArg)
 	case ModeClaudeBare:
 		args = append(args,
 			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
@@ -485,11 +498,19 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode) LaunchConventio
 			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--bare"},
-			ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: ".mcp.json", Value: "--mcp-config", OmitEmpty: true},
-			ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: "CLAUDE.md", Value: "--append-system-prompt-file", OmitEmpty: true},
-			ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: ".claude/settings.json", Value: "--settings", OmitEmpty: true},
-			ArgTemplate{Kind: ArgRoot, Root: RootProject, Value: "--add-dir", OmitEmpty: true},
+			mcpArg,
+			layoutFileArg(pid, mode, layout.Instructions),
+			layoutFileArg(pid, mode, layout.NativeConfig),
 		)
+		if dir, ok := layoutProjectDirArg(pid, mode); ok {
+			args = append(args, dir)
+		}
+		// --bare reads no cwd skills; the boot root must be an --add-dir for
+		// projected skills to be discovered (probe C4, C5). Only added when
+		// skills are actually projected, so argv is otherwise unchanged.
+		if _, flag := skillRootFor(pid, mode); withSkills && flag != "" {
+			args = append(args, ArgTemplate{Kind: ArgRoot, Root: RootBoot, Value: flag, OmitEmpty: true})
+		}
 	default:
 		args = append(args,
 			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
@@ -497,23 +518,25 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode) LaunchConventio
 			ArgTemplate{Kind: ArgLiteral, Value: "--output-format"},
 			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
-			ArgTemplate{Kind: ArgFile, Root: RootBoot, RelPath: ".mcp.json", Value: "--mcp-config", OmitEmpty: true},
+			mcpArg,
 		)
 	}
 	if a.SkipPermissions {
 		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--dangerously-skip-permissions"})
 	}
+	cwd, configRoot, env := layoutLaunchBase(pid, mode)
 	return LaunchConvention{
 		Executable: "claude",
 		Mode:       mode,
-		CWD:        RootBoot,
-		ConfigRoot: RootBoot,
+		CWD:        cwd,
+		ConfigRoot: configRoot,
 		Argv:       args,
+		Env:        env,
 	}
 }
 
 func codexLaunchConvention(mode ProviderMode) LaunchConvention {
-	args := []ArgTemplate{}
+	var args []ArgTemplate
 	if mode == ModeCodexAppServer {
 		args = []ArgTemplate{{Kind: ArgLiteral, Value: "app-server"}}
 	} else {
@@ -522,29 +545,27 @@ func codexLaunchConvention(mode ProviderMode) LaunchConvention {
 			{Kind: ArgPrompt},
 			{Kind: ArgLiteral, Value: "--json"},
 			{Kind: ArgLiteral, Value: "--skip-git-repo-check"},
-			{Kind: ArgRoot, Root: RootProject, Value: "--cd", OmitEmpty: true},
+		}
+		if dir, ok := layoutProjectDirArg(ProviderCodex, mode); ok {
+			args = append(args, dir)
 		}
 	}
+	cwd, configRoot, env := layoutLaunchBase(ProviderCodex, mode)
 	return LaunchConvention{
 		Executable: "codex",
 		Mode:       mode,
-		CWD:        RootBoot,
-		ConfigRoot: RootBoot,
+		CWD:        cwd,
+		ConfigRoot: configRoot,
 		Argv:       args,
-		Env: []EnvDelta{{
-			Name:       "CODEX_HOME",
-			Value:      string(RootBoot),
-			Operation:  EnvSet,
-			Precedence: EnvProviderWins,
-		}},
+		Env:        env,
 	}
 }
 
 func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName string) LaunchConvention {
-	args := []ArgTemplate{}
+	var args []ArgTemplate
 	if mode == ModeOpencodeServeHTTP {
 		args = []ArgTemplate{
-			{Kind: ArgLiteral, Value: "serve"},
+			{Kind: ArgLiteral, Value: layoutEntry(ProviderOpencode, mode, layout.Runtime).Flag},
 			{Kind: ArgLiteral, Value: "--port"},
 			{Kind: ArgLiteral, Value: "0"},
 			{Kind: ArgLiteral, Value: "--hostname"},
@@ -559,23 +580,19 @@ func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName s
 		if a.Model != "" {
 			args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
 		}
-		args = append(args,
-			ArgTemplate{Kind: ArgRoot, Root: RootProject, Value: "--dir", OmitEmpty: true},
-			ArgTemplate{Kind: ArgPrompt},
-		)
+		if dir, ok := layoutProjectDirArg(ProviderOpencode, mode); ok {
+			args = append(args, dir)
+		}
+		args = append(args, ArgTemplate{Kind: ArgPrompt})
 	}
+	cwd, configRoot, env := layoutLaunchBase(ProviderOpencode, mode)
 	return LaunchConvention{
 		Executable: "opencode",
 		Mode:       mode,
-		CWD:        RootProject,
-		ConfigRoot: RootBoot,
+		CWD:        cwd,
+		ConfigRoot: configRoot,
 		Argv:       args,
-		Env: []EnvDelta{{
-			Name:       "OPENCODE_CONFIG_DIR",
-			Value:      string(RootBoot),
-			Operation:  EnvSet,
-			Precedence: EnvProviderWins,
-		}},
+		Env:        env,
 	}
 }
 
@@ -801,6 +818,15 @@ func projectSkillPackages(prefix string, packages []SkillPackage) ([]ProjectedFi
 	for _, pkg := range packages {
 		if !validSkillName(pkg.Name) {
 			return nil, fmt.Errorf("skill package %q: invalid name (want lowercase alphanumeric with single hyphen separators)", pkg.Name)
+		}
+		if pkg.Hash != "" {
+			got, err := pkg.TreeHash()
+			if err != nil {
+				return nil, err
+			}
+			if got != pkg.Hash {
+				return nil, fmt.Errorf("skill package %q: content hash %s does not match pinned %s", pkg.Name, got, pkg.Hash)
+			}
 		}
 		seen := map[string]bool{}
 		for _, f := range pkg.Files {

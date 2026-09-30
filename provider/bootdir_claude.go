@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 // BootDirSpec for the Claude Code CLI.
@@ -22,22 +24,23 @@ import (
 // Spawn invariants: cwd = bootDir; project access via
 // "--add-dir <projectDir>"; CLAUDE.md is auto-loaded by the CLI.
 func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
+	const pid, mode = ProviderClaude, ModeClaudePrint
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: "CLAUDE.md",
+				RelPath: layoutRel(pid, mode, layout.Instructions, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderClaudeMD(ctx), nil
 				},
 			},
 			{
-				RelPath: "boot.md",
+				RelPath: layoutRel(pid, mode, layout.Boot, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: ".claude/settings.json",
+				RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					// Legacy compatibility effect, gated by explicit
 					// caller opt-in. New runtime paths should call
@@ -64,14 +67,15 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: ".mcp.json",
+				RelPath: layoutRel(pid, mode, layout.MCP, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
-		CwdPreference: CwdBootDir,
-		ProjectDirArg: "--add-dir {{.ProjectDir}}",
+		EnvAmendments: layoutLegacyEnv(pid, mode),
+		CwdPreference: layoutLegacyCwd(pid, mode),
+		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
 	}
 }
 
@@ -541,7 +545,7 @@ func withClaudeConfigLock(homeDir string, fn func() error) error {
 		time.Sleep(5 * time.Millisecond)
 	}
 	_ = lock.Close()
-	defer os.Remove(lockPath)
+	defer func() { _ = os.Remove(lockPath) }()
 	return fn()
 }
 

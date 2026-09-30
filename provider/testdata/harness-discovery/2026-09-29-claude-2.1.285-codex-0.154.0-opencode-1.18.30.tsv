@@ -1,0 +1,24 @@
+V	claude=2.1.285 (Claude Code)	codex=codex-cli 0.154.0	opencode=1.18.30
+R	claude	C1-cwd=proj	c-home-claude-dir,c-proj-claude-dir
+R	claude	C2-cwd=boot	c-boot-claude-dir,c-home-claude-dir
+R	claude	C3-cwd=boot+add-dir=proj	c-boot-claude-dir,c-home-claude-dir,c-proj-claude-dir
+R	claude	C4-cwd=boot+bare	
+R	claude	C5-cwd=boot+bare+add-dir=proj	c-proj-claude-dir
+R	claude	CFG1-cwd/.claude/settings.json+cwd/.mcp.json	mode=plan mcp=probe-mcp
+R	claude	CFG2---settings=file	mode=acceptEdits mcp=
+R	claude	CFG3-add-dir-only	mode=default mcp=
+R	claude	CFG4---mcp-config=file	mode=default mcp=probe-mcp
+R	codex	X1-cwd=proj,CODEX_HOME=default	x-home-agents-dir,x-home-codex-dir,x-proj-agents-dir,x-proj-codex-dir
+R	codex	X2-cwd=boot,CODEX_HOME=boot	x-boot-agents-dir,x-boot-root-dir,x-home-agents-dir
+R	codex	X3-cwd=boot,CODEX_HOME=boot,-C-proj	x-boot-root-dir,x-home-agents-dir,x-proj-agents-dir,x-proj-codex-dir
+R	codex	X4-cwd=proj,CODEX_HOME=boot	x-boot-root-dir,x-home-agents-dir,x-proj-agents-dir,x-proj-codex-dir
+R	codex	CFG1-cwd=proj,HOME=cx/home,CODEX_HOME=default	TOKEN-AGENTS-PROJ,TOKEN-HOME-DOTCODEX
+R	codex	CFG2-cwd=boot,CODEX_HOME=boot	TOKEN-AGENTS-BOOT,TOKEN-CODEX-HOME-BOOT
+R	codex	CFG3-cwd=proj,CODEX_HOME=boot	TOKEN-AGENTS-BOOT,TOKEN-AGENTS-PROJ,TOKEN-CODEX-HOME-BOOT
+R	codex	CFG4-HOME=boot2(wrapper-assumption)	TOKEN-WRAPPER-HOME-REDIRECT
+R	opencode	O1-cwd=proj	o-home-agents-dir,o-home-claude-dir,o-home-oc-dir,o-proj-agents-dir,o-proj-claude-dir,o-proj-opencode-dir
+R	opencode	O2-cwd=proj,OPENCODE_CONFIG_DIR=cfg	o-cfg-skill-singular-dir,o-cfg-skills-dir,o-home-agents-dir,o-home-claude-dir,o-home-oc-dir,o-proj-agents-dir,o-proj-claude-dir,o-proj-opencode-dir
+R	opencode	O3-cwd=boot	o-boot-agents-dir,o-boot-claude-dir,o-boot-opencode-dir,o-home-agents-dir,o-home-claude-dir,o-home-oc-dir
+R	opencode	O4-cwd=proj,DISABLE_EXTERNAL_SKILLS	o-home-oc-dir,o-proj-opencode-dir
+R	opencode	CFG1-cwd=proj	{"autoupdate":false,"username":"U-PROJ","share":"disabled"}
+R	opencode	CFG2-cwd=proj,OPENCODE_CONFIG_DIR	{"autoupdate":false,"username":"U-PROJ","share":"disabled","logLevel":"WARN"}

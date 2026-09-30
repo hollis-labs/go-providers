@@ -3,6 +3,8 @@ package provider
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 // BootDirSpec for the opencode CLI.
@@ -44,10 +46,13 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 	if agentName == "" {
 		agentName = "default"
 	}
+	// The legacy spec is mode-independent and keeps --dir for serve-http too,
+	// so it reads the run-mode rows.
+	const pid, mode = ProviderOpencode, ModeOpencodeRun
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: "agents/" + agentName + ".md",
+				RelPath: layoutRel(pid, mode, layout.Instructions, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					name := ctx.AgentName
 					if name == "" {
@@ -57,7 +62,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: "agents.json",
+				RelPath: layoutRel(pid, mode, layout.Agents, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					name := ctx.AgentName
 					if name == "" {
@@ -67,7 +72,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: "opencode.json",
+				RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					name := ctx.AgentName
 					if name == "" {
@@ -77,22 +82,22 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: "boot.md",
+				RelPath: layoutRel(pid, mode, layout.Boot, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: ".mcp.json",
+				RelPath: layoutRel(pid, mode, layout.MCP, agentName),
 				Mode:    0o600,
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
-		EnvAmendments: []string{"OPENCODE_CONFIG_DIR={{.BootDir}}"},
-		CwdPreference: CwdProjectDir,
-		ProjectDirArg: "--dir {{.ProjectDir}}",
+		EnvAmendments: layoutLegacyEnv(pid, mode),
+		CwdPreference: layoutLegacyCwd(pid, mode),
+		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
 		Notes:         "verify opencode MCP config convention; agents.json agent name must match OpencodeAdapter.Agent",
 	}
 }

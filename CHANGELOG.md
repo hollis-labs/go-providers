@@ -1,5 +1,87 @@
 # Changelog
 
+## v0.27.0 — 2026-09-29
+
+### Added
+
+- Package `layout` (stdlib only, imports nothing): one compile-checked table of
+  where Claude Code, Codex and OpenCode read files, skills and config, relative
+  to which root, with the flag, environment variables and working directory that
+  locate them. `Table`, `For`, `Find`, `SkillRoot`, `Providers`. Every row cites
+  Step 0 probe ids (`Entry.Probe`) or says why it has none (`Entry.Unprobed`).
+- `layout/gen` (`go generate ./...`; `go run ./layout/gen -check` fails when
+  stale): renders `docs/LAYOUT.md` and `layout/layout.json` for non-Go readers.
+- `layout/layouttest`: `AssertSkillPlacement`, `AssertProjectDirFlag`,
+  `AssertEnv`, for other modules to pin their own tables in their own tests.
+- Step 0 harness discovery: `hack/probe-harness-layout.sh`, the raw golden
+  `provider/testdata/harness-discovery/2026-09-29-claude-2.1.285-codex-0.154.0-opencode-1.18.30.tsv`,
+  `docs/HARNESS-DISCOVERY.md`, and an opt-in `go test -tags harnessprobe ./layout`
+  that re-runs the probe against the installed harnesses and diffs with the
+  newest golden.
+- `docs/CONSUMERS.md`: the nine path tables and five skill authors, with the
+  `layouttest` call that would pin each.
+- `SkillPackage.Hash` (optional pin) and `SkillPackage.TreeHash()`:
+  `sha256:<hex>` over the sorted whole skill tree, each file framed as
+  path NUL length NUL content NUL, `.DS_Store` skipped. This is go-agentdef's
+  definition (`skills.go hashTree`), so a hash from either module verifies in
+  the other. Projection fails when `Hash` is set and the files do not match.
+
+### Changed
+
+Behaviour changes to projected paths, flags and environment. Without
+`ProjectionOptions.Skills`, the projected files, `LaunchConvention`, resolved
+binding and legacy `BootDirSpec` of the three built-in adapters are byte-identical
+to v0.26.0 (pinned by `TestLayoutRegression_NonSkillProjectionUnchanged`, recorded
+before the change). Only skill placement and one argv addition changed:
+
+| Adapter / mode | Path, flag or env | Was | Now | Probe |
+|---|---|---|---|---|
+| Codex exec, app-server | skill tree prefix (under the boot root = `CODEX_HOME`) | `.agents/skills/<name>/` | `skills/<name>/` | X2, X3, X4 |
+| OpenCode run, serve-http | skill tree prefix (under the boot root = `OPENCODE_CONFIG_DIR`) | `.opencode/skills/<name>/` | `skills/<name>/` | O2, O3 |
+| Claude bare, when skills are projected | argv | no boot-root flag | `--add-dir <boot>` appended after the project `--add-dir` | C4, C5 (+ supplementary measurement in docs/HARNESS-DISCOVERY.md) |
+| Claude print, pty, streaming-stdio | skill tree prefix | `.claude/skills/<name>/` | unchanged | C1, C2 |
+
+Everything else changed here is provenance, not value:
+
+- `ProviderProjection`, `LaunchConvention` and the built-in adapters' `BootDirSpec`
+  read paths, flags, env and cwd from `layout`. The `BootDirSpec` type is kept.
+  Legacy `PlantedFile.Mode` values are unchanged (the claude legacy `.mcp.json`
+  keeps mode 0; the projection's is 0600, as before).
+- `ProviderCapabilityMatrix` `TestedVersion`: claude 2.1.263 to 2.1.285, codex
+  0.153.4 to 0.154.0, opencode 1.15.6 to 1.18.30 (the versions the probe measured).
+- go directive is `go 1.26.6` (landed as 8481a89, before this work).
+
+Skills are emitted only in the directory form `<name>/SKILL.md`; none of the
+three harnesses reads flat `<name>.md` (probes C1, X1, O1). The table records
+Form "dir" only.
+
+### Known limitations
+
+- Not measured (rows say so via `Unprobed`): `CLAUDE.md` / `AGENTS.md` /
+  `agents/<name>.md` model-visible effect, OpenCode `--dir`, Codex project trust,
+  Claude interactive mode, OpenCode `skills.paths`, Codex `--add-dir`. Stage B
+  (one model call) was not run; the Codex skill root is unambiguous from X2-X4.
+- The provider's PTY/subprocess argv builders (`BuildArgs`, `BareInjectionPaths`)
+  are unchanged and still author argv by hand.
+
+### What consumers can delete after adopting `layout` (not done here)
+
+- agentkit: both flat `skillRelPath` copies (`agentlaunch/providerplant/plant.go:386`,
+  `agentlaunch/materialize.go:407`); accept a `provider.SkillPackage` in
+  `NativeFile{Kind: skill}`; `appendMissingProjectArg` (`providerplant/plant.go:178`)
+  once the convention carries the project flag.
+- go-agent-wrapper: `plant.providerSettingsPath` / `hookPath` (`plant/plant.go:203-227`),
+  or route them through `layout`.
+- Nanite: the dual `skills/` plus `.opencode/skills/` planting and the "codex has no
+  native skill mechanism" branch in `skill_plant.go:325-362` (becomes a thin overlay).
+- Tether: bump from go-providers v0.25.0; replace `internal/skills` compile
+  (`skills.go:164-249`) with `provider.SkillPackage`; codex skills stop being
+  `AGENTS.md` sections, which also removes the latent `AGENTS.md` clobber.
+- Cairn and agent-launcher: read `layout/layout.json` for skill destinations and
+  the project-dir flag (codex `--cd` versus `--add-dir`).
+- Adoption changes what Torque and Tether launches deliver: flat skills, which no
+  harness ever read, become directory skills, which all three do.
+
 ## v0.26.0 — 2026-09-06
 
 ### Added

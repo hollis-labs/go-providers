@@ -264,9 +264,11 @@ The current M06 capability matrix is available from `ProviderCapabilityMatrix()`
 
 | Provider / mode | Fixture version | Projected here | Explicit later |
 |---|---:|---|---|
-| Claude bare/print/PTY/streaming | 2.1.263 | `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, `.claude/skills/<name>/...`, structured argv roots | credential helper execution, workspace trust, hooks, commands, subagents |
-| Codex exec/app-server | 0.153.4 | `AGENTS.md`, `config.toml`, `.mcp.json` mirror, `.agents/skills/<name>/...`, structured `CODEX_HOME`/argv roots | `auth.json` credential materialization, hooks, custom subagents |
-| OpenCode run/serve-http | 1.15.6 | `agents/<name>.md`, `agents.json`, `opencode.json`, `.mcp.json` mirror, `.opencode/skills/<name>/...`, structured `OPENCODE_CONFIG_DIR`/argv roots | provider auth, commands, subagents |
+| Claude bare/print/PTY/streaming | 2.1.285 | `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, `.claude/skills/<name>/...` (bare adds `--add-dir <boot>` when skills are projected), structured argv roots | credential helper execution, workspace trust, hooks, commands, subagents |
+| Codex exec/app-server | 0.154.0 | `AGENTS.md`, `config.toml`, `.mcp.json` mirror, `skills/<name>/...` (under `CODEX_HOME`), structured `CODEX_HOME`/argv roots | `auth.json` credential materialization, hooks, custom subagents |
+| OpenCode run/serve-http | 1.18.30 | `agents/<name>.md`, `agents.json`, `opencode.json`, `.mcp.json` mirror, `skills/<name>/...` (under `OPENCODE_CONFIG_DIR`), structured `OPENCODE_CONFIG_DIR`/argv roots | provider auth, commands, subagents |
+
+The versions above are the ones `hack/probe-harness-layout.sh` measured on 2026-09-29; see [docs/HARNESS-DISCOVERY.md](docs/HARNESS-DISCOVERY.md). Every path, flag and environment variable in these projections comes from one table, package `layout` ([docs/LAYOUT.md](docs/LAYOUT.md), [layout/layout.json](layout/layout.json) for non-Go readers). Skills are always emitted in the directory form `<name>/SKILL.md`; no harness reads flat `<name>.md`. `SkillPackage.Hash` optionally pins a package's content (`sha256:<hex>`, the same tree hash go-agentdef uses; compute it with `SkillPackage.TreeHash`). Other modules can pin their own path tables with `layout/layouttest` ([docs/CONSUMERS.md](docs/CONSUMERS.md)).
 
 `ProviderProjection` keeps `ProjectRoot`, `BootRoot`, `ConfigRoot`, `StateRoot`, `ScratchRoot`, and process cwd distinct. `LaunchConvention.Argv` is a list of typed arguments, and `EnvDelta` carries set/prepend/append/unset plus precedence, so paths with spaces or non-ASCII characters are never split through a shell string.
 
@@ -364,7 +366,7 @@ The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` fields (`CodexAdap
 
 ## Architecture Notes
 
-The package is intentionally flat: one Go package (`provider`) under `provider/`, one file per adapter. The shared `Provider` interface in `provider.go` is small (three methods). Cross-cutting features — circuit breaking, rate pacing, cost/scope/loop monitoring — are expressed either as adapter-implemented behavior or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
+The `provider` package is intentionally flat: one file per adapter. `layout` (with `layout/gen` and `layout/layouttest`) is a separate stdlib-only package holding the table those adapters derive their paths from; `layout` imports nothing, and `provider` imports `layout`. The shared `Provider` interface in `provider.go` is small (three methods). Cross-cutting features — circuit breaking, rate pacing, cost/scope/loop monitoring — are expressed either as adapter-implemented behavior or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
 
 CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defines how to build arguments and parse one line of output, and a transport wrapper (`PTYBridge` for pty-based or `SubprocessBridge` for pipes) runs the child process and feeds lines through the adapter. Context-value helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`, `WithActivityCallback`, `WithWaitDelay`) let callers pass session-resume IDs, working directories, and process-tracking hooks through to the bridge without widening the `Provider` interface. `pty.go` has a `//go:build !windows` build tag; the subprocess bridge is the portable fallback.
 
@@ -381,6 +383,20 @@ CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defin
 ### External (indirect)
 
 - None.
+
+## Compatibility
+
+- Go 1.26.6 or newer (`go` directive).
+- Behaviour change for callers that pass `ProjectionOptions.Skills`: skill trees now land where each harness reads them under this package's own launch convention, which the Step 0 probe measured. Codex skills move from `.agents/skills/<name>/` to `skills/<name>/` (under `CODEX_HOME`); OpenCode skills move from `.opencode/skills/<name>/` to `skills/<name>/` (under `OPENCODE_CONFIG_DIR`); Claude `--bare` launches gain `--add-dir <boot>` when skills are projected. Claude skills stay at `.claude/skills/<name>/`. Without `Skills`, the projected files, launch conventions and legacy `BootDirSpec` are unchanged. See `CHANGELOG.md`.
+- The tested harness versions are listed under "Pure provider projections". Harness behaviour moves between releases; `go test -tags harnessprobe ./layout` re-checks it against the installed binaries.
+
+## Out of scope
+
+- Launching agent CLIs or writing files: projections are pure values; `agentkit` owns materialization.
+- Credentials, workspace trust and provider auth (explicit `PrepareRuntime` effects only).
+- Direct HTTP chat or embedding adapters, shared LLM contracts and rate budgets (`go-llm-types`, `go-llm-contracts`).
+- Runtime-token vocabulary (`serve-http` vs `http-sse`), provider-by-runtime support matrices, and any provider-neutral launch type or planter.
+- Cross-repo drift checks: `layout/layouttest` provides assertions; adopting them is each consumer's decision.
 
 ## Testing
 
