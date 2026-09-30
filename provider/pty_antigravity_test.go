@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -221,7 +220,6 @@ func TestAntigravityClassifiers(t *testing.T) {
 	var _ SessionResumeVerifier = a
 	var _ SessionLostClassifier = a
 	var _ AuthFailureClassifier = a
-	var _ Preflighter = a
 	var _ EventParser = a
 
 	stderr, err := os.ReadFile(filepath.Join("testdata", "antigravity", "print_resume_unknown_id.stderr"))
@@ -236,18 +234,35 @@ func TestAntigravityClassifiers(t *testing.T) {
 	}
 }
 
-func TestAntigravityPreflight(t *testing.T) {
-	dir := t.TempDir()
-	creds := filepath.Join(dir, "oauth_creds.json")
-	a := &AntigravityAdapter{CredentialsPath: creds}
-	if err := a.Preflight(); !errors.Is(err, ErrProviderNotAuthenticated) {
-		t.Fatalf("missing creds: %v", err)
+func TestAntigravityHasNoPreflight(t *testing.T) {
+	// agy reads the Keychain, not ~/.gemini/oauth_creds.json; a stat of that
+	// file is wrong both ways, so the adapter must not implement Preflighter.
+	var a any = NewAntigravityAdapter()
+	if _, ok := a.(Preflighter); ok {
+		t.Fatal("AntigravityAdapter must not implement Preflighter")
 	}
-	if err := os.WriteFile(creds, []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
+}
+
+func TestAntigravityIsNotAuthenticatedMarkers(t *testing.T) {
+	a := NewAntigravityAdapter()
+	for name, tail := range map[string]string{
+		"sign-in prompt":     "Authentication required. Please visit the URL https://accounts.example/o/oauth2 to sign in\n",
+		"no stored creds":    "error: not authenticated: no stored credentials found\n",
+		"wait then timeout":  "Waiting for authentication (timeout 60s)...\nerror: authentication failed or timed out\n",
+		"marker after noise": "ChainedAuth: trying silent auth\nAuthentication required. Please visit the URL x\n",
+	} {
+		if !a.IsNotAuthenticated([]byte(tail)) {
+			t.Errorf("%s: want not-authenticated", name)
+		}
 	}
-	if err := a.Preflight(); err != nil {
-		t.Fatalf("present creds: %v", err)
+	for name, tail := range map[string]string{
+		"healthy run":   "ChainedAuth: trying silent auth\nChainedAuth: authenticated via keyring\n",
+		"empty":         "",
+		"unknown convo": "warning: conversation \"x\" not found\n",
+	} {
+		if a.IsNotAuthenticated([]byte(tail)) {
+			t.Errorf("%s: must not be classified as not-authenticated", name)
+		}
 	}
 }
 

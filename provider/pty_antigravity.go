@@ -2,9 +2,7 @@ package provider
 
 import (
 	"bytes"
-	"fmt"
 	"os"
-	"path/filepath"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
@@ -48,12 +46,14 @@ import (
 //     events.PermissionDenied. Permission "bypass" approves everything.
 //   - --sandbox is advisory: a command it blocked succeeded when the model
 //     retried it. Do not rely on it as a boundary.
-//   - Authentication comes from OAuth credentials under ~/.gemini, shared
-//     with the Antigravity desktop app. Without them print mode tries a
-//     silent sign-in, then prints a URL, opens a browser and reads an
-//     authorization code from stdin. Preflight refuses to start without the
-//     credentials file, and a turn's stdin is at EOF (go-runner never sets
-//     one), so the code prompt ends at once instead of blocking. Residual
+//   - Authentication comes from the macOS Keychain (go-keyring), not from
+//     ~/.gemini/oauth_creds.json, which belongs to the retired Gemini CLI.
+//     Without a usable login print mode tries a silent sign-in, then prints a
+//     URL, opens a browser and reads an authorization code from stdin. There
+//     is no Preflight (no reliable check exists that cannot raise a Keychain
+//     prompt); a turn's stdin is at EOF (go-runner never sets one), so the
+//     code prompt ends at once instead of blocking, and IsNotAuthenticated
+//     classifies the failure afterwards. Residual
 //     risk: credentials that exist but are expired or revoked may still
 //     reach the browser step.
 //   - agy has no config-dir variable; its global config (~/.gemini/config)
@@ -80,10 +80,6 @@ type AntigravityAdapter struct {
 
 	// AddDirs are extra --add-dir directories, before the prompt.
 	AddDirs []string
-
-	// CredentialsPath overrides the file Preflight checks. Empty means
-	// ~/.gemini/oauth_creds.json.
-	CredentialsPath string
 }
 
 func NewAntigravityAdapter() *AntigravityAdapter { return &AntigravityAdapter{} }
@@ -133,24 +129,12 @@ func (a *AntigravityAdapter) Detect() (string, bool) {
 	return p, true
 }
 
-// Preflight implements Preflighter: it refuses to start when agy's OAuth
-// credentials file is missing, because agy would otherwise fall into its
-// interactive sign-in and open a browser. It only stats the file; the
-// credentials are never read.
-func (a *AntigravityAdapter) Preflight() error {
-	path := a.CredentialsPath
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("%w: cannot locate home directory: %w", ErrProviderNotAuthenticated, err)
-		}
-		path = filepath.Join(home, ".gemini", "oauth_creds.json")
-	}
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("%w: agy not authenticated (no %s); run `agy` interactively once", ErrProviderNotAuthenticated, path)
-	}
-	return nil
-}
+// agy authenticates from the macOS Keychain, not from
+// ~/.gemini/oauth_creds.json (that file belongs to the retired Gemini CLI), and
+// the Keychain service name is not known statically, so there is no check that
+// is both reliable and guaranteed not to raise a Keychain prompt. The adapter
+// therefore has no Preflight: a login failure is reported after the fact
+// through IsNotAuthenticated.
 
 // ResumeKeepsSessionID implements SessionResumeVerifier: agy resumes a known
 // conversation under the same id and replaces an unknown one silently.
@@ -162,9 +146,25 @@ func (a *AntigravityAdapter) IsSessionLost(stderrTail []byte) bool {
 	return bytes.Contains(stderrTail, []byte(`conversation "`)) && bytes.Contains(stderrTail, []byte(`" not found`))
 }
 
-// IsNotAuthenticated implements AuthFailureClassifier. Without a usable
-// login print mode ends with "authentication failed or timed out".
+// IsNotAuthenticated implements AuthFailureClassifier. It matches the lines
+// agy prints when it has no usable login: the interactive sign-in prompt
+// ("Authentication required. Please visit the URL"), the missing-credentials
+// error ("not authenticated: no stored credentials found"), and the outcomes of
+// the sign-in wait ("Waiting for authentication", "authentication failed or
+// timed out"). It deliberately does not match "trying silent auth", which agy
+// logs on every healthy run before it finds its Keychain credentials.
 func (a *AntigravityAdapter) IsNotAuthenticated(stderrTail []byte) bool {
-	return bytes.Contains(stderrTail, []byte("authentication failed or timed out")) ||
-		bytes.Contains(stderrTail, []byte("Waiting for authentication"))
+	for _, marker := range antigravityAuthMarkers {
+		if bytes.Contains(stderrTail, []byte(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+var antigravityAuthMarkers = []string{
+	"Authentication required. Please visit the URL",
+	"not authenticated: no stored credentials found",
+	"authentication failed or timed out",
+	"Waiting for authentication",
 }

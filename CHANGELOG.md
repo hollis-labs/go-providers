@@ -9,6 +9,26 @@
   Codex, OpenCode and Antigravity. `docs/CONSUMERS.md` records that agentkit's
   legacy skill paths are fixed (opencode in agentkit v0.7.0, claude in v0.9.0).
 
+### Fixed
+
+- `AntigravityAdapter.IsNotAuthenticated` now matches agy's real login-failure
+  output: "Authentication required. Please visit the URL" and
+  "not authenticated: no stored credentials found" (plus the existing "Waiting
+  for authentication" and "authentication failed or timed out"). It does not
+  match "trying silent auth", which agy logs on every healthy run.
+
+### Removed
+
+- **Breaking:** `AntigravityAdapter.Preflight` and the `CredentialsPath` field.
+  agy authenticates from the macOS Keychain, not from
+  `~/.gemini/oauth_creds.json` (a file that belongs to the retired Gemini
+  CLI), so the stat was wrong both ways: it passed whenever gemini-cli was
+  logged in and refused healthy agy launches once that file was gone. The
+  Keychain service name is not known statically and a probe cannot be shown to
+  avoid a Keychain prompt, so the adapter no longer implements `Preflighter`;
+  a login failure is reported after the fact through `IsNotAuthenticated` and
+  `ErrProviderNotAuthenticated`. Callers that set `CredentialsPath` must drop it.
+
 ## v0.29.0 — 2026-09-30
 
 ### Added
