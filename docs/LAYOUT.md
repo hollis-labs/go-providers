@@ -35,7 +35,6 @@ Where each agent CLI reads its files, skills and config, relative to which launc
 | mode | concern | root | rel | form | file mode | flag | env | cwd | aliases | probe | note |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | all | instructions | boot | `agents/{agent}.md` |  |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project |  | none | Unprobed: agent prompt file is model-visible only; Step 0 does not measure it. |
-| all | agents | boot | `agents.json` |  |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project |  | none | Unprobed: agent registry sidecar; Step 0 does not measure it. |
 | all | native-config | boot | `opencode.json` |  |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project |  | CFG2 | $OPENCODE_CONFIG_DIR/opencode.json is merged with project and user config |
 | all | boot | boot | `boot.md` |  |  |  |  |  |  | none | Unprobed: kick-off content read by the launcher, not discovered by the harness. |
 | all | mcp | boot | `.mcp.json` |  | 0600 |  |  |  |  | none | Unprobed: mirror for operators; OpenCode reads MCP servers from opencode.json. |

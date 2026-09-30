@@ -200,17 +200,6 @@
     },
     {
       "provider": "opencode",
-      "concern": "agents",
-      "root": "boot",
-      "rel": "agents.json",
-      "env": {
-        "OPENCODE_CONFIG_DIR": "boot"
-      },
-      "cwd": "project",
-      "unprobed": "agent registry sidecar; Step 0 does not measure it"
-    },
-    {
-      "provider": "opencode",
       "concern": "native-config",
       "root": "boot",
       "rel": "opencode.json",

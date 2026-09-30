@@ -13,17 +13,24 @@ import (
 //
 //	<bootDir>/
 //	├── agents/
-//	│   └── <agentName>.md    # system context referenced by agents.json + opencode.json
-//	├── agents.json            # {"agents":[{"name","instructions_file"}]}
-//	├── opencode.json          # {"agent":{...},"mcp":{"loopback":{"type":"remote","url":...,"enabled":true}}}
+//	│   └── <agentName>.md    # markdown agent: frontmatter (description, mode: primary) + system context
+//	├── opencode.json          # {"mcp":{"loopback":{"type":"remote","url":...,"enabled":true}}}
 //	├── boot.md                # task kickoff content
 //	└── .mcp.json              # claude-shape mirror (kept for cross-tool sanity, ignored by opencode)
 //
 // Spawn invariants: cwd = projectDir (opencode treats the *config*
 // dir as the boot dir, not cwd); project access is implicit via cwd
 // or via "--dir <projectDir>"; OPENCODE_CONFIG_DIR={{.BootDir}} env
-// var must be set so opencode loads agents.json + opencode.json from
+// var must be set so opencode loads agents/*.md + opencode.json from
 // the boot dir.
+//
+// The agent is defined once, by agents/<agentName>.md: opencode 1.18.30
+// registers every <config>/agents/*.md as an agent named after the file,
+// taking description and mode from its frontmatter and the body as the
+// prompt. Earlier specs also planted agents.json (which opencode does not
+// read) and an opencode.json "agent" entry pointing its prompt at the same
+// file with {file:...}, which would now pull the frontmatter into the
+// prompt text.
 //
 // MCP loopback: opencode's MCP server config lives INSIDE
 // opencode.json under the top-level "mcp" key (opencode 1.14.x
@@ -39,8 +46,8 @@ import (
 // access. The `.mcp.json` file is still planted as a cross-tool
 // sanity mirror but carries no weight for opencode itself.
 //
-// Notes: the agent name in agents.json must match the value passed
-// to OpencodeAdapter.Agent at construction time.
+// Notes: the planted agent file is named after OpencodeAdapter.Agent (or
+// PlantContext.AgentName), which is what `run --agent` selects.
 func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 	agentName := a.Agent
 	if agentName == "" {
@@ -62,23 +69,9 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Agents, agentName),
-				Render: func(ctx PlantContext) (string, error) {
-					name := ctx.AgentName
-					if name == "" {
-						name = agentName
-					}
-					return renderOpencodeAgentsJSON(name), nil
-				},
-			},
-			{
 				RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName),
 				Render: func(ctx PlantContext) (string, error) {
-					name := ctx.AgentName
-					if name == "" {
-						name = agentName
-					}
-					return renderOpencodeJSON(name, ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 			{
@@ -98,13 +91,18 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 		EnvAmendments: layoutLegacyEnv(pid, mode),
 		CwdPreference: layoutLegacyCwd(pid, mode),
 		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
-		Notes:         "verify opencode MCP config convention; agents.json agent name must match OpencodeAdapter.Agent",
+		Notes:         "agents/<name>.md is the agent definition; its name must match OpencodeAdapter.Agent",
 	}
 }
 
 func renderOpencodeAgentMD(agentName string, ctx PlantContext) string {
 	var b strings.Builder
-	b.WriteString("# ")
+	// mode: primary keeps the agent selectable by `run --agent` without
+	// also offering it to itself as a subagent (a file with no mode is
+	// registered as "all").
+	b.WriteString("---\ndescription: Launch agent ")
+	b.WriteString(agentName)
+	b.WriteString("\nmode: primary\n---\n\n# ")
 	b.WriteString(agentName)
 	b.WriteString("\n\n")
 	if ctx.SystemPrompt != "" {
@@ -119,25 +117,8 @@ func renderOpencodeAgentMD(agentName string, ctx PlantContext) string {
 	return b.String()
 }
 
-func renderOpencodeAgentsJSON(agentName string) string {
-	cfg := map[string]any{
-		"agents": []map[string]any{{
-			"name":              agentName,
-			"instructions_file": "./agents/" + agentName + ".md",
-		}},
-	}
-	out, _ := json.MarshalIndent(cfg, "", "  ")
-	return string(out) + "\n"
-}
-
-func renderOpencodeJSON(agentName, mcpLoopbackURL string, mux muxEntry) string {
-	cfg := map[string]any{
-		"agent": map[string]any{
-			agentName: map[string]any{
-				"prompt": "{file:./agents/" + agentName + ".md}",
-			},
-		},
-	}
+func renderOpencodeJSON(mcpLoopbackURL string, mux muxEntry) string {
+	cfg := map[string]any{}
 	// opencode's MCP config lives under the top-level "mcp" key in
 	// opencode.json (opencode 1.14.x). The transport keywords differ
 	// from claude's:

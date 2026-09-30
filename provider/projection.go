@@ -436,8 +436,7 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 	pid := ProviderOpencode
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, mode, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
-		{RelPath: layoutRel(pid, mode, layout.Agents, agentName), Content: []byte(renderOpencodeAgentsJSON(agentName)), Role: "native-config"},
-		{RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(agentName, ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
+		{RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
 		{RelPath: layoutRel(pid, mode, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
 		{RelPath: layoutRel(pid, mode, layout.MCP, agentName), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp-mirror"},
 	}
@@ -574,6 +573,8 @@ func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName s
 	} else {
 		args = []ArgTemplate{
 			{Kind: ArgLiteral, Value: "run"},
+			{Kind: ArgLiteral, Value: "--format"},
+			{Kind: ArgLiteral, Value: "json"},
 			{Kind: ArgLiteral, Value: "--agent"},
 			{Kind: ArgLiteral, Value: firstNonEmpty(agentName, "default")},
 		}
