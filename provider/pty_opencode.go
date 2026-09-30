@@ -2,7 +2,6 @@ package provider
 
 import (
 	"os"
-	"strings"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
@@ -21,20 +20,13 @@ import (
 //     in the consumer runtime (go-agent-sessions ServeHTTP kind), not in this
 //     adapter.
 //
-// Turn boundary: opencode emits plain text on stdout with no structured
-// completion event. ParseLine emits llmtypes.EventDelta per non-empty line
-// and never emits llmtypes.EventDone/llmtypes.EventError directly.
-//
-// For the default (run) mode, driven through go-agentkit's agentsessions
-// subprocess-per-turn adapter runtime (agentkit/agentsessions/from_adapter.go,
-// NewFromAdapter's default Caps{} shape), the consuming session — not this
-// adapter — synthesizes a terminal llmtypes.StreamEvent once the spawned
-// process itself exits: llmtypes.EventDone on a clean exit, EventError
-// otherwise. That synthesis lives in agentsessions' adapterSession.SendInput/
-// synthesizeTerminalEvent (agentkit >= v0.5.0), not in this package — a
-// consumer driving this adapter through some other harness that doesn't
-// perform that synthesis will see exactly what ParseLine emits above: deltas
-// only, no terminal event, ever.
+// Run mode drives `opencode run --format json`, which writes one JSON
+// object per line: step_start, text, tool_use, reasoning (only with
+// --thinking), step_finish and error. Every line carries the top-level
+// sessionID, and `--session <id>` resumes that conversation on a later
+// turn (verified against opencode 1.18.30). ParseLine maps the stream to
+// typed llmtypes events; see pty_opencode_events.go for the mapping and
+// the turn boundary.
 //
 // For "serve-http" mode, turn completion is signaled a different way
 // entirely — see NewOpencodeAdapterServeHTTP's doc comment and the consumer
@@ -46,8 +38,9 @@ type OpencodeAdapter struct {
 	// (long-lived HTTP server for go-agent-sessions ServeHTTP runtime).
 	Mode string
 
-	// Agent is the opencode agent profile name passed via --agent.
-	// Required: opencode run aborts without it.
+	// Agent is the opencode agent profile name passed via --agent. An
+	// empty or unknown name makes opencode 1.18.30 fall back to its
+	// default agent (unknown names with a warning on stderr).
 	Agent string
 
 	// Model optionally overrides the agent's default model via --model.
@@ -76,18 +69,19 @@ func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) [
 		// session/message endpoints owned by the runtime, not argv.
 		return []string{"serve", "--port", "0", "--hostname", "127.0.0.1"}
 	}
-	// Keep --agent in the argv even when Agent is empty so opencode itself
-	// reports the configuration error. This matches the adapter contract used
-	// by the upstreaming handoff for uniform spawn/runtime error handling.
-	args := []string{"run", "--agent", a.Agent}
+	// --agent stays in the argv even when Agent is empty, so the argv shape
+	// is uniform; opencode resolves an empty name to its default agent.
+	args := []string{"run", "--format", "json", "--agent", a.Agent}
 	if a.Model != "" {
 		args = append(args, "--model", a.Model)
 	}
 	if a.Dir != "" {
 		args = append(args, "--dir", a.Dir)
 	}
+	if cliSessionID != "" {
+		args = append(args, "--session", cliSessionID)
+	}
 	args = append(args, prependOpencodeSystemPrompt(prompt, systemPrompt))
-	_ = cliSessionID // opencode run has no resume/session attach flag.
 	return args
 }
 
@@ -98,14 +92,7 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 		// for server diagnostics and listen-URL discovery.
 		return nil, nil
 	}
-	if len(line) == 0 {
-		return nil, nil
-	}
-	text := string(line)
-	if strings.TrimSpace(text) == "" {
-		return nil, nil
-	}
-	return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text + "\n"}}, nil
+	return parseOpencodeStreamLine(line), nil
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {

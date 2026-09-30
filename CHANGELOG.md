@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `SessionLostClassifier` (optional `CLIAdapter` extension) and
+  `ErrProviderSessionLost`, for CLIs that report an unknown resume id only on
+  stderr. `OpencodeAdapter` implements it: `opencode run --session <id>` with
+  an id opencode no longer has prints `Session not found`, no JSON, and exits 1.
+- `OpencodeAdapter.ParseLineEvents` (`EventParser`), adding a `ToolResult` per
+  tool call and `Done.StopReason`.
+
+### Changed
+
+- OpenCode run mode is structured. `BuildArgs` emits `run --format json` and
+  `--session <id>` when resuming (opencode 1.18.30 resumes the conversation;
+  the old "no resume flag" note was wrong). `ParseLine` maps the JSON stream to
+  typed events instead of one plain-text delta per line: `step_start` → session
+  id, `text` → delta (one whole text block per line), `reasoning` → thinking,
+  `tool_use` → tool use, `step_finish` → usage for that step, plus done when its
+  reason is not `tool-calls`, `error` → error. Usage is per step: a turn with
+  tool calls reports several and consumers sum them. Non-JSON and unknown lines
+  yield nothing. **Consumers that treated opencode output as plain text now
+  receive only the reply text in deltas, and a done event per turn.**
+- OpenCode boot dir: `agents/<name>.md` now carries frontmatter
+  (`description`, `mode: primary`) and is the whole agent definition.
+  `agents.json` is no longer planted or projected (opencode does not read it),
+  and `opencode.json` no longer defines the agent (its `{file:}` prompt would
+  now include the frontmatter). The projection's run argv gains
+  `--format json`. `layout` drops the OpenCode `agents` row.
+
 ## v0.27.0 — 2026-09-29
 
 ### Added

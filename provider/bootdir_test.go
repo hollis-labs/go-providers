@@ -997,7 +997,6 @@ func TestOpencodeBootDirSpec(t *testing.T) {
 
 	wantPaths := []string{
 		"agents/executor.md",
-		"agents.json",
 		"opencode.json",
 		"boot.md",
 		".mcp.json",
@@ -1015,17 +1014,22 @@ func TestOpencodeBootDirSpec(t *testing.T) {
 		SystemPrompt: "you orchestrate",
 		AgentName:    "executor",
 	}
-	agentsJSON, _ := spec.PlantedFiles[1].Render(pctx)
-	if !strings.Contains(agentsJSON, `"name": "executor"`) {
-		t.Errorf("agents.json should contain name=executor, got %s", agentsJSON)
+	// The markdown file is the whole agent definition: opencode takes
+	// description and mode from its frontmatter and the body as prompt.
+	agentMD, _ := spec.PlantedFiles[0].Render(pctx)
+	if !strings.HasPrefix(agentMD, "---\ndescription: Launch agent executor\nmode: primary\n---\n") {
+		t.Errorf("agents/executor.md should open with agent frontmatter, got %s", agentMD)
 	}
-	if !strings.Contains(agentsJSON, "./agents/executor.md") {
-		t.Errorf("agents.json should reference agents/executor.md, got %s", agentsJSON)
+	if !strings.Contains(agentMD, "you orchestrate") {
+		t.Errorf("agents/executor.md should carry the system prompt, got %s", agentMD)
 	}
 
-	opencodeJSON, _ := spec.PlantedFiles[2].Render(pctx)
-	if !strings.Contains(opencodeJSON, "{file:./agents/executor.md}") {
-		t.Errorf("opencode.json should reference agent file, got %s", opencodeJSON)
+	// opencode.json must not define the agent again: a {file:} prompt
+	// pointing at the markdown file would pull its frontmatter into the
+	// prompt text.
+	opencodeJSON, _ := spec.PlantedFiles[1].Render(pctx)
+	if strings.Contains(opencodeJSON, `"agent"`) {
+		t.Errorf("opencode.json should not define the agent, got %s", opencodeJSON)
 	}
 	// With no MCP loopback URL, opencode.json should NOT carry an `mcp`
 	// block. opencode merges per-dir config with global, so an empty
@@ -1050,7 +1054,7 @@ func TestOpencodeBootDirSpec_MCPBlock(t *testing.T) {
 		AgentName:      "executor",
 		MCPLoopbackURL: "http://127.0.0.1:65500/mcp",
 	}
-	opencodeJSON, err := spec.PlantedFiles[2].Render(pctx)
+	opencodeJSON, err := spec.PlantedFiles[1].Render(pctx)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -1216,7 +1220,7 @@ func TestOpencodeBootDirSpec_MuxEntry(t *testing.T) {
 			"--scopes", "session.write,message.write",
 		},
 	}
-	opencodeJSON, err := spec.PlantedFiles[2].Render(pctx)
+	opencodeJSON, err := spec.PlantedFiles[1].Render(pctx)
 	if err != nil {
 		t.Fatalf("opencode.json render: %v", err)
 	}

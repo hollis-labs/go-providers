@@ -27,35 +27,42 @@ func TestOpencodeAdapter_BuildArgs(t *testing.T) {
 	t.Run("agent plus prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--agent", "code-review", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("agent plus model", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review", Model: "gpt-5"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--agent", "code-review", "--model", "gpt-5", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("agent plus dir", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review", Dir: "/tmp/work"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--agent", "code-review", "--dir", "/tmp/work", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--dir", "/tmp/work", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("system prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review"}
 		args := a.BuildArgs("fix the bug", "Follow repo conventions", "")
-		expected := []string{"run", "--agent", "code-review", "System: Follow repo conventions\n\nfix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "System: Follow repo conventions\n\nfix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
-	t.Run("empty agent preserves cli validation", func(t *testing.T) {
+	t.Run("empty agent keeps the flag", func(t *testing.T) {
 		a := NewOpencodeAdapter()
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--agent", "", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "", "fix the bug"}
+		assertArgsEqual(t, args, expected)
+	})
+
+	t.Run("resume passes --session before the prompt", func(t *testing.T) {
+		a := &OpencodeAdapter{Agent: "code-review", Model: "gpt-5"}
+		args := a.BuildArgs("fix the bug", "", "ses_123")
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "--session", "ses_123", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
@@ -90,19 +97,33 @@ func TestOpencodeAdapter_ParseLine(t *testing.T) {
 		}
 	})
 
-	t.Run("content line emits delta", func(t *testing.T) {
-		events, err := a.ParseLine([]byte("Applied the patch"))
+	t.Run("non-JSON line is tolerated", func(t *testing.T) {
+		events, err := a.ParseLine([]byte("! agent \"nosuch\" not found. Falling back to default agent"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(events) != 1 {
-			t.Fatalf("expected 1 event, got %d", len(events))
+		if len(events) != 0 {
+			t.Errorf("expected 0 events, got %+v", events)
 		}
-		if events[0].Type != llmtypes.EventDelta {
-			t.Errorf("expected delta, got %s", events[0].Type)
+	})
+
+	t.Run("unknown type is tolerated", func(t *testing.T) {
+		events, err := a.ParseLine([]byte(`{"type":"something_new","sessionID":"ses_x","part":{}}`))
+		if err != nil {
+			t.Fatal(err)
 		}
-		if events[0].Content != "Applied the patch\n" {
-			t.Errorf("expected content %q, got %q", "Applied the patch\n", events[0].Content)
+		if len(events) != 0 {
+			t.Errorf("expected 0 events, got %+v", events)
+		}
+	})
+
+	t.Run("error line", func(t *testing.T) {
+		events, err := a.ParseLine([]byte(`{"type":"error","sessionID":"ses_x","error":{"name":"APIError","data":{"message":"rate limited"}}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 1 || events[0].Type != llmtypes.EventError || events[0].Error != "rate limited" {
+			t.Errorf("events = %+v", events)
 		}
 	})
 

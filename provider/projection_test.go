@@ -117,7 +117,6 @@ func TestProviderProjection_GoldenLayoutsWithSkillTrees(t *testing.T) {
 			},
 			wantFiles: []string{
 				".mcp.json",
-				"agents.json",
 				"agents/fixture-agent.md",
 				"boot.md",
 				"opencode.json",
@@ -125,7 +124,7 @@ func TestProviderProjection_GoldenLayoutsWithSkillTrees(t *testing.T) {
 				"skills/fixture-skill/references/info.md",
 				"skills/fixture-skill/scripts/run.sh",
 			},
-			wants: []string{`"type": "remote"`, `"type": "local"`, `"{file:./agents/fixture-agent.md}"`},
+			wants: []string{`"type": "remote"`, `"type": "local"`, "description: Launch agent fixture-agent\nmode: primary\n"},
 		},
 	}
 	for _, c := range cases {
