@@ -16,7 +16,7 @@ and a test fails when an id is missing.
 | Claude Code | 2.1.285 |
 | Codex | codex-cli 0.154.0 |
 | OpenCode | 1.18.30 |
-| Re-run | `bash hack/probe-harness-layout.sh "$(mktemp -d)/p"`; or `go test -tags harnessprobe ./provider -run TestHarnessProbe` |
+| Re-run | `bash hack/probe-harness-layout.sh "$(mktemp -d)/p"`; or `go test -tags harnessprobe ./layout -run TestHarnessProbe` |
 
 Observation channels: Claude = first stream-json line (`system/init`:
 `skills`, `permissionMode`, `mcp_servers`), with the API base pointed at a
