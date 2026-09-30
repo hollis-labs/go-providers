@@ -18,9 +18,10 @@ import (
 type ProviderID string
 
 const (
-	ProviderClaude   ProviderID = "claude"
-	ProviderCodex    ProviderID = "codex"
-	ProviderOpencode ProviderID = "opencode"
+	ProviderClaude      ProviderID = "claude"
+	ProviderCodex       ProviderID = "codex"
+	ProviderOpencode    ProviderID = "opencode"
+	ProviderAntigravity ProviderID = "antigravity"
 )
 
 // ProviderMode names the provider runtime shape whose filesystem and launch
@@ -36,6 +37,7 @@ const (
 	ModeCodexAppServer       ProviderMode = "codex-app-server"
 	ModeOpencodeRun          ProviderMode = "opencode-run"
 	ModeOpencodeServeHTTP    ProviderMode = "opencode-serve-http"
+	ModeAntigravityPrint     ProviderMode = "antigravity-print"
 )
 
 // ProviderFeature is a named provider capability that callers may require
@@ -111,6 +113,17 @@ func ProviderCapabilityMatrix() []ProviderCapabilityRow {
 		FeatureCredential:   SupportExplicit,
 		FeatureTrust:        SupportUnsupported,
 	})
+	antigravityFeatures := featureMap(map[ProviderFeature]CapabilitySupport{
+		FeatureInstructions: SupportProjected,
+		FeatureNativeConfig: SupportProjected,
+		FeatureMCP:          SupportProjected,
+		FeatureSkillTrees:   SupportProjected,
+		FeatureHooks:        SupportExplicit,
+		FeatureCommands:     SupportExplicit,
+		FeatureSubagents:    SupportExplicit,
+		FeatureCredential:   SupportExplicit,
+		FeatureTrust:        SupportUnsupported,
+	})
 	return []ProviderCapabilityRow{
 		claudeCapabilityRow(ModeClaudePrint, claudeFeatures),
 		claudeCapabilityRow(ModeClaudeBare, claudeFeatures),
@@ -143,6 +156,13 @@ func ProviderCapabilityMatrix() []ProviderCapabilityRow {
 			TestedVersion: "1.18.30",
 			Features:      opencodeFeatures,
 			Notes:         "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
+		},
+		{
+			Provider:      ProviderAntigravity,
+			Mode:          ModeAntigravityPrint,
+			TestedVersion: "1.2.7",
+			Features:      antigravityFeatures,
+			Notes:         "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
 		},
 	}
 }
@@ -304,6 +324,7 @@ const (
 	EffectClaudeWorkspaceTrust   ProviderEffectKind = "claude-workspace-trust"
 	EffectCodexAuthJSON          ProviderEffectKind = "codex-auth-json"
 	EffectOpencodeProviderAuth   ProviderEffectKind = "opencode-provider-auth"
+	EffectAntigravityAuth        ProviderEffectKind = "antigravity-auth"
 )
 
 // ProviderEffect names runtime preparation that pure projection intentionally
@@ -415,6 +436,34 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 		Launch:   codexLaunchConvention(mode),
 		Effects: []ProviderEffect{
 			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, mode, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
+		},
+	}
+	return requireProjectedFeatures(proj, opts.RequiredFeatures)
+}
+
+// ProviderProjection renders a pure projection for an Antigravity adapter.
+func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
+	const pid, mode = ProviderAntigravity, ModeAntigravityPrint
+	files := []ProjectedFile{
+		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
+		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, mode, layout.NativeConfig, ""), Content: []byte(renderAntigravityPluginJSON()), Role: "native-config"},
+		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp"},
+	}
+	skillPrefix, _ := skillRootFor(pid, mode)
+	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
+	files = append(files, skillFiles...)
+	proj := ProviderProjection{
+		Provider: pid,
+		Mode:     mode,
+		Version:  opts.Version,
+		Files:    sortProjectedFiles(files),
+		Launch:   antigravityLaunchConvention(a),
+		Effects: []ProviderEffect{
+			{Kind: EffectAntigravityAuth, Reason: "agy authenticates from OAuth credentials under ~/.gemini, shared with the desktop app; they are never projected or relocated"},
 		},
 	}
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)
@@ -552,6 +601,33 @@ func codexLaunchConvention(mode ProviderMode) LaunchConvention {
 	cwd, configRoot, env := layoutLaunchBase(ProviderCodex, mode)
 	return LaunchConvention{
 		Executable: "codex",
+		Mode:       mode,
+		CWD:        cwd,
+		ConfigRoot: configRoot,
+		Argv:       args,
+		Env:        env,
+	}
+}
+
+func antigravityLaunchConvention(a *AntigravityAdapter) LaunchConvention {
+	const pid, mode = ProviderAntigravity, ModeAntigravityPrint
+	args := []ArgTemplate{
+		{Kind: ArgLiteral, Value: "--output-format"},
+		{Kind: ArgLiteral, Value: "stream-json"},
+	}
+	if a.Model != "" {
+		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
+	}
+	if dir, ok := layoutProjectDirArg(pid, mode); ok {
+		args = append(args, dir)
+	}
+	// The prompt is the value of -p, so it goes last: agy's -p takes the
+	// next argument whatever it is. BuildArgs uses the inline -p=<prompt>
+	// form, which a template cannot express.
+	args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "-p"}, ArgTemplate{Kind: ArgPrompt})
+	cwd, configRoot, env := layoutLaunchBase(pid, mode)
+	return LaunchConvention{
+		Executable: "agy",
 		Mode:       mode,
 		CWD:        cwd,
 		ConfigRoot: configRoot,

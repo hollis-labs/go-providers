@@ -220,6 +220,7 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 | claude | concrete | `CLAUDE.md` + `boot.md` + `.claude/settings.json` + `.mcp.json`, cwd = bootDir, `--add-dir {{.ProjectDir}}` |
 | codex | concrete | `AGENTS.md` + `boot.md` + `config.toml` + `auth.json` + `.mcp.json`, cwd = bootDir, `--cd {{.ProjectDir}}` (exec mode) |
 | opencode | concrete | `agents/<name>.md` (markdown agent with frontmatter) + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir {{.ProjectDir}}` |
+| antigravity | concrete | `AGENTS.md` + `boot.md` + `.agents/plugins/tether/{plugin.json,mcp_config.json}` + `.agents/skills/<name>/SKILL.md` (workspace root; agy has no config-dir variable), cwd = bootDir, `--add-dir {{.ProjectDir}}` |
 | gemini, copilot, aider, junie, kiro, qwen | stub | zero-value spec; `Notes` describes the probe needed |
 
 `AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
@@ -267,6 +268,7 @@ The current M06 capability matrix is available from `ProviderCapabilityMatrix()`
 | Claude bare/print/PTY/streaming | 2.1.285 | `CLAUDE.md`, `.claude/settings.json`, `.mcp.json`, `.claude/skills/<name>/...` (bare adds `--add-dir <boot>` when skills are projected), structured argv roots | credential helper execution, workspace trust, hooks, commands, subagents |
 | Codex exec/app-server | 0.154.0 | `AGENTS.md`, `config.toml`, `.mcp.json` mirror, `skills/<name>/...` (under `CODEX_HOME`), structured `CODEX_HOME`/argv roots | `auth.json` credential materialization, hooks, custom subagents |
 | OpenCode run/serve-http | 1.18.30 | `agents/<name>.md`, `opencode.json`, `.mcp.json` mirror, `skills/<name>/...` (under `OPENCODE_CONFIG_DIR`), structured `OPENCODE_CONFIG_DIR`/argv roots | provider auth, commands, subagents |
+| Antigravity print (`agy`) | 1.2.7 | `AGENTS.md`, `.agents/plugins/tether/` (plugin MCP), `.agents/skills/<name>/...`, `--add-dir` project | OAuth credentials in `~/.gemini` (never projected), hooks, commands, subagents |
 
 The versions above are the ones `hack/probe-harness-layout.sh` measured on 2026-09-29; see [docs/HARNESS-DISCOVERY.md](docs/HARNESS-DISCOVERY.md). Every path, flag and environment variable in these projections comes from one table, package `layout` ([docs/LAYOUT.md](docs/LAYOUT.md), [layout/layout.json](layout/layout.json) for non-Go readers). Skills are always emitted in the directory form `<name>/SKILL.md`; no harness reads flat `<name>.md`. `SkillPackage.Hash` optionally pins a package's content (`sha256:<hex>`, the same tree hash go-agentdef uses; compute it with `SkillPackage.TreeHash`). Other modules can pin their own path tables with `layout/layouttest` ([docs/CONSUMERS.md](docs/CONSUMERS.md)).
 

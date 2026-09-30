@@ -49,6 +49,9 @@ var builtinModes = []struct {
 	{ProviderOpencode, ModeOpencodeServeHTTP, func() projectingAdapter {
 		return &OpencodeAdapter{Mode: "serve-http", Agent: "fixture-agent"}
 	}},
+	{ProviderAntigravity, ModeAntigravityPrint, func() projectingAdapter {
+		return NewAntigravityAdapter()
+	}},
 }
 
 // layout must not import provider, so its Mode and Root strings are guarded
@@ -63,6 +66,7 @@ func TestLayoutVocabularyMirrorsProvider(t *testing.T) {
 		ModeCodexAppServer:       layout.ModeCodexAppServer,
 		ModeOpencodeRun:          layout.ModeOpenCodeRun,
 		ModeOpencodeServeHTTP:    layout.ModeOpenCodeServeHTTP,
+		ModeAntigravityPrint:     layout.ModeAntigravityPrint,
 	}
 	for pm, lm := range modes {
 		if string(pm) != string(lm) {
@@ -80,6 +84,7 @@ func TestLayoutVocabularyMirrorsProvider(t *testing.T) {
 	}
 	for id, lp := range map[ProviderID]layout.Provider{
 		ProviderClaude: layout.Claude, ProviderCodex: layout.Codex, ProviderOpencode: layout.OpenCode,
+		ProviderAntigravity: layout.Antigravity,
 	} {
 		if string(id) != string(lp) {
 			t.Errorf("provider %q != layout %q", id, lp)

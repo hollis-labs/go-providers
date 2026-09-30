@@ -20,3 +20,34 @@ type SessionLostClassifier interface {
 	// BuildArgs is unknown to the CLI.
 	IsSessionLost(stderrTail []byte) bool
 }
+
+// SessionResumeVerifier is an optional CLIAdapter extension for CLIs whose
+// resume keeps the session id: resuming a known session reports that same
+// id, so a resume turn that reports a different one did not continue the
+// requested session. Antigravity needs this because it answers an unknown
+// conversation id by silently starting a new conversation (a stderr warning,
+// exit 0), where claude and opencode fail the turn instead and are covered
+// by SessionLostClassifier. The session layer compares the id it passed to
+// BuildArgs with the first session id the turn reports.
+type SessionResumeVerifier interface {
+	ResumeKeepsSessionID() bool
+}
+
+// ErrProviderNotAuthenticated reports that the CLI has no usable login.
+// Session layers wrap it so callers can tell "sign in first" from other
+// launch failures.
+var ErrProviderNotAuthenticated = errors.New("provider: provider CLI not authenticated")
+
+// AuthFailureClassifier is an optional CLIAdapter extension that recognizes
+// a login failure from the tail of a failed turn's stderr.
+type AuthFailureClassifier interface {
+	IsNotAuthenticated(stderrTail []byte) bool
+}
+
+// Preflighter is an optional CLIAdapter extension: a cheap check, run before
+// a runtime starts a session, that fails with a typed error instead of
+// letting the CLI hit the failure itself (for example, an interactive login
+// that would open a browser).
+type Preflighter interface {
+	Preflight() error
+}

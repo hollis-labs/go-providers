@@ -144,3 +144,26 @@ type Heartbeat struct {
 }
 
 func (Heartbeat) eventTag() {}
+
+// SessionLost reports that a resume turn did not continue the requested
+// provider session: the CLI started a new one instead (Antigravity answers
+// an unknown conversation id that way, without failing the turn).
+// Non-terminal: the turn itself runs on in the new session. Emitted by the
+// session layer, which is the only place that knows the requested id.
+type SessionLost struct {
+	RequestedID string
+	ActualID    string
+	Reason      string
+}
+
+func (SessionLost) eventTag() {}
+
+// PermissionDenied reports a tool action the CLI refused because it needed
+// an approval that headless mode cannot ask for. The turn still completes,
+// so without this event the refusal is a silent no-op. Non-terminal.
+type PermissionDenied struct {
+	Action      string
+	DisplayName string
+}
+
+func (PermissionDenied) eventTag() {}

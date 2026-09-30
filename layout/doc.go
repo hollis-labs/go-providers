@@ -1,5 +1,5 @@
 // Package layout is the single source of truth for where each agent CLI
-// (Claude Code, Codex, OpenCode) looks for its files, skills and config, and
+// (Claude Code, Codex, OpenCode, Antigravity) looks for its files, skills and config, and
 // which flags, environment variables and working directory locate them.
 //
 // The table is a Go literal (compile-checked). Every row names the launch
