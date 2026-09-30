@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Docs: the README no longer lists Gemini, Aider, Copilot, Junie, Kiro or Qwen
+  adapters (removed in v0.12.0) and now names the four that ship — Claude Code,
+  Codex, OpenCode and Antigravity. `docs/CONSUMERS.md` records that agentkit's
+  legacy skill paths are fixed (opencode in agentkit v0.7.0, claude in v0.9.0).
+
 ## v0.29.0 — 2026-09-30
 
 ### Added

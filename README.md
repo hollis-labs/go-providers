@@ -1,6 +1,6 @@
 # go-providers
 
-`go-providers` is a Go library that provides a single `Provider` interface over a collection of CLI-bridge adapters (Claude Code, Codex, Gemini CLI, Aider, Copilot, Junie, Kiro, Opencode, Qwen) wrapped via PTY or plain subprocess. It also ships cross-cutting primitives for the adapter layer — a registry, cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
+`go-providers` is a Go library that provides a single `Provider` interface over a collection of CLI-bridge adapters (Claude Code, Codex, OpenCode, Antigravity) wrapped via PTY or plain subprocess. It also ships cross-cutting primitives for the adapter layer — a registry, cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
 
 As of **v0.11.0** this library is **CLI/PTY-only** and no longer owns the shared LLM contracts or rate-budget primitives. Direct HTTP chat and embedding adapters were removed in v0.10.0; the shared transport-agnostic model types now live in `github.com/hollis-labs/go-llm-types`, and the shared provider contracts/rate-budget primitives live in `github.com/hollis-labs/go-llm-contracts`.
 
@@ -145,7 +145,7 @@ the planted-file render.
 - `CLIAdapter` interface and `CLIConfig` struct (`cli_adapter.go`) — abstraction for spawning a CLI tool.
 - `PTYBridge` / `NewPTYBridge` / `NewPTYBridgeWithAdapter` (`pty.go`, non-Windows build tag) — wraps a CLI in a pseudo-terminal.
 - `SubprocessBridge` / `NewSubprocessBridge` (`subprocess.go`) — wraps a CLI using plain stdin/stdout pipes (all platforms).
-- Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `GeminiAdapter`, `AiderAdapter`, `CopilotAdapter`, `JunieAdapter`, `KiroAdapter`, `OpencodeAdapter`, `QwenAdapter`. Each ships `New…Adapter()` plus PTY/Dev/Bare variants where applicable. `ClaudeAdapter` additionally ships `NewClaudeAdapterStreamingStdio()` / `NewClaudeAdapterDevStreamingStdio()` for vendor-documented long-lived NDJSON-over-stdin sessions; `CodexAdapter` ships `NewCodexAdapterAppServer()` for long-lived JSON-RPC-over-stdio sessions; `OpencodeAdapter` ships `NewOpencodeAdapterServeHTTP()` for long-lived HTTP/SSE sessions. See [Long-lived headless modes](#long-lived-headless-modes).
+- Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `OpencodeAdapter`, `AntigravityAdapter`. Each ships `New…Adapter()` plus PTY/Dev/Bare variants where applicable. `ClaudeAdapter` additionally ships `NewClaudeAdapterStreamingStdio()` / `NewClaudeAdapterDevStreamingStdio()` for vendor-documented long-lived NDJSON-over-stdin sessions; `CodexAdapter` ships `NewCodexAdapterAppServer()` for long-lived JSON-RPC-over-stdio sessions; `OpencodeAdapter` ships `NewOpencodeAdapterServeHTTP()` for long-lived HTTP/SSE sessions. See [Long-lived headless modes](#long-lived-headless-modes).
 
 ### Per-line typed events (`provider/events/`)
 
@@ -221,7 +221,6 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 | codex | concrete | `AGENTS.md` + `boot.md` + `config.toml` + `auth.json` + `.mcp.json`, cwd = bootDir, `--cd {{.ProjectDir}}` (exec mode) |
 | opencode | concrete | `agents/<name>.md` (markdown agent with frontmatter) + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir {{.ProjectDir}}` |
 | antigravity | concrete | `AGENTS.md` + `boot.md` + `.agents/plugins/tether/{plugin.json,mcp_config.json}` + `.agents/skills/<name>/SKILL.md` (workspace root; agy has no config-dir variable), cwd = bootDir, `--add-dir {{.ProjectDir}}` |
-| gemini, copilot, aider, junie, kiro, qwen | stub | zero-value spec; `Notes` describes the probe needed |
 
 `AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
 
