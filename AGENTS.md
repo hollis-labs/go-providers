@@ -19,6 +19,8 @@ contracts, rate budgets, or any direct HTTP chat or embedding path.
   `provider/progress_tracker.go` are the decorator monitors.
 - `provider/projection.go` and `provider/preparation.go` produce the pure
   values `agentkit` converts into materialization requests.
+- `layout/` is the one table of where each agent CLI reads files, skills and config
+  (`docs/LAYOUT.md`, `docs/HARNESS-DISCOVERY.md`); the adapters derive from it.
 - `provider/events/` and `provider/event_pipeline.go` own typed per-line events.
 - `examples/claude_bare`, `examples/codex_bootdir`, `examples/opencode_bootdir`
   are runnable.
@@ -29,6 +31,7 @@ contracts, rate budgets, or any direct HTTP chat or embedding path.
 gofmt -l .
 go vet ./...
 go test -race -count=1 ./...
+go run ./layout/gen -check   # docs/LAYOUT.md and layout/layout.json are generated
 ```
 
 Smoke tests that spawn a real CLI are env-gated (`CLAUDE_PTY_SMOKE`,
