@@ -193,3 +193,26 @@ func TestOpencodeIsSessionLost(t *testing.T) {
 		t.Error("unrelated error classified as session lost")
 	}
 }
+
+// A failed step reports usage but never done: opencode's error line (or
+// the non-zero exit) is the turn's one terminal event.
+func TestOpencodeParseLine_ErrorStepIsNotDone(t *testing.T) {
+	line := []byte(`{"type":"step_finish","sessionID":"ses_x","part":{"type":"step-finish","reason":"error","tokens":{"input":1,"output":2,"reasoning":0,"cache":{"read":0,"write":0}}}}`)
+	a := &OpencodeAdapter{}
+	evs, err := a.ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opencodeEventTypes(evs); !reflect.DeepEqual(got, []llmtypes.EventType{llmtypes.EventUsage}) {
+		t.Errorf("ParseLine types = %v; want usage only", got)
+	}
+	typed, err := a.ParseLineEvents(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range typed {
+		if _, ok := ev.(events.Done); ok {
+			t.Errorf("ParseLineEvents emitted Done for a failed step: %#v", typed)
+		}
+	}
+}

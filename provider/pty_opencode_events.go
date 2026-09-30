@@ -20,7 +20,8 @@ import (
 //     opencode writes the line once the tool has completed or failed.
 //   - step_finish → usage for that step. A turn is one or more steps: each
 //     step that ends in tool calls has reason "tool-calls" and the turn
-//     continues; any other reason ends the turn, so that step_finish also
+//     continues; "error" ends it with the failure reported by the error
+//     line; any other reason ends the turn, so that step_finish also
 //     emits done. Usage is per step, not cumulative — consumers sum it.
 //     step_finish also reports a dollar cost, which has no field on either
 //     usage type and is left in the raw line.
@@ -30,7 +31,19 @@ import (
 // as an unknown --agent to stderr, but a future version might not) yield no
 // events rather than an error: one odd line must not end the turn.
 
-const opencodeReasonToolCalls = "tool-calls"
+const (
+	opencodeReasonToolCalls = "tool-calls"
+	opencodeReasonError     = "error"
+)
+
+// opencodeStepEndsTurn reports whether a step_finish closes the turn with
+// success. "tool-calls" continues the turn. "error" closes it with a
+// failure that the error line (or, without one, the non-zero exit the
+// session layer turns into an error) already reports, so it must not also
+// report done.
+func opencodeStepEndsTurn(reason string) bool {
+	return reason != opencodeReasonToolCalls && reason != opencodeReasonError
+}
 
 type opencodeLine struct {
 	Type      string          `json:"type"`
@@ -142,7 +155,7 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 			u := ev.Part.Tokens.usage(ev.Part.Reason)
 			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &u})
 		}
-		if ev.Part.Reason != opencodeReasonToolCalls {
+		if opencodeStepEndsTurn(ev.Part.Reason) {
 			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 		}
 		return out
@@ -203,7 +216,7 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 				StopReason:          u.StopReason,
 			})
 		}
-		if ev.Part.Reason != opencodeReasonToolCalls {
+		if opencodeStepEndsTurn(ev.Part.Reason) {
 			out = append(out, events.Done{StopReason: ev.Part.Reason})
 		}
 		return out, nil
