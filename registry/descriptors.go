@@ -44,6 +44,7 @@ func init() {
 			{runtimes.ModeACPStdio, caps(typedEvents)},
 		},
 		DefaultMode: runtimes.ModeStreamingStdio,
+		Posture:     claudePosture,
 		Projection: &ProjectionFacts{
 			TestedVersion: "2.1.285",
 			Features: map[Feature]Support{
@@ -89,6 +90,7 @@ func init() {
 			{runtimes.ModeACPStdio, caps(typedEvents)},
 		},
 		DefaultMode: runtimes.ModeJSONRPCStdio,
+		Posture:     codexPosture,
 		Projection: &ProjectionFacts{
 			TestedVersion: "0.154.0",
 			Features: map[Feature]Support{
@@ -127,6 +129,7 @@ func init() {
 			{runtimes.ModeACPStdio, caps(resume, typedEvents)},
 		},
 		DefaultMode: runtimes.ModeSubprocessPerTurn,
+		Posture:     opencodePosture,
 		Projection: &ProjectionFacts{
 			TestedVersion: "1.18.30",
 			Features: map[Feature]Support{
@@ -189,6 +192,7 @@ func init() {
 			{runtimes.ModeSubprocessPerTurn, caps(resume, resumeKeepsID, typedEvents, authClass, lostClass)},
 		},
 		DefaultMode: runtimes.ModeSubprocessPerTurn,
+		Posture:     antigravityPosture,
 		Projection: &ProjectionFacts{
 			TestedVersion: "1.2.7",
 			Features: map[Feature]Support{

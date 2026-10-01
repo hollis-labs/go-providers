@@ -6,3 +6,9 @@ github.com/hollis-labs/go-llm-contracts v0.1.0 h1:AzN35sz1vwXzClgHpx3SWede+U5TiR
 github.com/hollis-labs/go-llm-contracts v0.1.0/go.mod h1:msDaHCBEemyTbXhk0Q8lm5doK79aWK5VR/hdzjWgqbU=
 github.com/hollis-labs/go-llm-types v0.5.1 h1:4h473ppF+N+DxPJ9V+/Dt/kc3bkWcOaJOp6kRH9YxsQ=
 github.com/hollis-labs/go-llm-types v0.5.1/go.mod h1:n4XoMPvSTR7Dfjxj/D37cL8nQPKmtci2EzZQFjAvSr8=
+github.com/hollis-labs/go-permission v0.1.0 h1:eOlb2pPmEkh9D5zlVgWwOd4ryycEQYiLT1cLMEG6y2c=
+github.com/hollis-labs/go-permission v0.1.0/go.mod h1:OXz5GXvR7vFAb6TVoGDOESIEecC0V40524NdN0jiOrs=
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
