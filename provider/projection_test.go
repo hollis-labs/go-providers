@@ -231,7 +231,7 @@ func TestProviderProjection_ResolveLaunchStructuredRootsAndEnvPrecedence(t *test
 	if err != nil {
 		t.Fatalf("ResolveLaunch: %v", err)
 	}
-	wantArgv := []string{"exec", "say hello to Ω", "--json", "--skip-git-repo-check", "--cd", "/tmp/Project Root Ω"}
+	wantArgv := []string{"exec", "--json", "--skip-git-repo-check", "--cd", "/tmp/Project Root Ω", "--", "say hello to Ω"}
 	if !reflect.DeepEqual(binding.Argv, wantArgv) {
 		t.Fatalf("argv mismatch\nwant %#v\ngot  %#v", wantArgv, binding.Argv)
 	}

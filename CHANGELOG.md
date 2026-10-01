@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.34.1 — 2026-10-01
+
+### Security
+
+- **Untrusted turn text could be parsed as a CLI flag (CW-20261001-0069).**
+  - **Bug.** The per-turn conventions passed the turn's prompt as a bare
+    positional (`claude -p <prompt> …`, `codex exec <prompt> …`,
+    `opencode run … <prompt>`). Turn text is untrusted: another agent's
+    message, a wake, a steering notice. So a turn starting with `-` was
+    parsed as an option, and a turn equal to a real flag was honoured. For
+    example, `--dangerously-bypass-approvals-and-sandbox` (codex),
+    `--dangerously-skip-permissions` (claude) or `--auto` (opencode): a
+    sandbox/permission escape.
+  - **Fix.** `ArgPrompt` now resolves to an end-of-options `--` followed by
+    the prompt, and every convention puts it last. `ResolveTurn` refuses a
+    convention with anything after the prompt.
+  - **Argv changes** (for both `BuildArgs` and the projection's
+    `ResolveTurn`):
+
+    | Runtime | New argv |
+    |---|---|
+    | Claude print and bare | `-p --output-format stream-json --verbose … [--add-dir …] [--dangerously-skip-permissions] -- <prompt>` |
+    | codex exec | `exec … --json --skip-git-repo-check [--cd project] -- <prompt>` |
+    | opencode run | `run … [extra] -- <prompt>` |
+
+    Claude's system prompt is passed as `--system-prompt=<text>`, so a value
+    starting with `-` stays its value.
+  - **Unaffected:** agy (inline `-p=<prompt>`), and Claude streaming/PTY,
+    codex app-server and opencode serve, whose turns go over stdin or their
+    protocol (pinned by tests).
+  - **Verified live** on claude 2.1.286, codex-cli 0.159.2 and opencode
+    1.18.33. Each accepts `--`, answers, and receives
+    `--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`,
+    `--model` and `--auto` as prompt text. Claude stayed in `default`
+    permission mode and codex stayed read-only.
+
 ## v0.34.0 — 2026-10-01
 
 ### Added

@@ -27,42 +27,42 @@ func TestOpencodeAdapter_BuildArgs(t *testing.T) {
 	t.Run("agent plus prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--format", "json", "--agent", "code-review", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("agent plus model", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review", Model: "gpt-5"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "--", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("agent plus dir", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review", Dir: "/tmp/work"}
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--format", "json", "--agent", "code-review", "--dir", "/tmp/work", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--dir", "/tmp/work", "--", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("system prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review"}
 		args := a.BuildArgs("fix the bug", "Follow repo conventions", "")
-		expected := []string{"run", "--format", "json", "--agent", "code-review", "System: Follow repo conventions\n\nfix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--", "System: Follow repo conventions\n\nfix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("empty agent keeps the flag", func(t *testing.T) {
 		a := NewOpencodeAdapter()
 		args := a.BuildArgs("fix the bug", "", "")
-		expected := []string{"run", "--format", "json", "--agent", "", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "", "--", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 
 	t.Run("resume passes --session before the prompt", func(t *testing.T) {
 		a := &OpencodeAdapter{Agent: "code-review", Model: "gpt-5"}
 		args := a.BuildArgs("fix the bug", "", "ses_123")
-		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "--session", "ses_123", "fix the bug"}
+		expected := []string{"run", "--format", "json", "--agent", "code-review", "--model", "gpt-5", "--session", "ses_123", "--", "fix the bug"}
 		assertArgsEqual(t, args, expected)
 	})
 

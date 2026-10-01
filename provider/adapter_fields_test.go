@@ -50,7 +50,7 @@ func TestAdapterExtraArgsLandAtTheSlot(t *testing.T) {
 		{"claude bare", func(x []string) CLIAdapter { return &ClaudeAdapter{Bare: true, ProjectDir: "/p", ExtraArgs: x} }, "--add-dir"},
 		{"codex exec", func(x []string) CLIAdapter { return &CodexAdapter{ExtraArgs: x} }, "--json"},
 		{"codex app-server", func(x []string) CLIAdapter { return &CodexAdapter{Mode: "app-server", ExtraArgs: x} }, ""},
-		{"opencode run", func(x []string) CLIAdapter { return &OpencodeAdapter{ExtraArgs: x} }, "PROMPT"},
+		{"opencode run", func(x []string) CLIAdapter { return &OpencodeAdapter{ExtraArgs: x} }, "--"},
 		{"opencode serve", func(x []string) CLIAdapter { return &OpencodeAdapter{Mode: "serve-http", ExtraArgs: x} }, ""},
 		{"agy", func(x []string) CLIAdapter { return &AntigravityAdapter{AddDirs: []string{"/p"}, ExtraArgs: x} }, "--add-dir"},
 	}
