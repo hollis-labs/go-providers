@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.37.0 — 2026-10-01
+
+Permission posture mapped per runtime (CW-20260930-0138, D-72).
+
+### Added
+
+- **`registry.Descriptor.PostureFor(posture, mode)`** maps go-permission's
+  `Mode` (`default`, `accept-edits`, `plan`, `yolo`) onto each runtime's own
+  launch flags or environment, returned as a `registry.PostureLaunch{Args,
+  Env}`. Apps pass only the Mode. Args belong at the launch convention's
+  extra-argument slot, which is before `--` in every convention; a test holds
+  each posture's flags there.
+
+  | posture | claude | codex | opencode | agy |
+  |---|---|---|---|---|
+  | default | `--permission-mode default` | `-c sandbox_mode="read-only" -c approval_policy="on-request"` | `OPENCODE_PERMISSION={"edit":"ask","bash":"ask"}` | none |
+  | accept-edits | `--permission-mode acceptEdits` | `workspace-write`, `on-request` | `{"edit":"allow","bash":"ask"}` | `--mode accept-edits` |
+  | plan | `--permission-mode plan` | `read-only`, `never` | `{"edit":"deny","bash":"ask"}` | `--mode plan` |
+  | yolo | `--permission-mode bypassPermissions` | `danger-full-access`, `never` | every permission `allow` | `--dangerously-skip-permissions` |
+
+  Measured live with cheap runs on claude 2.1.286, codex-cli 0.159.2 (exec
+  and app-server) and opencode 1.18.33 (run and serve). agy 1.2.14 was not
+  signed in on the measuring host, so only its flag spelling was measured
+  there. The registry package doc records what each runtime did headless.
+- `registry.ErrNoPostureMapping`: ACP modes, and Copilot and Pi (ACP-only),
+  have no launch mapping. An ACP agent's permission requests are answered by
+  the ACP client, best effort. `registry.ErrInvalidPosture` for a value that
+  is not one of the four Modes.
+- Requires go-permission v0.1.0 (its only dependency is yaml.v3).
+
+### Changed
+
+- **`registry.PostureFunc` takes a `permission.Mode` and returns a
+  `PostureLaunch`** (was a provisional `string` posture and `[]string`).
+  Claude, Codex, OpenCode and Antigravity now have a Posture hook; Copilot and
+  Pi do not.
+
+### Notes
+
+- codex-cli 0.159.2 rejects `approval_policy = "untrusted"` ("no longer
+  supported"), so Codex's accept-edits lets sandboxed commands in the
+  workspace run; there is no longer an edits-only policy to map it to. The
+  adapter-level `CodexAdapter.ApprovalPolicy` still accepts "untrusted".
+- The adapter posture fields (`ClaudeAdapter.PermissionMode` /
+  `SkipPermissions`, `CodexAdapter.ApprovalPolicy` / `SandboxMode`,
+  `AntigravityAdapter.Permission`) are unchanged. Where both are set, the
+  posture flag wins: claude's `--permission-mode acceptEdits` over a planted
+  `permissions.defaultMode: default` was measured, and codex's `-c` overrides
+  config.toml by its own definition. Set one, not both.
+
 ## v0.36.0 — 2026-10-01
 
 MCP servers reach every runtime's boot dir (CW-20260930-0136, W4b and item 3).
