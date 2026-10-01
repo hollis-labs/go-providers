@@ -1,38 +1,24 @@
 package provider
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"fmt"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
-// lookPathExpanded tries exec.LookPath first, then checks common install
-// directories that may not be in the service PATH (e.g., when launched by
-// a process supervisor with a minimal PATH).
-func lookPathExpanded(name string) (string, error) {
-	// Standard LookPath using current PATH.
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
+// detect resolves runtime id's executable through its registry descriptor:
+// the env override (CLAUDE_CLI_PATH and so on) as-is, then PATH, then the
+// common install directories, which a process supervisor's minimal PATH often
+// leaves out, and the runtime's own.
+func detect(id runtimes.ID) (string, bool) {
+	d, ok := registry.Lookup(string(id))
+	if !ok {
+		panic(fmt.Sprintf("provider: no registry descriptor for built-in runtime %s", id))
 	}
-
-	home, _ := os.UserHomeDir()
-
-	// Common locations not always in service PATH.
-	candidates := []string{
-		filepath.Join(home, ".local", "bin", name),
-		"/opt/homebrew/bin/" + name,
-		"/opt/homebrew/sbin/" + name,
-		filepath.Join(home, "bin", name),
-		filepath.Join(home, "go", "bin", name),
-		filepath.Join(home, ".opencode", "bin", name),
-		"/usr/local/bin/" + name,
+	p, err := d.LookPath()
+	if err != nil {
+		return "", false
 	}
-
-	for _, p := range candidates {
-		if info, err := os.Stat(p); err == nil && !info.IsDir() {
-			return p, nil
-		}
-	}
-
-	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
+	return p, true
 }

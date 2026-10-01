@@ -2,8 +2,8 @@ package provider
 
 import (
 	"bytes"
-	"os"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
@@ -119,14 +119,7 @@ func (a *AntigravityAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, err
 // Detect resolves AGY_CLI_PATH, then agy on PATH and the usual install
 // directories (the installer puts it in ~/.local/bin).
 func (a *AntigravityAdapter) Detect() (string, bool) {
-	if p := os.Getenv("AGY_CLI_PATH"); p != "" {
-		return p, true
-	}
-	p, err := lookPathExpanded("agy")
-	if err != nil {
-		return "", false
-	}
-	return p, true
+	return detect(runtimes.Antigravity)
 }
 
 // agy authenticates from the macOS Keychain, not from

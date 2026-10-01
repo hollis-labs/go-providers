@@ -11,7 +11,8 @@
     },
     {
       "provider": "claude",
-      "mode": "claude-bare",
+      "mode": "subprocess-per-turn",
+      "variant": "bare",
       "concern": "instructions",
       "root": "boot",
       "rel": "CLAUDE.md",
@@ -53,7 +54,8 @@
     },
     {
       "provider": "claude",
-      "mode": "claude-bare",
+      "mode": "subprocess-per-turn",
+      "variant": "bare",
       "concern": "native-config",
       "root": "boot",
       "rel": ".claude/settings.json",
@@ -79,7 +81,8 @@
     },
     {
       "provider": "claude",
-      "mode": "claude-bare",
+      "mode": "subprocess-per-turn",
+      "variant": "bare",
       "concern": "skills",
       "root": "boot",
       "rel": ".claude/skills",
@@ -102,7 +105,7 @@
         "C3",
         "C5"
       ],
-      "note": "extra directory, not a working root; accepted in every mode. The built-in launch convention passes it in claude-bare only (AK adds it for the other modes)"
+      "note": "extra directory, not a working root; accepted in every mode, and the built-in launch convention passes it in every mode"
     },
     {
       "provider": "codex",
@@ -178,7 +181,7 @@
     },
     {
       "provider": "codex",
-      "mode": "codex-exec",
+      "mode": "subprocess-per-turn",
       "concern": "project-dir",
       "root": "project",
       "flag": "--cd",
@@ -257,7 +260,7 @@
     },
     {
       "provider": "opencode",
-      "mode": "opencode-run",
+      "mode": "subprocess-per-turn",
       "concern": "project-dir",
       "root": "project",
       "flag": "--dir",
@@ -265,15 +268,11 @@
     },
     {
       "provider": "opencode",
-      "mode": "opencode-serve-http",
+      "mode": "http-sse",
       "concern": "runtime",
       "root": "project",
       "flag": "serve",
-      "aliases": [
-        "serve-http",
-        "http-sse"
-      ],
-      "unprobed": "wire token for the HTTP runtime, not a harness discovery path; canonical spelling serve-http, http-sse is the public runtimeevents value and is never renamed here"
+      "unprobed": "the opencode subcommand that starts the HTTP+SSE runtime, not a harness discovery path"
     },
     {
       "provider": "antigravity",
@@ -318,7 +317,7 @@
     },
     {
       "provider": "antigravity",
-      "mode": "antigravity-print",
+      "mode": "subprocess-per-turn",
       "concern": "project-dir",
       "root": "project",
       "flag": "--add-dir",

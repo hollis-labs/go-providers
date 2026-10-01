@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 var updateLayoutGolden = flag.Bool("update-layout-golden", false, "rewrite provider/testdata/layout-regression/projection.golden")
@@ -55,7 +57,7 @@ func renderLayoutRegression(t *testing.T) string {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		fmt.Fprintf(&b, "provider=%s mode=%s\n", proj.Provider, proj.Mode)
+		fmt.Fprintf(&b, "provider=%s mode=%s\n", proj.Provider, layout.Shape{Mode: proj.Mode, Variant: proj.Variant})
 		for _, f := range proj.Files {
 			sum := sha256.Sum256(f.Content)
 			fmt.Fprintf(&b, "file %s mode=%04o role=%s sha=%s\n", f.RelPath, f.Mode, f.Role, hex.EncodeToString(sum[:6]))

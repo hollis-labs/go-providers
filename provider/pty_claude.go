@@ -3,8 +3,8 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
@@ -341,14 +341,7 @@ func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 }
 
 func (a *ClaudeAdapter) Detect() (string, bool) {
-	if p := os.Getenv("CLAUDE_CLI_PATH"); p != "" {
-		return p, true
-	}
-	p, err := lookPathExpanded("claude")
-	if err != nil {
-		return "", false
-	}
-	return p, true
+	return detect(runtimes.Claude)
 }
 
 // Claude Code stream-json event types.

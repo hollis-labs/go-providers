@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -54,12 +55,13 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 		agentName = "default"
 	}
 	// The legacy spec is mode-independent and keeps --dir for serve-http too,
-	// so it reads the run-mode rows.
-	const pid, mode = ProviderOpencode, ModeOpencodeRun
+	// so it reads the subprocess-per-turn (run) rows.
+	const pid = runtimes.OpenCode
+	shape := shapePerTurn
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: layoutRel(pid, mode, layout.Instructions, agentName),
+				RelPath: layoutRel(pid, shape, layout.Instructions, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					name := ctx.AgentName
 					if name == "" {
@@ -69,28 +71,28 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName),
+				RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Boot, agentName),
+				RelPath: layoutRel(pid, shape, layout.Boot, agentName),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.MCP, agentName),
+				RelPath: layoutRel(pid, shape, layout.MCP, agentName),
 				Mode:    0o600,
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
-		EnvAmendments: layoutLegacyEnv(pid, mode),
-		CwdPreference: layoutLegacyCwd(pid, mode),
-		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
+		EnvAmendments: layoutLegacyEnv(pid, shape),
+		CwdPreference: layoutLegacyCwd(pid, shape),
+		ProjectDirArg: layoutLegacyProjectDirArg(pid, shape),
 		Notes:         "agents/<name>.md is the agent definition; its name must match OpencodeAdapter.Agent",
 	}
 }

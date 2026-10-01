@@ -13,15 +13,21 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 // Fake is a fake CLI binary for one runtime, serving the runs given to
 // [New]. Its files live in a t.TempDir, so they go away with the test.
 type Fake struct {
-	// Runtime is the runtime id the fake was created for.
-	Runtime string
-	// Descriptor holds the runtime's binary name and CLI-path variable.
-	Descriptor Descriptor
+	// Runtime is the canonical id of the runtime the fake stands in for.
+	Runtime runtimes.ID
+	// Descriptor is the runtime's registry descriptor: the binary name the
+	// fake is installed under and the CLI-path variable [Fake.Install]
+	// sets.
+	Descriptor registry.Descriptor
 	// Path is the fake executable. Pass it as given; see the package doc.
 	Path string
 	// Dir is the directory holding Path and nothing else on PATH lookup.
@@ -32,15 +38,17 @@ type Fake struct {
 	expectErrors atomic.Bool
 }
 
-// New creates a fake binary for runtime (an id or alias such as "claude"
-// or "agy") that serves runs in order, one per invocation; see [Run] for
-// how an invocation picks its run. A missing fixture fails t immediately.
-// Fake-side errors fail t at cleanup unless [Fake.ExpectErrors] is called.
-func New(t testing.TB, runtimeID string, runs ...Run) *Fake {
+// New creates a fake binary for a runtime that serves runs in order, one
+// per invocation; see [Run] for how an invocation picks its run. id is
+// any runtime id or alias the [registry] knows ("claude", "agy", "pi-acp"); a
+// test stands in a runtime of its own with registry.RegisterForTest. A
+// missing fixture fails t immediately. Fake-side errors fail t at cleanup
+// unless [Fake.ExpectErrors] is called.
+func New(t testing.TB, id runtimes.ID, runs ...Run) *Fake {
 	t.Helper()
-	d, ok := LookupDescriptor(runtimeID)
+	d, ok := registry.Lookup(string(id))
 	if !ok {
-		t.Fatalf("providertest: unknown runtime %q; register it with RegisterDescriptor", runtimeID)
+		t.Fatalf("providertest: runtime %q is not in the registry; a test registers its own with registry.RegisterForTest", id)
 	}
 	resolved := make([]Run, len(runs))
 	for i, r := range runs {
@@ -80,7 +88,7 @@ func New(t testing.TB, runtimeID string, runs ...Run) *Fake {
 	var sc bytes.Buffer
 	enc := json.NewEncoder(&sc)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(script{Runtime: d.ID, Runs: resolved}); err != nil {
+	if err := enc.Encode(script{Runtime: string(d.ID), Runs: resolved}); err != nil {
 		t.Fatalf("providertest: encode script: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(state, scriptName), sc.Bytes(), 0o644); err != nil {
@@ -124,14 +132,13 @@ func linkExecutable(exe, path string) error {
 }
 
 // Env returns environment entries that make the runtime's adapter find the
-// fake: its CLI-path variable, when it has one, and PATH with Dir first.
-// Use it where the code under test takes an explicit child environment.
+// fake: its CLI-path variable and PATH with Dir first. Use it where the
+// code under test takes an explicit child environment.
 func (f *Fake) Env() []string {
-	var env []string
-	if f.Descriptor.EnvVar != "" {
-		env = append(env, f.Descriptor.EnvVar+"="+f.Path)
+	return []string{
+		f.Descriptor.EnvOverride + "=" + f.Path,
+		"PATH=" + f.Dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
-	return append(env, "PATH="+f.Dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // Install points the runtime's CLI-path variable and PATH at the fake for

@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 // PreparationPolicy declares which runtime effects the caller authorizes.
@@ -22,8 +25,9 @@ type PreparationPolicy struct {
 // CredentialRequest is passed to caller-owned credential resolution. The
 // provider package never falls back to ambient HOME or provider env vars.
 type CredentialRequest struct {
-	Provider    ProviderID         `json:"provider"`
-	Mode        ProviderMode       `json:"mode"`
+	Provider    runtimes.ID        `json:"provider"`
+	Mode        runtimes.Mode      `json:"mode"`
+	Variant     layout.Variant     `json:"variant,omitempty"`
 	Effect      ProviderEffectKind `json:"effect"`
 	Destination string             `json:"destination,omitempty"`
 }
@@ -145,7 +149,7 @@ func PrepareRuntime(ctx context.Context, req RuntimePreparationRequest) (Runtime
 			diagnostics = append(diagnostics, PreparationDiagnostic{
 				Effect:  kind,
 				Code:    "unknown_effect",
-				Message: fmt.Sprintf("%s/%s did not declare required preparation effect %q", req.Projection.Provider, req.Projection.Mode, kind),
+				Message: fmt.Sprintf("%s/%s did not declare required preparation effect %q", req.Projection.Provider, layout.Shape{Mode: req.Projection.Mode, Variant: req.Projection.Variant}, kind),
 			})
 			continue
 		}
@@ -247,6 +251,7 @@ func prepareCodexAuthJSON(ctx context.Context, req RuntimePreparationRequest, ef
 	cred, err := req.CredentialResolver.ResolveProviderCredential(ctx, CredentialRequest{
 		Provider:    req.Projection.Provider,
 		Mode:        req.Projection.Mode,
+		Variant:     req.Projection.Variant,
 		Effect:      EffectCodexAuthJSON,
 		Destination: effect.Destination,
 	})

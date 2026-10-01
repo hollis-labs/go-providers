@@ -15,7 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+
 	"github.com/hollis-labs/go-providers/providertest"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 // proc is a running fake with line-oriented stdio.
@@ -400,19 +403,23 @@ func TestConcurrentInvocationsEachClaimOneRun(t *testing.T) {
 	}
 }
 
-func TestRegisterDescriptor(t *testing.T) {
-	t.Run("registered", func(t *testing.T) {
-		providertest.RegisterDescriptor(t, providertest.Descriptor{ID: "fakeagent", Binary: "fake-agent", EnvVar: "FAKEAGENT_CLI_PATH"})
-		f := providertest.New(t, "fakeagent", providertest.Lines("hi"))
-		if !strings.HasSuffix(f.Path, "/fake-agent") {
-			t.Errorf("Path = %s", f.Path)
-		}
-		if out, err := exec.Command(f.Path).Output(); err != nil || string(out) != "hi\n" {
-			t.Errorf("out = %q, err = %v", out, err)
-		}
+func TestFakeForATestRegisteredRuntime(t *testing.T) {
+	registry.RegisterForTest(t, registry.Descriptor{
+		ID:          "fakeagent",
+		Binary:      "fake-agent",
+		EnvOverride: "FAKEAGENT_CLI_PATH",
+		Modes:       []registry.ModeSupport{{Mode: runtimes.ModeSubprocessPerTurn}},
+		DefaultMode: runtimes.ModeSubprocessPerTurn,
 	})
-	if _, ok := providertest.LookupDescriptor("fakeagent"); ok {
-		t.Error("descriptor outlived the test that registered it")
+	f := providertest.New(t, "fakeagent", providertest.Lines("hi"))
+	if !strings.HasSuffix(f.Path, "/fake-agent") {
+		t.Errorf("Path = %s", f.Path)
+	}
+	if env := f.Env(); env[0] != "FAKEAGENT_CLI_PATH="+f.Path {
+		t.Errorf("Env() = %q", env)
+	}
+	if out, err := exec.Command(f.Path).Output(); err != nil || string(out) != "hi\n" {
+		t.Errorf("out = %q, err = %v", out, err)
 	}
 }
 
@@ -424,7 +431,7 @@ func TestEveryFixtureLoads(t *testing.T) {
 		if err != nil || d.IsDir() || path.Dir(p) == "." {
 			return err
 		}
-		if _, ok := providertest.LookupDescriptor(path.Dir(p)); !ok {
+		if !runtimes.ID(path.Dir(p)).Valid() {
 			t.Errorf("%s: directory is not a runtime id", p)
 		}
 		switch base := path.Base(p); {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -24,23 +25,24 @@ import (
 // Spawn invariants: cwd = bootDir; project access via
 // "--add-dir <projectDir>"; CLAUDE.md is auto-loaded by the CLI.
 func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
-	const pid, mode = ProviderClaude, ModeClaudePrint
+	const pid = runtimes.Claude
+	shape := shapePerTurn
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: layoutRel(pid, mode, layout.Instructions, ""),
+				RelPath: layoutRel(pid, shape, layout.Instructions, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderClaudeMD(ctx), nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Boot, ""),
+				RelPath: layoutRel(pid, shape, layout.Boot, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
+				RelPath: layoutRel(pid, shape, layout.NativeConfig, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					// Legacy compatibility effect, gated by explicit
 					// caller opt-in. New runtime paths should call
@@ -67,15 +69,15 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.MCP, ""),
+				RelPath: layoutRel(pid, shape, layout.MCP, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
-		EnvAmendments: layoutLegacyEnv(pid, mode),
-		CwdPreference: layoutLegacyCwd(pid, mode),
-		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
+		EnvAmendments: layoutLegacyEnv(pid, shape),
+		CwdPreference: layoutLegacyCwd(pid, shape),
+		ProjectDirArg: layoutLegacyProjectDirArg(pid, shape),
 	}
 }
 

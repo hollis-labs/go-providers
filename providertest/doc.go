@@ -6,11 +6,12 @@
 // # The fake binary
 //
 // [New] returns a [Fake] whose Path is an executable named after the
-// runtime's binary (claude, codex, opencode, agy, copilot, pi-acp). It is a
-// symlink to the running test binary: when that binary starts under the
-// fake's name, this package's init function takes over, replays the
-// scripted [Run] and exits, before any test or TestMain runs. Importing the
-// package is the only setup a test binary needs.
+// runtime's binary in its registry descriptor (claude, codex, opencode,
+// agy, copilot, pi-acp). It is a symlink to the running test binary: when
+// that binary starts under the fake's name, this package's init function
+// takes over, replays the scripted [Run] and exits, before any test or
+// TestMain runs. Importing the package is the only setup a test binary
+// needs.
 //
 // The script travels in a hidden directory beside the symlink, found
 // through argv[0], not through the environment, so the fake still works
@@ -48,12 +49,14 @@
 //
 // # Fixtures
 //
-// [Fixtures] holds the corpus, one directory per runtime id; see
-// fixtures/README.md for what each file is, how it was captured and which
-// ones are synthetic. Runtime ids are plain strings for now (claude, codex,
-// opencode, antigravity, copilot, pi); [RegisterDescriptor] adds a fake
-// runtime for one test.
+// [Fixtures] holds the corpus, one directory per runtime id (claude, codex,
+// opencode, antigravity, copilot, pi); see fixtures/README.md for what each
+// file is, how it was captured and which ones are synthetic.
 //
-// This package imports only the standard library, so the provider
-// package's own tests can use it without an import cycle.
+// Runtimes come from the go-providers registry. A test that needs a runtime
+// of its own registers it with registry.RegisterForTest and passes its id
+// to [New].
+//
+// This package must not import package provider: provider's own tests use
+// it, and that would be an import cycle.
 package providertest

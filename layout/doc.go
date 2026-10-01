@@ -1,6 +1,7 @@
 // Package layout is the single source of truth for where each agent CLI
 // (Claude Code, Codex, OpenCode, Antigravity) looks for its files, skills and config, and
-// which flags, environment variables and working directory locate them.
+// which flags, environment variables and working directory locate them. Copilot
+// and Pi have no rows: they are launched only over ACP and have no boot dir.
 //
 // The table is a Go literal (compile-checked). Every row names the launch
 // root it is relative to, and carries the Step 0 probe ids
@@ -11,11 +12,16 @@
 // layout/layout.json from it for non-Go readers; layout/layouttest lets other
 // modules pin their own path tables against it.
 //
-// The package imports only the standard library, and nothing in the
-// go-providers module that it does not own: it must stay importable from
-// provider without a cycle. Mode and Root are therefore plain string types
-// whose values equal provider.ProviderMode and provider.RootKind; a test in
-// provider guards that they cannot drift.
+// Rows are keyed by runtime id and launch shape in the agent-contracts-leaf
+// runtimes vocabulary: a [Shape] is a transport mode plus an optional
+// runtime-specific [Variant] (Claude's bare). The registry package derives each
+// runtime descriptor's layout from this table, so there is one list.
+//
+// The package imports only the standard library and agent-contracts-leaf, and
+// nothing in the go-providers module that it does not own: it must stay
+// importable from provider and registry without a cycle. Root is therefore a
+// plain string type whose values equal provider.RootKind; a test in provider
+// guards that they cannot drift.
 //
 //go:generate go run ./gen
 package layout

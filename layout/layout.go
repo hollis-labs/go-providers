@@ -1,33 +1,40 @@
 package layout
 
-import "sort"
+import "github.com/hollis-labs/agent-contracts-leaf/runtimes"
 
-// Provider names an agent CLI family.
-type Provider string
+// Variant names a runtime-specific launch variant: a flag that changes where
+// the harness looks for its files without changing the transport mode. The
+// empty Variant is the runtime's ordinary launch.
+type Variant string
 
 const (
-	Claude      Provider = "claude"
-	Codex       Provider = "codex"
-	OpenCode    Provider = "opencode"
-	Antigravity Provider = "antigravity"
+	// VariantBare is Claude Code's --bare: it skips cwd discovery of
+	// CLAUDE.md, settings and skills, so each must be passed explicitly.
+	VariantBare Variant = "bare"
 )
 
-// Mode is the string value of a provider.ProviderMode. The empty Mode means
-// "every mode of the provider".
-type Mode string
+// Shape is one launch shape of a runtime: the transport mode it is driven in
+// and, where the runtime has one, a launch variant. A row applies to a Shape
+// when each of its Mode and Variant is empty or equal to the Shape's. The zero
+// Shape selects only the rows that hold in every mode.
+type Shape struct {
+	Mode    runtimes.Mode `json:"mode,omitempty"`
+	Variant Variant       `json:"variant,omitempty"`
+}
 
-// Modes mirror the provider.ProviderMode constants.
-const (
-	ModeClaudePrint          Mode = "claude-print"
-	ModeClaudeBare           Mode = "claude-bare"
-	ModeClaudePTY            Mode = "claude-pty"
-	ModeClaudeStreamingStdio Mode = "claude-streaming-stdio"
-	ModeCodexExec            Mode = "codex-exec"
-	ModeCodexAppServer       Mode = "codex-app-server"
-	ModeOpenCodeRun          Mode = "opencode-run"
-	ModeOpenCodeServeHTTP    Mode = "opencode-serve-http"
-	ModeAntigravityPrint     Mode = "antigravity-print"
-)
+// String renders s as mode or mode+variant, "all" for the zero Shape.
+func (s Shape) String() string {
+	switch {
+	case s.Mode == "" && s.Variant == "":
+		return "all"
+	case s.Variant == "":
+		return string(s.Mode)
+	case s.Mode == "":
+		return "+" + string(s.Variant)
+	default:
+		return string(s.Mode) + "+" + string(s.Variant)
+	}
+}
 
 // Root names the directory an Entry is relative to. The values mirror the
 // provider.RootKind strings that are meaningful for placement.
@@ -74,9 +81,10 @@ const AgentPlaceholder = "{agent}"
 // and the flag, environment and working directory that make the harness find
 // it.
 type Entry struct {
-	Provider Provider `json:"provider"`
-	Mode     Mode     `json:"mode,omitempty"` // "" = every mode
-	Concern  Concern  `json:"concern"`
+	Provider runtimes.ID   `json:"provider"`
+	Mode     runtimes.Mode `json:"mode,omitempty"`    // "" = every mode
+	Variant  Variant       `json:"variant,omitempty"` // "" = every variant
+	Concern  Concern       `json:"concern"`
 
 	Root     Root   `json:"root"`                // relative to which launch root
 	Rel      string `json:"rel,omitempty"`       // path under Root; for skills, the directory that holds <name>/SKILL.md
@@ -92,8 +100,6 @@ type Entry struct {
 	// CWD is the root the process must be started in for the row to hold.
 	CWD Root `json:"cwd,omitempty"`
 
-	// Aliases are other spellings of the same thing (informational).
-	Aliases []string `json:"aliases,omitempty"`
 	// Probe lists Step 0 probe ids (for example "C2") of this provider whose
 	// measured result justifies the row.
 	Probe []string `json:"probe,omitempty"`
@@ -114,59 +120,82 @@ func Table() []Entry {
 	return out
 }
 
-// For returns the rows that apply to provider p in mode m: rows for the exact
-// mode and rows with an empty Mode. An empty m returns only the every-mode
-// rows plus nothing mode-specific.
-func For(p Provider, m Mode) []Entry {
+// Shape returns the row's own Mode and Variant.
+func (e Entry) Shape() Shape { return Shape{Mode: e.Mode, Variant: e.Variant} }
+
+// appliesTo reports whether the row holds for shape s, and how specific the
+// match is: one point each for a Mode and a Variant the row pins.
+func (e Entry) appliesTo(s Shape) (specificity int, ok bool) {
+	if e.Mode != "" {
+		if e.Mode != s.Mode {
+			return 0, false
+		}
+		specificity++
+	}
+	if e.Variant != "" {
+		if e.Variant != s.Variant {
+			return 0, false
+		}
+		specificity++
+	}
+	return specificity, true
+}
+
+// For returns the rows that apply to runtime r in shape s: rows whose Mode and
+// Variant are each empty or equal to s's. The zero Shape returns only the
+// every-mode rows.
+func For(r runtimes.ID, s Shape) []Entry {
 	var out []Entry
 	for _, e := range table {
-		if e.Provider == p && (e.Mode == "" || e.Mode == m) {
+		if _, ok := e.appliesTo(s); e.Provider == r && ok {
 			out = append(out, e.clone())
 		}
 	}
 	return out
 }
 
-// Find returns the row for (p, m, c). A row for the exact mode wins over an
-// every-mode row; among rows of equal specificity the first in Table order
+// Find returns the row for (r, s, c). The most specific applicable row wins:
+// one pinning both Mode and Variant beats one pinning either, which beats an
+// every-mode row. Among rows of equal specificity the first in Table order
 // (the primary) wins.
-func Find(p Provider, m Mode, c Concern) (Entry, bool) {
-	var fallback *Entry
+func Find(r runtimes.ID, s Shape, c Concern) (Entry, bool) {
+	var best *Entry
+	bestSpec := -1
 	for i := range table {
 		e := &table[i]
-		if e.Provider != p || e.Concern != c {
+		if e.Provider != r || e.Concern != c {
 			continue
 		}
-		if e.Mode == m && m != "" {
-			return e.clone(), true
-		}
-		if e.Mode == "" && fallback == nil {
-			fallback = e
+		if spec, ok := e.appliesTo(s); ok && spec > bestSpec {
+			best, bestSpec = e, spec
 		}
 	}
-	if fallback != nil {
-		return fallback.clone(), true
+	if best == nil {
+		return Entry{}, false
 	}
-	return Entry{}, false
+	return best.clone(), true
 }
 
 // SkillRoot returns the row saying which root, and which relative prefix under
-// it, a skill package (<name>/SKILL.md) is placed under for provider p in mode
-// m. Flag, Env and CWD on the row are what the launch must also carry for the
+// it, a skill package (<name>/SKILL.md) is placed under for runtime r in shape
+// s. Flag, Env and CWD on the row are what the launch must also carry for the
 // harness to scan it.
-func SkillRoot(p Provider, m Mode) (Entry, bool) { return Find(p, m, Skills) }
+func SkillRoot(r runtimes.ID, s Shape) (Entry, bool) { return Find(r, s, Skills) }
 
-// Providers returns the providers in the table, sorted.
-func Providers() []Provider {
-	seen := map[Provider]bool{}
-	var out []Provider
+// Runtimes returns the runtimes the table has rows for, in canonical
+// (runtimes.IDs) order. A runtime without rows has no boot-dir layout: it is
+// launched only over ACP.
+func Runtimes() []runtimes.ID {
+	have := map[runtimes.ID]bool{}
 	for _, e := range table {
-		if !seen[e.Provider] {
-			seen[e.Provider] = true
-			out = append(out, e.Provider)
+		have[e.Provider] = true
+	}
+	var out []runtimes.ID
+	for _, id := range runtimes.IDs() {
+		if have[id] {
+			out = append(out, id)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
@@ -178,11 +207,7 @@ func (e Entry) clone() Entry {
 		}
 		e.Env = env
 	}
-	e.Aliases = append([]string(nil), e.Aliases...)
 	e.Probe = append([]string(nil), e.Probe...)
-	if len(e.Aliases) == 0 {
-		e.Aliases = nil
-	}
 	if len(e.Probe) == 0 {
 		e.Probe = nil
 	}
