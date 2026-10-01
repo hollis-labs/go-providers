@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -12,11 +13,13 @@ import (
 //
 // Two argv shapes are supported, selected by the Mode field:
 //
-//   - "" (default, exec mode): emits `codex exec <prompt> --json`. One
+//   - "" (default, exec mode): emits `codex exec … --json -- <prompt>`. One
 //     subprocess per turn. Turn boundary: llmtypes.EventDone on the
 //     `turn.completed` event; llmtypes.EventError on `turn.failed` or a
 //     top-level `error` event. ParseLine handles the line-delimited
-//     stream-json events.
+//     stream-json events; `thread.started` reports the thread id as the
+//     session id, and a turn given that id resumes the thread with
+//     `exec … resume <id> -- <prompt>`.
 //
 //   - "app-server": emits `codex app-server`. One long-lived subprocess
 //     speaking JSON-RPC 2.0 over stdio (default `--listen stdio://`;
@@ -39,8 +42,9 @@ type CodexAdapter struct {
 	// for codex exec and opencode run before the prompt.
 	ExtraArgs []string
 
-	// Mode selects the argv shape. "" or "exec" → `codex exec`
-	// (single-turn subprocess). "app-server" → `codex app-server`
+	// Mode selects the argv shape. "" or "exec" → `codex exec` (a
+	// subprocess per turn; a turn given a thread id resumes it).
+	// "app-server" → `codex app-server`
 	// (long-lived JSON-RPC daemon over stdio).
 	Mode string
 
@@ -131,8 +135,9 @@ func NewCodexAdapterAppServer() *CodexAdapter { return &CodexAdapter{Mode: "app-
 func (a *CodexAdapter) Name() string { return "codex" }
 
 // BuildArgs resolves Codex's launch convention (see codexConvention) from the
-// adapter's fields. exec mode is one turn and ignores cliSessionID; app-server
-// mode ignores the prompt and cliSessionID, which travel over JSON-RPC.
+// adapter's fields. In exec mode a non-empty cliSessionID resumes that thread
+// (`resume <id>` before the prompt); app-server mode ignores the prompt and
+// cliSessionID, which travel over JSON-RPC.
 func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
 	shape := codexShape(a)
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Codex, shape, a.ProjectDir)}
@@ -157,9 +162,26 @@ func (a *CodexAdapter) Detect() (string, bool) {
 	return detect(runtimes.Codex, a.Binary)
 }
 
+// IsSessionLost implements SessionLostClassifier for exec mode. `codex exec
+// … resume <id>` with a thread codex has no rollout for writes "no rollout
+// found for thread id <id>" to stderr, prints nothing on stdout and exits 1
+// (codex-cli 0.159.2, providertest/fixtures/codex/exec_resume_unknown_id).
+// app-server reports the same loss as a JSON-RPC error, which agentkit's
+// turn package classifies; this method does not see it.
+func (a *CodexAdapter) IsSessionLost(stderrTail []byte) bool {
+	return bytes.Contains(stderrTail, []byte("no rollout found for thread id"))
+}
+
 // Codex JSONL event types.
 type codexEvent struct {
 	Type string `json:"type"`
+}
+
+// codexThreadStarted is exec's first line. A resumed turn reports the
+// thread it resumed, under the same id (codex-cli 0.159.2,
+// providertest/fixtures/codex/exec_turn2_resume).
+type codexThreadStarted struct {
+	ThreadID string `json:"thread_id"`
 }
 
 type codexItemMessage struct {
@@ -270,7 +292,18 @@ func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 		}
 		return []llmtypes.StreamEvent{{Type: llmtypes.EventError, Error: "codex error"}}, nil
 
-	case "thread.started", "turn.started":
+	case "thread.started":
+		// The thread id is the session a later turn resumes.
+		var started codexThreadStarted
+		if err := json.Unmarshal(line, &started); err != nil {
+			return nil, fmt.Errorf("parse codex thread.started: %w", err)
+		}
+		if started.ThreadID == "" {
+			return nil, nil
+		}
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventSessionID, SessionID: started.ThreadID}}, nil
+
+	case "turn.started":
 		// Informational — skip.
 		return nil, nil
 

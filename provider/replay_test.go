@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -159,32 +160,60 @@ func TestReplay_ClaudePrint(t *testing.T) {
 func TestReplay_CodexExec(t *testing.T) {
 	fake := providertest.New(t, "codex",
 		providertest.Replay("codex/exec_turn1"),
+		providertest.Replay("codex/exec_turn2_resume"),
 		providertest.Replay("codex/exec_resume_unknown_id"),
 		providertest.Replay("codex/exec_tool_use"),
 		providertest.Replay("codex/exec_error_unknown_model"),
 	)
-	adapter := NewCodexAdapter()
+	adapter := &CodexAdapter{ProjectDir: "/work/project"}
 
-	// The exec adapter neither reports thread.started's thread_id nor
-	// builds resume argv; exec mode is single-turn.
+	// thread.started's thread id is the session a later turn resumes.
 	turn1 := runTurn(t, adapter, fake.Path, "")
+	sid, ok := turn1.first(llmtypes.EventSessionID)
+	if !ok || sid.SessionID == "" {
+		t.Fatalf("turn 1 reported no thread id: %+v", turn1.events)
+	}
 	if turn1.terminal(t).Type != llmtypes.EventDone || turn1.text() == "" {
 		t.Errorf("turn 1: text %q, terminal %+v", turn1.text(), turn1.terminal(t))
 	}
-	if c := fake.Call(0); c.Args[0] != "exec" || !c.HasArg("--json") {
-		t.Errorf("argv = %q", c.Args)
+	if c := fake.Call(0); c.Args[0] != "exec" || !c.HasArg("--json") || c.HasArg("resume") {
+		t.Errorf("turn 1 argv = %q", c.Args)
 	}
 
-	// The fixture is `codex exec resume <unknown id>`; with no resume argv
-	// in the adapter, this checks only how the bridge surfaces the failure.
-	// CodexAdapter has no IsSessionLost on purpose: exec does not resume
-	// (see the codex descriptor in package registry).
-	lost := runTurn(t, adapter, fake.Path, "")
+	// The resume turn: `resume <id>` after every exec option, --cd
+	// included, and the prompt after "--" (CW-20261001-0109).
+	turn2 := runTurn(t, adapter, fake.Path, sid.SessionID)
+	c := fake.Call(1)
+	if got, _ := c.ArgAfter("resume"); got != sid.SessionID {
+		t.Errorf("resume turn argv = %q, want resume %s", c.Args, sid.SessionID)
+	}
+	if cd, _ := c.ArgAfter("--cd"); cd != "/work/project" || slices.Index(c.Args, "--cd") > slices.Index(c.Args, "resume") {
+		t.Errorf("resume turn argv = %q, want --cd /work/project before resume", c.Args)
+	}
+	if n := len(c.Args); n < 2 || c.Args[n-2] != "--" {
+		t.Errorf("resume turn argv = %q, want the prompt last, after --", c.Args)
+	}
+	if again, _ := turn2.first(llmtypes.EventSessionID); again.SessionID != sid.SessionID {
+		t.Errorf("resume reported thread %q, want %q", again.SessionID, sid.SessionID)
+	}
+	if turn2.terminal(t).Type != llmtypes.EventDone || turn2.text() == "" {
+		t.Errorf("resume turn: text %q, terminal %+v", turn2.text(), turn2.terminal(t))
+	}
+
+	lost := runTurn(t, adapter, fake.Path, unknownSessionID)
+	if got, _ := fake.Call(2).ArgAfter("resume"); got != unknownSessionID {
+		t.Errorf("unknown thread argv = %q", fake.Call(2).Args)
+	}
 	if lost.terminal(t).Type != llmtypes.EventError {
 		t.Errorf("unknown thread: terminal = %+v, want an error", lost.terminal(t))
 	}
-	if !strings.Contains(strings.Join(lost.stderr, "\n"), "no rollout found for thread id") {
-		t.Errorf("unknown thread: stderr = %q", lost.stderr)
+	if !adapter.IsSessionLost([]byte(strings.Join(lost.stderr, "\n"))) {
+		t.Errorf("IsSessionLost(%q) = false, want the lost thread classified", lost.stderr)
+	}
+	for name, ok := range map[string]turnResult{"turn 1": turn1, "resume turn": turn2} {
+		if adapter.IsSessionLost([]byte(strings.Join(ok.stderr, "\n"))) {
+			t.Errorf("IsSessionLost(%s stderr %q) = true", name, ok.stderr)
+		}
 	}
 
 	tool := runTurn(t, adapter, fake.Path, "")

@@ -528,8 +528,8 @@ func TestCodexBootDirSpec(t *testing.T) {
 
 // TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg is a regression
 // guard for the exec-mode (default) branch: BootDirSpec MUST keep emitting
-// `--cd {{.ProjectDir}}` so single-turn `codex exec` invocations continue
-// to receive the project root. Pins behavior alongside the app-server
+// `--cd {{.ProjectDir}}` so `codex exec` invocations, resume turns
+// included, continue to receive the project root. Pins behavior alongside the app-server
 // suppression below.
 func TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg(t *testing.T) {
 	a := NewCodexAdapter()

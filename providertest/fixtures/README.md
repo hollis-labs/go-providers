@@ -84,8 +84,8 @@ stay out of `system/init`.
 | Fixture | What it is |
 |---|---|
 | `exec_turn1` | `exec "say hi" --json --skip-git-repo-check` |
-| `exec_turn2_resume` | `exec resume <thread> "say bye" --json …` |
-| `exec_resume_unknown_id` | `exec resume <unknown id>`: no stdout, `no rollout found for thread id` on stderr, exit 1 |
+| `exec_turn2_resume` | `exec … --json --skip-git-repo-check --cd <project> resume <thread> -- "say bye"`, CodexAdapter's resume argv: `thread.started` reports the same thread id |
+| `exec_resume_unknown_id` | the same form with an unknown id: no stdout, `no rollout found for thread id` on stderr, exit 1 |
 | `exec_tool_use` | `-s read-only`, `echo providertest`: `command_execution` item started/completed |
 | `exec_error_unknown_model` | `-m gpt-nonexistent-0`: `error` and `turn.failed` events, exit 1 |
 | `app_server_turn` | `app-server`: initialize, initialized, thread/start, two turn/start turns to `turn/completed`, stdin closed |

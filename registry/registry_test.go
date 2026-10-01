@@ -110,10 +110,15 @@ func TestCapabilitiesPerMode(t *testing.T) {
 	if !codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapApprovals) || codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapApprovals) {
 		t.Error("codex asks for approval in app-server mode only")
 	}
-	// thread/resume measured live (providertest codex/app_server_resume);
-	// exec's adapter does not resume.
-	if !codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapResume) || codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapResume) {
-		t.Error("codex resumes in app-server mode only")
+	// thread/resume and `exec … resume <id>` measured live (providertest
+	// codex/app_server_resume, codex/exec_turn2_resume). exec reads a lost
+	// thread from stderr; app-server's loss is a JSON-RPC error agentkit
+	// classifies.
+	if !codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapResume) || !codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapResume) {
+		t.Error("codex resumes in app-server and exec modes")
+	}
+	if codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapSessionLostClassifier) || !codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapSessionLostClassifier) {
+		t.Error("codex classifies a lost session from stderr in exec mode only")
 	}
 	claude := mustLookup(t, "claude")
 	if claude.Has(runtimes.ModePTY, runtimes.CapTypedEvents) || !claude.Has(runtimes.ModeStreamingStdio, runtimes.CapTypedEvents) {
