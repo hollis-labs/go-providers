@@ -19,8 +19,9 @@
 // blobs (thinking signatures, encrypted reasoning) become REDACTED. Run the
 // scrub grep in providertest/fixtures/README.md before committing.
 //
-// opencode and antigravity fixtures were captured by hand earlier and are
-// not re-recorded here; copilot and pi fixtures are synthetic.
+// opencode's run fixtures and the antigravity fixtures were captured by hand
+// earlier and are not re-recorded here (-runtimes opencode records only
+// serve_abort); copilot and pi fixtures are synthetic.
 package main
 
 import (
@@ -33,6 +34,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,6 +87,8 @@ func main() {
 			c.claude()
 		case "codex":
 			c.codex()
+		case "opencode":
+			c.opencode()
 		default:
 			log.Fatalf("no capture plan for runtime %q", c.runtime)
 		}
@@ -220,12 +225,21 @@ func (c *capturer) codex() {
 	codexExec := func(stem string, args ...string) result {
 		return c.perTurn(stem, "codex", append(append([]string{"exec"}, args...), model...))
 	}
-	t1 := codexExec("exec_turn1", trivialPrompt, "--json", "--skip-git-repo-check")
-	thread := t1.field("thread_id")
-	codexExec("exec_turn2_resume", "resume", thread, secondPrompt, "--json", "--skip-git-repo-check")
-	codexExec("exec_resume_unknown_id", "resume", lostID, trivialPrompt, "--json", "--skip-git-repo-check")
-	codexExec("exec_tool_use", toolPrompt, "--json", "--skip-git-repo-check", "-s", "read-only")
-	c.perTurn("exec_error_unknown_model", "codex", []string{"exec", trivialPrompt, "--json", "--skip-git-repo-check", "-m", "gpt-nonexistent-0"})
+	if c.want("exec_turn1", "exec_turn2_resume") {
+		t1 := codexExec("exec_turn1", trivialPrompt, "--json", "--skip-git-repo-check")
+		if c.want("exec_turn2_resume") {
+			codexExec("exec_turn2_resume", "resume", t1.field("thread_id"), secondPrompt, "--json", "--skip-git-repo-check")
+		}
+	}
+	if c.want("exec_resume_unknown_id") {
+		codexExec("exec_resume_unknown_id", "resume", lostID, trivialPrompt, "--json", "--skip-git-repo-check")
+	}
+	if c.want("exec_tool_use") {
+		codexExec("exec_tool_use", toolPrompt, "--json", "--skip-git-repo-check", "-s", "read-only")
+	}
+	if c.want("exec_error_unknown_model") {
+		c.perTurn("exec_error_unknown_model", "codex", []string{"exec", trivialPrompt, "--json", "--skip-git-repo-check", "-m", "gpt-nonexistent-0"})
+	}
 
 	rpc := func(d *duplexSession) *rpcClient { return &rpcClient{d: d} }
 	initialize := func(r *rpcClient) {
@@ -240,35 +254,237 @@ func (c *capturer) codex() {
 		})
 		r.d.readUntil(func(line []byte) bool { return jsonField(line, "method") == "turn/completed" })
 	}
-	var appThread string
-	c.duplex("app_server_turn", "codex", []string{"app-server"}, func(d *duplexSession) {
-		r := rpc(d)
-		initialize(r)
-		res := r.call("thread/start", map[string]any{"cwd": c.proj, "model": *codexModel})
-		appThread = threadID(res)
-		turn(r, appThread, trivialPrompt)
-		turn(r, appThread, secondPrompt)
-	})
-	c.duplex("app_server_resume", "codex", []string{"app-server"}, func(d *duplexSession) {
-		r := rpc(d)
-		initialize(r)
-		r.call("thread/resume", map[string]any{"threadId": appThread, "model": *codexModel})
-		turn(r, appThread, trivialPrompt)
-	})
-	c.duplex("app_server_resume_unknown_id", "codex", []string{"app-server"}, func(d *duplexSession) {
-		r := rpc(d)
-		initialize(r)
-		r.call("thread/resume", map[string]any{"threadId": lostID})
-	})
-	c.duplex("app_server_tool_approval", "codex", []string{"app-server"}, func(d *duplexSession) {
-		r := rpc(d)
-		initialize(r)
-		res := r.call("thread/start", map[string]any{
-			"cwd": c.proj, "model": *codexModel,
-			"approvalPolicy": "untrusted", "sandbox": "read-only",
+	if c.want("app_server_turn", "app_server_resume", "app_server_resume_unknown_id", "app_server_tool_approval") {
+		var appThread string
+		c.duplex("app_server_turn", "codex", []string{"app-server"}, func(d *duplexSession) {
+			r := rpc(d)
+			initialize(r)
+			res := r.call("thread/start", map[string]any{"cwd": c.proj, "model": *codexModel})
+			appThread = threadID(res)
+			turn(r, appThread, trivialPrompt)
+			turn(r, appThread, secondPrompt)
 		})
-		turn(r, threadID(res), "Create an empty file named providertest.txt in the current directory with the shell command `touch providertest.txt`, then say done.")
-	})
+		c.duplex("app_server_resume", "codex", []string{"app-server"}, func(d *duplexSession) {
+			r := rpc(d)
+			initialize(r)
+			r.call("thread/resume", map[string]any{"threadId": appThread, "model": *codexModel})
+			turn(r, appThread, trivialPrompt)
+		})
+		c.duplex("app_server_resume_unknown_id", "codex", []string{"app-server"}, func(d *duplexSession) {
+			r := rpc(d)
+			initialize(r)
+			r.call("thread/resume", map[string]any{"threadId": lostID})
+		})
+		c.duplex("app_server_tool_approval", "codex", []string{"app-server"}, func(d *duplexSession) {
+			r := rpc(d)
+			initialize(r)
+			res := r.call("thread/start", map[string]any{
+				"cwd": c.proj, "model": *codexModel,
+				"approvalPolicy": "untrusted", "sandbox": "read-only",
+			})
+			turn(r, threadID(res), "Create an empty file named providertest.txt in the current directory with the shell command `touch providertest.txt`, then say done.")
+		})
+	}
+	// A turn interrupted while its command runs, then a turn on the same
+	// process and thread: turn/interrupt answers {}, the turn completes with
+	// status "interrupted" (CW-20261001-0160). The sandbox lets the sleep run
+	// unasked; nothing else is asked for.
+	if c.want("app_server_interrupt") {
+		c.duplex("app_server_interrupt", "codex", []string{"app-server", "-c", `sandbox_mode="workspace-write"`, "-c", `approval_policy="never"`}, func(d *duplexSession) {
+			r := rpc(d)
+			initialize(r)
+			thread := threadID(r.call("thread/start", map[string]any{"cwd": c.proj, "model": *codexModel}))
+			started := r.call("turn/start", map[string]any{
+				"threadId": thread,
+				"input":    []map[string]any{{"type": "text", "text": "Run the shell command `sleep 30` and reply done."}},
+				"effort":   "low",
+			})
+			var res struct {
+				Result struct {
+					Turn struct {
+						ID string `json:"id"`
+					} `json:"turn"`
+				} `json:"result"`
+			}
+			_ = json.Unmarshal(started, &res)
+			d.readUntil(func(line []byte) bool {
+				return jsonField(line, "method") == "item/started" && bytes.Contains(line, []byte(`"commandExecution"`))
+			})
+			time.Sleep(time.Second)
+			r.call("turn/interrupt", map[string]any{"threadId": thread, "turnId": res.Result.Turn.ID})
+			d.readUntil(func(line []byte) bool { return jsonField(line, "method") == "turn/completed" })
+			turn(r, thread, secondPrompt)
+		})
+	}
+}
+
+// --- opencode serve -------------------------------------------------------
+
+// opencodeServeNoise are event types `opencode serve` streams about the
+// server itself (its plugins, model catalog, integrations), not the session.
+// A capture drops them; every other event is kept.
+var opencodeServeNoise = map[string]bool{
+	"plugin.added": true, "catalog.updated": true, "integration.updated": true, "reference.updated": true,
+}
+
+func (c *capturer) opencode() {
+	c.version = cliVersion("opencode")
+	// A turn aborted while its bash command runs, then a turn on the same
+	// server and session: POST /session/{id}/abort answers true, the turn
+	// ends with session.error MessageAbortedError then session.idle, and the
+	// aborted tool's cleanup follows with a second session.idle
+	// (CW-20261001-0160).
+	if c.want("serve_abort") {
+		c.httpCapture("serve_abort", "opencode", []string{"serve", "--port", "0", "--hostname", "127.0.0.1"}, func(h *httpSession) {
+			sid := jsonField(h.post("/session", map[string]any{}), "id")
+			h.post("/session/"+sid+"/prompt_async", map[string]any{"parts": []map[string]any{{"type": "text", "text": "Run the shell command `sleep 30` with the bash tool, then reply done."}}})
+			h.until(func(ev []byte) bool {
+				return bytes.Contains(ev, []byte(`"type":"tool"`)) && bytes.Contains(ev, []byte(`"status":"running"`))
+			})
+			time.Sleep(time.Second)
+			h.post("/session/"+sid+"/abort", nil)
+			h.until(func(ev []byte) bool { return jsonField(ev, "type") == "session.idle" })
+			// The aborted tool's cleanup arrives after the first idle,
+			// with a second session.idle of its own; let it land before
+			// the next turn so the fixture keeps the two apart.
+			time.Sleep(2 * time.Second)
+			h.post("/session/"+sid+"/prompt_async", map[string]any{"parts": []map[string]any{{"type": "text", "text": secondPrompt}}})
+			h.until(func(ev []byte) bool { return bytes.Contains(ev, []byte(`"type":"busy"`)) })
+			h.until(func(ev []byte) bool { return jsonField(ev, "type") == "session.idle" })
+		})
+	}
+}
+
+// httpSession records an HTTP server's exchange with one client: each
+// request and its response, and the server-sent events in the order they
+// arrived. The file is <stem>.http.jsonl, one step per line:
+// {"request":{"method","path","body"}}, {"response":{"status","body"}},
+// {"event":{...}}.
+type httpSession struct {
+	c      *capturer
+	base   string
+	dir    string
+	mu     sync.Mutex
+	steps  []string
+	events chan []byte
+}
+
+func (c *capturer) httpCapture(stem, bin string, args []string, drive func(*httpSession)) {
+	log.Printf("%s/%s: %s %s (http)", c.runtime, stem, bin, strings.Join(args, " "))
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = c.proj
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	listen := regexp.MustCompile(`listening on (http://\S+)`)
+	sc := bufio.NewScanner(out)
+	var base string
+	for sc.Scan() {
+		if m := listen.FindStringSubmatch(sc.Text()); m != nil {
+			base = m[1]
+			break
+		}
+	}
+	if base == "" {
+		log.Fatalf("%s: no listening line", bin)
+	}
+	go func() {
+		for sc.Scan() {
+		}
+	}()
+	h := &httpSession{c: c, base: base, dir: c.proj, events: make(chan []byte, 4096)}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/event?directory="+url.QueryEscape(c.proj), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() {
+		defer func() { _ = resp.Body.Close() }()
+		r := bufio.NewReaderSize(resp.Body, 1<<20)
+		for {
+			line, err := r.ReadBytes('\n')
+			if data, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:")); ok {
+				data = bytes.TrimSpace(data)
+				if !opencodeServeNoise[jsonField(data, "type")] && json.Valid(data) {
+					h.record("event", data)
+				}
+				h.events <- data
+			}
+			if err != nil {
+				close(h.events)
+				return
+			}
+		}
+	}()
+	drive(h)
+	time.Sleep(500 * time.Millisecond) // let the last events land
+	h.mu.Lock()
+	steps := append([]string(nil), h.steps...)
+	h.mu.Unlock()
+	if !c.want(stem) {
+		return
+	}
+	c.write(stem+".http.jsonl", []byte(strings.Join(steps, "\n")+"\n"))
+	c.argv[stem] = c.scrub.args(append([]string{bin}, args...))
+}
+
+func (h *httpSession) record(kind string, raw []byte) {
+	scrubbed := h.c.scrub.line(raw)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.steps = append(h.steps, fmt.Sprintf(`{%q:%s}`, kind, scrubbed))
+}
+
+// post sends a POST under the session's directory and records the
+// exchange; it returns the response body.
+func (h *httpSession) post(path string, body any) []byte {
+	var rd io.Reader
+	reqBody := []byte("null")
+	if body != nil {
+		reqBody, _ = json.Marshal(body)
+		rd = bytes.NewReader(reqBody)
+	}
+	req, _ := http.NewRequest(http.MethodPost, h.base+path+"?directory="+url.QueryEscape(h.dir), rd)
+	req.Header.Set("Content-Type", "application/json")
+	h.record("request", []byte(fmt.Sprintf(`{"method":"POST","path":%q,"body":%s}`, path, reqBody)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	respBody := bytes.TrimSpace(b)
+	if len(respBody) == 0 || !json.Valid(respBody) {
+		respBody, _ = json.Marshal(string(b))
+	}
+	h.record("response", []byte(fmt.Sprintf(`{"status":%d,"body":%s}`, resp.StatusCode, respBody)))
+	return b
+}
+
+// until waits for an event done accepts.
+func (h *httpSession) until(done func([]byte) bool) {
+	deadline := time.After(*timeout)
+	for {
+		select {
+		case ev, ok := <-h.events:
+			if !ok {
+				log.Fatalf("%s: event stream ended", h.c.runtime)
+			}
+			if done(ev) {
+				return
+			}
+		case <-deadline:
+			log.Fatalf("%s: timed out waiting for an event", h.c.runtime)
+		}
+	}
 }
 
 func threadID(res []byte) string {
@@ -529,6 +745,13 @@ func newScrubber(work, proj string) *scrubber {
 		{tmp + "/", "/tmp/"},
 		{home, "/home/user"},
 	}
+	// A CLI can report a path without its leading slash (opencode's
+	// session "path"); scrub that form too.
+	for _, l := range append([][2]string(nil), s.literal...) {
+		if bare := strings.TrimPrefix(l[0], "/"); bare != l[0] && len(bare) > 1 {
+			s.literal = append(s.literal, [2]string{bare, strings.TrimPrefix(l[1], "/")})
+		}
+	}
 	sort.SliceStable(s.literal, func(i, j int) bool { return len(s.literal[i][0]) > len(s.literal[j][0]) })
 	if user != "" && user != "user" && user != "root" {
 		s.literal = append(s.literal, [2]string{user, "user"})
@@ -602,8 +825,11 @@ func (c *capturer) writeManifest() {
 			Argv    map[string][]string `json:"argv"`
 		}
 		b, err := os.ReadFile(filepath.Join(c.dir, "captured.json"))
-		if err != nil || json.Unmarshal(b, &prev) != nil {
-			log.Fatalf("-only needs an existing %s/captured.json to merge into", c.dir)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			prev.Version, prev.Argv = c.version, map[string][]string{}
+		case err != nil || json.Unmarshal(b, &prev) != nil:
+			log.Fatalf("-only: cannot read %s/captured.json to merge into", c.dir)
 		}
 		if prev.Version != c.version {
 			log.Fatalf("-only: %s is %s, the manifest records %s; re-record every fixture", c.runtime, c.version, prev.Version)

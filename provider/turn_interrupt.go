@@ -67,3 +67,50 @@ func (a *ClaudeAdapter) InterruptResponse(line []byte) (string, bool, error) {
 	}
 	return frame.Response.RequestID, true, nil
 }
+
+// RPCTurnInterrupter is an optional CLIAdapter extension for a JSON-RPC
+// runtime whose protocol can interrupt the turn in flight and keep its
+// process: the session follows turns through TurnNotification and interrupts
+// the open one with the request InterruptCall returns. The turn then ends the
+// runtime's usual way and the next turn runs on the same process.
+type RPCTurnInterrupter interface {
+	// TurnNotification reports what a server notification says about a
+	// turn: its handle and whether it started or ended. Any other
+	// notification returns neither. A handle is opaque to the caller; it
+	// identifies one turn and is passed back to InterruptCall.
+	TurnNotification(method string, params json.RawMessage) (handle json.RawMessage, started, ended bool)
+	// InterruptCall returns the request that interrupts the turn handle
+	// names.
+	InterruptCall(handle json.RawMessage) (method string, params json.RawMessage)
+}
+
+// TurnNotification follows Codex app-server turns: turn/started opens one
+// and turn/completed ends it, each carrying {threadId, turn: {id}}. The
+// handle is {"threadId", "turnId"}.
+func (a *CodexAdapter) TurnNotification(method string, params json.RawMessage) (json.RawMessage, bool, bool) {
+	started := method == "turn/started"
+	if !started && method != "turn/completed" {
+		return nil, false, false
+	}
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Turn     struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal(params, &p) != nil || p.ThreadID == "" || p.Turn.ID == "" {
+		return nil, false, false
+	}
+	handle, _ := json.Marshal(map[string]string{"threadId": p.ThreadID, "turnId": p.Turn.ID})
+	return handle, started, !started
+}
+
+// InterruptCall is Codex app-server's turn/interrupt for the turn. Codex
+// answers {} and completes the turn with status "interrupted"; the thread
+// and process stay up and the next turn/start runs normally. With no turn
+// running it answers a JSON-RPC error ("no active turn to interrupt").
+// Measured on codex-cli 0.159.2 (providertest fixture
+// codex/app_server_interrupt.transcript.jsonl).
+func (a *CodexAdapter) InterruptCall(handle json.RawMessage) (string, json.RawMessage) {
+	return "turn/interrupt", handle
+}
