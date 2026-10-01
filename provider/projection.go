@@ -353,6 +353,41 @@ const (
 	EffectAntigravityAuth        ProviderEffectKind = "antigravity-auth"
 )
 
+// EffectClass says what a ProviderEffect touches when it is carried out.
+type EffectClass string
+
+const (
+	// EffectClassCredential writes or exposes a credential.
+	EffectClassCredential EffectClass = "credential"
+	// EffectClassHostConfig changes host state outside the boot dir, such
+	// as Claude's workspace-trust record.
+	EffectClassHostConfig EffectClass = "host-config"
+)
+
+// Class reports what an effect of kind k touches. An unknown kind is a
+// credential: the class that is handled most carefully.
+func (k ProviderEffectKind) Class() EffectClass {
+	switch k {
+	case EffectClaudeWorkspaceTrust:
+		return EffectClassHostConfig
+	default:
+		return EffectClassCredential
+	}
+}
+
+// Secret reports whether an effect of kind k puts secret bytes at its
+// destination, so a host must redact them. Claude's credential helper
+// serializes only the helper's path, and agy's credentials are never
+// projected. An unknown kind is secret.
+func (k ProviderEffectKind) Secret() bool {
+	switch k {
+	case EffectClaudeCredentialHelper, EffectClaudeWorkspaceTrust, EffectAntigravityAuth:
+		return false
+	default:
+		return true
+	}
+}
+
 // ProviderEffect names runtime preparation that pure projection intentionally
 // does not perform.
 type ProviderEffect struct {

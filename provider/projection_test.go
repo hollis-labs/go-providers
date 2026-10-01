@@ -307,3 +307,25 @@ func containsExact(values []string, want string) bool {
 	}
 	return false
 }
+
+// Hosts classify and redact projection effects from these two methods rather
+// than keeping their own per-kind table; an unknown kind fails closed.
+func TestProviderEffectKindClassAndSecret(t *testing.T) {
+	cases := []struct {
+		kind   ProviderEffectKind
+		class  EffectClass
+		secret bool
+	}{
+		{EffectClaudeCredentialHelper, EffectClassCredential, false},
+		{EffectClaudeWorkspaceTrust, EffectClassHostConfig, false},
+		{EffectCodexAuthJSON, EffectClassCredential, true},
+		{EffectOpencodeProviderAuth, EffectClassCredential, true},
+		{EffectAntigravityAuth, EffectClassCredential, false},
+		{"some-future-effect", EffectClassCredential, true},
+	}
+	for _, c := range cases {
+		if c.kind.Class() != c.class || c.kind.Secret() != c.secret {
+			t.Errorf("%s: Class %s Secret %v, want %s %v", c.kind, c.kind.Class(), c.kind.Secret(), c.class, c.secret)
+		}
+	}
+}

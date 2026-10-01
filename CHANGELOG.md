@@ -16,6 +16,10 @@
   out-of-tree registration, and `RegisterForTest` exists only for test fakes.
   Copilot and Pi are ACP-only, with no layout rows.
 - `layout.Shape` and `layout.Variant` (`VariantBare`), and `layout.Runtimes`.
+- `ProviderEffectKind.Class` (`EffectClassCredential`, `EffectClassHostConfig`)
+  and `ProviderEffectKind.Secret`, so hosts classify and redact projection
+  effects from go-providers rather than keeping a per-kind table. An unknown
+  kind is a secret credential.
 
 ### Changed
 
