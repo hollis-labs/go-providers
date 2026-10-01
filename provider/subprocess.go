@@ -155,7 +155,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 	if hasTyped && stderr != nil {
 		go func() {
 			defer close(stderrDone)
-			defer stderr.Close()
+			defer func() { _ = stderr.Close() }()
 			scanner := bufio.NewScanner(stderr)
 			scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 			for scanner.Scan() {
@@ -169,7 +169,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 	go func() {
 		defer close(ch)
-		defer stdout.Close()
+		defer func() { _ = stdout.Close() }()
 		defer stopHeartbeat()
 
 		scanner := bufio.NewScanner(stdout)

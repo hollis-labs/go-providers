@@ -1,0 +1,55 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the lint ratchet below diffs against a base commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go fmt (verify)
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "Files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # docs/LAYOUT.md and layout/layout.json are generated from layout/table.go.
+      - name: layout gen -check
+        run: go run ./layout/gen -check
+
+      # .golangci.yml is the portfolio go-baseline config. Lint findings that
+      # predate it (160 at ab81540, 147 after this config's PR fixed errcheck,
+      # ineffassign and unused) are ratcheted: only lines changed since that
+      # commit are linted, so new code meets the standard while the backlog
+      # is cleaned up separately. Drop --new-from-rev once the full run is
+      # clean.
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.4
+          install-mode: goinstall
+          args: --new-from-rev=ab81540281903332964eb2eb8a20bbfeeaebc512
+
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
+      # Pinned, not @latest: an unpinned scanner changes its verdict without a
+      # commit. v1.8.0 declares `go 1.26.0`.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

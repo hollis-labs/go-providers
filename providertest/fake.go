@@ -119,13 +119,13 @@ func linkExecutable(exe, path string) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	dst, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
+		_ = dst.Close()
 		return err
 	}
 	return dst.Close()
@@ -272,7 +272,7 @@ func readCall(path string) (Call, error) {
 	if err != nil {
 		return Call{}, err
 	}
-	defer fh.Close()
+	defer func() { _ = fh.Close() }()
 	c := Call{Run: -1}
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)

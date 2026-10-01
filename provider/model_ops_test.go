@@ -35,8 +35,8 @@ func TestStaticModelSelector_explicit(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok from fallback")
 	}
-	if model != "claude-sonnet" {
-		t.Errorf("expected claude-sonnet fallback, got %s", model)
+	if prov != "anthropic" || model != "claude-sonnet" {
+		t.Errorf("expected anthropic/claude-sonnet fallback, got %s/%s", prov, model)
 	}
 }
 

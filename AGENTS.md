@@ -51,12 +51,19 @@ rate budgets, or any direct HTTP chat or embedding path.
 ```bash
 gofmt -l .
 go vet ./...
-go test -race -count=1 ./...
 go run ./layout/gen -check   # docs/LAYOUT.md and layout/layout.json are generated
+golangci-lint run --new-from-rev=ab81540281903332964eb2eb8a20bbfeeaebc512 ./...   # v2.11.4
+go test -race -count=1 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 ```
 
+`.github/workflows/check.yml` runs these on every pull request and push to
+main. `.golangci.yml` is the portfolio go-baseline config. The lint is
+ratcheted at ab81540, so only lines changed since then are linted. The
+findings that predate it are a backlog, not a gate.
+
 Smoke tests that spawn a real CLI are env-gated (`CLAUDE_PTY_SMOKE`,
-`CLAUDE_BARE_SMOKE`) and skip by default. There is no CI workflow in this repo.
+`CLAUDE_BARE_SMOKE`) and skip by default.
 
 ## Boundaries
 
