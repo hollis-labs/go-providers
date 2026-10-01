@@ -470,6 +470,15 @@ func TestEveryFixtureLoads(t *testing.T) {
 			t.Errorf("%s: directory is not a runtime id", p)
 		}
 		switch base := path.Base(p); {
+		case strings.HasSuffix(base, ".http.jsonl"):
+			// Not replayed by the fake: each line is a request, a
+			// response or a server-sent event.
+			for i, line := range providertest.FixtureLines(t, p) {
+				var step map[string]json.RawMessage
+				if json.Unmarshal(line, &step) != nil || len(step) != 1 || (step["request"] == nil && step["response"] == nil && step["event"] == nil) {
+					t.Errorf("%s:%d: not a request, response or event: %.80s", p, i+1, line)
+				}
+			}
 		case strings.HasSuffix(base, ".transcript.jsonl"):
 			stems[strings.TrimSuffix(p, ".transcript.jsonl")] = true
 		case strings.HasSuffix(base, ".jsonl"):

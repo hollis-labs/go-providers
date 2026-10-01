@@ -1,5 +1,13 @@
 {
   "argv": {
+    "app_server_interrupt": [
+      "codex",
+      "app-server",
+      "-c",
+      "sandbox_mode=\"workspace-write\"",
+      "-c",
+      "approval_policy=\"never\""
+    ],
     "app_server_resume": [
       "codex",
       "app-server"

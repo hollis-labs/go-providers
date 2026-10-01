@@ -44,3 +44,53 @@ func TestClaudeInterruptFrames(t *testing.T) {
 		}
 	}
 }
+
+var _ RPCTurnInterrupter = (*CodexAdapter)(nil)
+
+// The interrupt the capture sent is the one InterruptCall builds from the
+// turn/started notification before it.
+func TestCodexRPCTurnInterrupt(t *testing.T) {
+	a := NewCodexAdapterAppServer()
+	var handle json.RawMessage
+	var sent, ended map[string]any
+	for _, line := range providertest.FixtureLines(t, "codex/app_server_interrupt.transcript.jsonl") {
+		var step struct {
+			Send, Recv json.RawMessage
+		}
+		if json.Unmarshal(line, &step) != nil {
+			continue
+		}
+		var f struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		_ = json.Unmarshal(append(step.Send, step.Recv...), &f)
+		switch {
+		case step.Recv != nil && f.Method == "turn/interrupt" && sent == nil:
+			_ = json.Unmarshal(f.Params, &sent)
+		case step.Send != nil && handle == nil:
+			if h, started, _ := a.TurnNotification(f.Method, f.Params); started {
+				handle = h
+			}
+		case step.Send != nil && ended == nil:
+			if h, _, done := a.TurnNotification(f.Method, f.Params); done {
+				_ = json.Unmarshal(h, &ended)
+			}
+		}
+	}
+	if handle == nil || sent == nil {
+		t.Fatalf("fixture lacks a turn/started or the turn/interrupt: %s, %v", handle, sent)
+	}
+	method, params := a.InterruptCall(handle)
+	var built map[string]any
+	_ = json.Unmarshal(params, &built)
+	if method != "turn/interrupt" || built["threadId"] != sent["threadId"] || built["turnId"] != sent["turnId"] {
+		t.Errorf("InterruptCall = %s %v, the capture sent %v", method, built, sent)
+	}
+	if ended["turnId"] != built["turnId"] {
+		t.Errorf("the turn/completed after the interrupt names %v, want the interrupted turn", ended)
+	}
+	if _, s, e := a.TurnNotification("item/started", json.RawMessage(`{"threadId":"t","turn":{"id":"x"}}`)); s || e {
+		t.Error("an item notification read as a turn boundary")
+	}
+}

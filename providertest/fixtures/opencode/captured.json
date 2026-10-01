@@ -1,0 +1,15 @@
+{
+  "argv": {
+    "serve_abort": [
+      "opencode",
+      "serve",
+      "--port",
+      "0",
+      "--hostname",
+      "127.0.0.1"
+    ]
+  },
+  "captured": "2026-10-01",
+  "runtime": "opencode",
+  "version": "1.18.33"
+}

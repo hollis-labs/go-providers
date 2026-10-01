@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.40.0 — 2026-10-01
+
+Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
+
+### Added
+
+- **`provider.RPCTurnInterrupter`**, an optional CLIAdapter extension for a
+  JSON-RPC runtime that can interrupt the turn in flight and keep its
+  process. `TurnNotification(method, params)` follows turns through the
+  runtime's notifications, and `InterruptCall(handle)` is the request that
+  interrupts one. `CodexAdapter` implements it: `turn/started` and
+  `turn/completed` carry `{threadId, turn: {id}}`, and the interrupt is
+  `turn/interrupt {threadId, turnId}`. Measured on codex-cli 0.159.2:
+  - Codex answers `{}` and completes the turn with `status: "interrupted"`.
+  - The thread and the process stay up, and the next `turn/start` runs
+    normally.
+  - With no turn running, the interrupt is a JSON-RPC error: -32600 "no
+    active turn to interrupt".
+- **Live fixtures:**
+  - `codex/app_server_interrupt`.
+  - `opencode/serve_abort`, in a new `.http.jsonl` format: requests,
+    responses and server-sent events in arrival order. OpenCode's
+    `POST /session/{id}/abort` answers `true`. The turn ends with
+    `session.error` `MessageAbortedError` and `session.idle`; the aborted
+    tool's cleanup then sends a second `session.idle`. The next prompt runs on
+    the same session.
+- **`hack/capturefixtures`:**
+  - It records `opencode serve` (`-runtimes opencode`, `serve_abort` only).
+    The run fixtures stay hand-captured.
+  - The codex recipes honour `-only`.
+  - `-only` starts a manifest when the runtime has none.
+  - The scrubber also replaces paths reported without their leading slash
+    (opencode reports the project that way), and replaces OpenCode's `ses_`,
+    `prt_` and `evt_` ids with `…_fixtureNNNN` placeholders. This is the
+    policy v0.39.1's run fixtures follow.
+
 ## v0.39.3 — 2026-10-01
 
 ### Fixed

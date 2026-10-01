@@ -42,6 +42,21 @@ live request's id (and a Claude `control_response` with the live
 `control_request`'s `request_id`), and otherwise follows the lines in order. The step
 reference is `providertest.Step`.
 
+**HTTP** (a CLI serving HTTP and server-sent events: opencode serve):
+`<stem>.http.jsonl`, one step per line, in the order the capture saw them:
+
+| Line | Meaning |
+|---|---|
+| `{"request":{"method","path","body"}}` | the client's request |
+| `{"response":{"status","body"}}` | the server's answer |
+| `{"event":{…}}` | an event on the server's `/event` stream |
+
+Events between two requests arrived after the first; a test replaying the
+file releases them as the live client makes that request. providertest
+does not replay HTTP itself; agentkit's serve-http tests do it with
+`httptest`. Events about the server itself (`plugin.added`,
+`catalog.updated`, `integration.updated`, `reference.updated`) are dropped.
+
 `captured.json` in a captured directory records the CLI version, the
 capture date and the exact argv of each fixture.
 
@@ -77,6 +92,7 @@ stay out of `system/init`.
 | `app_server_resume` | initialize, thread/resume of that thread, one turn |
 | `app_server_resume_unknown_id` | thread/resume of an unknown id: JSON-RPC error -32600 `no rollout found`; the server stays up until stdin closes |
 | `app_server_tool_approval` | thread/start with `approvalPolicy: untrusted`, sandbox read-only: an `item/commandExecution/requestApproval` server request answered `{"decision":"accept"}`, then the command runs |
+| `app_server_interrupt` | `app-server -c sandbox_mode="workspace-write" -c approval_policy="never"`: a turn whose `sleep 30` is running gets `turn/interrupt {threadId, turnId}`; Codex answers `{}` and sends `turn/completed` with `status: "interrupted"`; a second turn/start on the same thread completes. Captured with `-only app_server_interrupt`. Also measured, not in the fixture: `turn/interrupt` with no turn running is a JSON-RPC error, -32600 "no active turn to interrupt" |
 
 `exec` reads stdin when it is not a terminal, so the captures carry
 `Reading additional input from stdin...` on stderr, as real runs under a
@@ -96,6 +112,7 @@ session.
 | `run_turn2_resume` | `--session <turn 1 id>`, which recalled turn 1's content |
 | `run_tool_use` | one turn of three steps: glob, read, reply |
 | `run_error_unknown_model` | opencode **1.18.33**, `-m anthropic/claude-nonexistent-0`. A single `error` line, `UnknownError` "Unexpected server error. Check server logs for details." with `data.ref` and no model name, then exit 1. No stderr. |
+| `serve_abort` | opencode **1.18.33**, `serve --port 0`, an `.http.jsonl`: a session whose bash `sleep 30` is running gets `POST /session/{id}/abort`, answered `true`; the turn ends with `session.error` (`MessageAbortedError`) and `session.idle`, and the aborted tool's cleanup follows with a second `session.idle`. A second `prompt_async` then runs a turn on the same server and session. Captured with `-runtimes opencode -only serve_abort` |
 
 ## antigravity — captured, agy 1.2.7
 
