@@ -397,6 +397,36 @@ func TestRequireMCPExclusiveChecksTheConvention(t *testing.T) {
 	}
 }
 
+// CheckMCPExclusive is what a host runs on a projection from an adapter that
+// may ignore ProjectionOptions.MCPExclusive: it passes the projection the
+// built-in adapter renders when asked, and refuses the one it renders when not.
+func TestCheckMCPExclusiveJudgesAProjectionNotTheRequest(t *testing.T) {
+	ctx := PlantContext{AgentName: "agent"}
+	asked, err := NewClaudeAdapter().ProviderProjection(ctx, ProjectionOptions{MCPExclusive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = CheckMCPExclusive(asked); err != nil {
+		t.Errorf("a claude projection rendered with MCPExclusive: %v", err)
+	}
+	ignored, err := NewClaudeAdapter().ProviderProjection(ctx, ProjectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = CheckMCPExclusive(ignored)
+	if !errors.Is(err, ErrMCPExclusiveUnsupported) {
+		t.Fatalf("a claude projection that did not ask: err = %v, want ErrMCPExclusiveUnsupported", err)
+	}
+	wantNamed(t, err, "claude", string(ignored.Mode))
+	codex, err := NewCodexAdapter().ProviderProjection(ctx, ProjectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = CheckMCPExclusive(codex); err != nil {
+		t.Errorf("a codex projection sets its own config root: %v", err)
+	}
+}
+
 // wantNamed fails unless err names the provider and the mode it refused.
 func wantNamed(t *testing.T, err error, provider, mode string) {
 	t.Helper()

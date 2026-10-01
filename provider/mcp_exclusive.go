@@ -27,6 +27,17 @@ var ErrMCPExclusiveUnsupported = errors.New("provider: MCP exclusivity is not su
 // the config root the runtime reads its MCP servers from.
 var layoutExclusiveEnv = map[runtimes.ID]string{runtimes.Codex: "CODEX_HOME"}
 
+// CheckMCPExclusive reports whether proj really keeps its launch to the MCP
+// servers it plants, by the mechanism the registry declares for proj's mode
+// (see requireMCPExclusive). The built-in adapters run it themselves when
+// ProjectionOptions.MCPExclusive is set. A host that asked for exclusivity
+// from an adapter it did not get from here, a custom ProjectionProvider that
+// may ignore the option, calls it on the projection it got back: a failure
+// wraps ErrMCPExclusiveUnsupported and names the provider and mode.
+func CheckMCPExclusive(proj ProviderProjection) error {
+	return requireMCPExclusive(proj, ProjectionOptions{MCPExclusive: true})
+}
+
 // requireMCPExclusive refuses a projection that was asked to be exclusive and
 // is not. It trusts neither side alone: the registry must declare a mechanism
 // for the mode, and the projection's own launch convention must carry it.

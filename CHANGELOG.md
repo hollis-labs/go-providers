@@ -30,6 +30,11 @@ extras API's limits are documented and tested (CW-20261001-0219).
   host cannot launch non-exclusive without knowing. It trusts neither side
   alone: the registry must declare a mechanism, and the projection's own launch
   convention must carry it (the flag, or the `CODEX_HOME` config root).
+  Every refusal names the provider and mode.
+- **`provider.CheckMCPExclusive(proj)`**: the same check as a function on a
+  projection. A host whose adapter is not one of these, so may ignore
+  `ProjectionOptions.MCPExclusive`, runs it on the projection it got back and
+  never launches on the strength of a request alone.
 - **`registry.MCPExclusivity`**, so a host can ask whether a runtime and mode
   can be made exclusive: `Descriptor.MCPExclusivity(mode)` and
   `ProjectionFacts.MCPExclusive`, which holds a value only for a measured mode.
