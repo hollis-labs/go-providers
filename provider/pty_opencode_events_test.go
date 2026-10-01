@@ -47,7 +47,7 @@ func TestOpencodeParseLine_Fixtures(t *testing.T) {
 		if got := opencodeEventTypes(evs); !reflect.DeepEqual(got, want) {
 			t.Fatalf("types = %v; want %v", got, want)
 		}
-		if evs[0].SessionID != "ses_f0d6f8b4bffeveyfKIA5MI2bYi" {
+		if evs[0].SessionID != "ses_fixture000000000000000002" {
 			t.Errorf("session id = %q", evs[0].SessionID)
 		}
 		if evs[1].Content != "OK." {
@@ -59,14 +59,14 @@ func TestOpencodeParseLine_Fixtures(t *testing.T) {
 		if *evs[2].Usage != wantUsage {
 			t.Errorf("usage = %+v; want %+v", *evs[2].Usage, wantUsage)
 		}
-		if evs[1].BlockID != "prt_0f290925c001eiKl2rF4xK7o1G" {
+		if evs[1].BlockID != "prt_fixture000000000000000002" {
 			t.Errorf("delta block id = %q; want the text part id", evs[1].BlockID)
 		}
 	})
 
 	t.Run("resumed turn keeps the session id", func(t *testing.T) {
 		evs := parseOpencodeFixture(t, "run_turn2_resume.jsonl")
-		if evs[0].Type != llmtypes.EventSessionID || evs[0].SessionID != "ses_f0d6f8b4bffeveyfKIA5MI2bYi" {
+		if evs[0].Type != llmtypes.EventSessionID || evs[0].SessionID != "ses_fixture000000000000000002" {
 			t.Errorf("first event = %+v", evs[0])
 		}
 		if evs[1].Content != "PERIWINKLE-42" {
