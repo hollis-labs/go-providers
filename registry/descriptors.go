@@ -20,6 +20,11 @@ func init() {
 		approvals     = runtimes.CapApprovals
 	)
 	caps := func(c ...runtimes.Capability) []runtimes.Capability { return c }
+	const (
+		projected   = SupportProjected
+		explicit    = SupportExplicit
+		unsupported = SupportUnsupported
+	)
 
 	register(Descriptor{
 		ID:          runtimes.Claude,
@@ -39,6 +44,23 @@ func init() {
 			{runtimes.ModeACPStdio, caps(typedEvents)},
 		},
 		DefaultMode: runtimes.ModeStreamingStdio,
+		Projection: &ProjectionFacts{
+			TestedVersion: "2.1.285",
+			Features: map[Feature]Support{
+				FeatureInstructions: projected,
+				FeatureNativeConfig: projected,
+				FeatureMCP:          projected,
+				FeatureSkillTrees:   projected,
+				FeatureHooks:        explicit,
+				FeatureCommands:     explicit,
+				FeatureSubagents:    explicit,
+				FeatureCredential:   explicit,
+				FeatureTrust:        explicit,
+			},
+			Notes: map[runtimes.Mode]string{
+				"": "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
+			},
+		},
 	})
 
 	register(Descriptor{
@@ -57,6 +79,24 @@ func init() {
 			{runtimes.ModeACPStdio, caps(typedEvents)},
 		},
 		DefaultMode: runtimes.ModeJSONRPCStdio,
+		Projection: &ProjectionFacts{
+			TestedVersion: "0.154.0",
+			Features: map[Feature]Support{
+				FeatureInstructions: projected,
+				FeatureNativeConfig: projected,
+				FeatureMCP:          projected,
+				FeatureSkillTrees:   projected,
+				FeatureHooks:        explicit,
+				FeatureCommands:     unsupported,
+				FeatureSubagents:    explicit,
+				FeatureCredential:   explicit,
+				FeatureTrust:        unsupported,
+			},
+			Notes: map[runtimes.Mode]string{
+				runtimes.ModeSubprocessPerTurn: "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
+				runtimes.ModeJSONRPCStdio:      "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
+			},
+		},
 	})
 
 	register(Descriptor{
@@ -77,6 +117,24 @@ func init() {
 			{runtimes.ModeACPStdio, caps(resume, typedEvents)},
 		},
 		DefaultMode: runtimes.ModeSubprocessPerTurn,
+		Projection: &ProjectionFacts{
+			TestedVersion: "1.18.30",
+			Features: map[Feature]Support{
+				FeatureInstructions: projected,
+				FeatureNativeConfig: projected,
+				FeatureMCP:          projected,
+				FeatureSkillTrees:   projected,
+				FeatureHooks:        unsupported,
+				FeatureCommands:     explicit,
+				FeatureSubagents:    explicit,
+				FeatureCredential:   explicit,
+				FeatureTrust:        unsupported,
+			},
+			Notes: map[runtimes.Mode]string{
+				runtimes.ModeSubprocessPerTurn: "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
+				runtimes.ModeHTTPSSE:           "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
+			},
+		},
 	})
 
 	// Copilot CLI is ACP-only: copilot --acp, over stdio or with --port N
@@ -121,5 +179,22 @@ func init() {
 			{runtimes.ModeSubprocessPerTurn, caps(resume, resumeKeepsID, typedEvents, authClass, lostClass)},
 		},
 		DefaultMode: runtimes.ModeSubprocessPerTurn,
+		Projection: &ProjectionFacts{
+			TestedVersion: "1.2.7",
+			Features: map[Feature]Support{
+				FeatureInstructions: projected,
+				FeatureNativeConfig: projected,
+				FeatureMCP:          projected,
+				FeatureSkillTrees:   projected,
+				FeatureHooks:        explicit,
+				FeatureCommands:     explicit,
+				FeatureSubagents:    explicit,
+				FeatureCredential:   explicit,
+				FeatureTrust:        unsupported,
+			},
+			Notes: map[runtimes.Mode]string{
+				"": "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
+			},
+		},
 	})
 }

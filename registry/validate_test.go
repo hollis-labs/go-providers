@@ -7,8 +7,9 @@ import (
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
-// The rules only a built-in must meet: a runtimes.ID, and layout rows exactly
-// when there is a native mode, naming only native modes it supports.
+// The rules only a built-in must meet: a runtimes.ID, layout rows exactly when
+// there is a native mode, naming only native modes it supports, and projection
+// facts exactly when there are layout rows, covering every Feature.
 func TestValidateBuiltinRules(t *testing.T) {
 	base := func() Descriptor {
 		d, _ := Lookup("codex")
@@ -28,6 +29,10 @@ func TestValidateBuiltinRules(t *testing.T) {
 			d.Modes = []ModeSupport{{Mode: runtimes.ModeJSONRPCStdio}}
 			d.DefaultMode = runtimes.ModeJSONRPCStdio
 		}, "not a native mode"},
+		"layout without projection facts":          {func(d *Descriptor) { d.Projection = nil }, "projection facts must be set exactly"},
+		"projection facts without a version":       {func(d *Descriptor) { d.Projection.TestedVersion = "" }, "no tested version"},
+		"projection facts missing a feature":       {func(d *Descriptor) { delete(d.Projection.Features, FeatureTrust) }, `feature "trust"`},
+		"projection facts with an unknown feature": {func(d *Descriptor) { d.Projection.Features["telepathy"] = SupportProjected }, "outside registry.Features"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -38,6 +38,10 @@ type Descriptor struct {
 	// is one of Modes, and native where the runtime has a native mode.
 	DefaultMode runtimes.Mode `json:"default_mode"`
 
+	// Projection is what go-providers' boot-dir projection does for the
+	// runtime. It is set exactly when the runtime has a layout.
+	Projection *ProjectionFacts `json:"projection,omitempty"`
+
 	// Posture maps a permission posture onto the runtime's own launch
 	// flags. Nil means the runtime has no posture mapping yet; every
 	// descriptor's is nil until CW-20260930-0138. The hook's signature is
@@ -128,6 +132,7 @@ func (d Descriptor) clone() Descriptor {
 		modes[i] = ModeSupport{Mode: ms.Mode, Capabilities: slices.Clone(ms.Capabilities)}
 	}
 	d.Modes = modes
+	d.Projection = d.Projection.clone()
 	return d
 }
 
@@ -297,6 +302,24 @@ func validate(d Descriptor, builtin bool) error {
 	rows := d.Layout()
 	if (len(native) > 0) != (len(rows) > 0) {
 		return fmt.Errorf("%s: %d native modes but %d layout rows; a runtime has layout rows exactly when it has a native mode", d.ID, len(native), len(rows))
+	}
+	if (d.Projection != nil) != (len(rows) > 0) {
+		return fmt.Errorf("%s: projection facts must be set exactly when the runtime has layout rows", d.ID)
+	}
+	if p := d.Projection; p != nil {
+		if p.TestedVersion == "" {
+			return fmt.Errorf("%s: projection facts have no tested version", d.ID)
+		}
+		for _, f := range Features() {
+			switch p.Features[f] {
+			case SupportProjected, SupportExplicit, SupportUnsupported:
+			default:
+				return fmt.Errorf("%s: projection feature %q has support %q", d.ID, f, p.Features[f])
+			}
+		}
+		if len(p.Features) != len(Features()) {
+			return fmt.Errorf("%s: projection names a feature outside registry.Features", d.ID)
+		}
 	}
 	for _, e := range rows {
 		if e.Mode != "" && !slices.Contains(native, e.Mode) {

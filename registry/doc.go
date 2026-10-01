@@ -1,8 +1,8 @@
 // Package registry is the one list of agent CLI runtimes: a [Descriptor] per
 // runtime carrying everything the libraries and apps need to know about it —
 // its id and aliases, binary and how to find it, the modes it can be driven in
-// and what each mode can do, the permission-posture hook, and its boot-dir
-// layout.
+// and what each mode can do, the permission-posture hook, its boot-dir layout,
+// and what go-providers' projection does for it ([ProjectionFacts]).
 //
 // The vocabulary (runtime ids, modes, capabilities) is agent-contracts-leaf's
 // runtimes package (D-73); this package holds the facts. The layout is not

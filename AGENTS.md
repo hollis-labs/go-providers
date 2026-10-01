@@ -19,9 +19,13 @@ contracts, rate budgets, or any direct HTTP chat or embedding path.
   `provider/progress_tracker.go` are the decorator monitors.
 - `provider/projection.go` and `provider/preparation.go` produce the pure
   values `agentkit` converts into materialization requests.
+- `provider/argv.go` is the one owner of each runtime's argv: a convention
+  builder per runtime, which `ProviderProjection` resolves against launch roots
+  and each adapter's `BuildArgs` resolves from its own fields, both through
+  `LaunchConvention.ResolveTurn`.
 - `registry/` is the one list of runtimes: a `Descriptor` per runtime (binary,
-  env override, modes with per-mode capabilities, default mode, posture hook)
-  over the agent-contracts-leaf `runtimes` vocabulary. Its layout is read from
+  env override, modes with per-mode capabilities, default mode, posture hook,
+  projection facts) over the agent-contracts-leaf `runtimes` vocabulary. Its layout is read from
   `layout/`, never copied.
 - `layout/` is the one table of where each agent CLI reads files, skills and config
   (`docs/LAYOUT.md`, `docs/HARNESS-DISCOVERY.md`), keyed by runtime id and
@@ -68,6 +72,12 @@ import it, so that dependency would be an import cycle. It reads runtimes from
 Every adapter must implement the boot-dir provider surface —
 `TestBootDirProvider_AssertedOnAllAdapters` fails when a new adapter is added
 without it, which is the point.
+
+A runtime's argv is authored once, in `provider/argv.go`. Do not add a flag to
+an adapter's `BuildArgs` or to a projection separately:
+`TestBuildArgsMatchesProjectionResolveTurn` fails when the adapter path and the
+prepared path disagree for any runtime, mode or turn, and
+`TestNoPositionalAfterAddDir` guards the variadic `--add-dir`.
 
 Codex argv differs by mode on purpose: exec mode carries the project-dir
 argument and app-server mode must not

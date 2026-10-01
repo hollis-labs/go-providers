@@ -268,6 +268,17 @@ binding, err := proj.ResolveLaunch(provider.ProjectionRoots{
 }, "implement the task")
 ```
 
+`ResolveLaunch` resolves a first turn. `ResolveTurn` resolves any turn: the prompt, the system prompt where the runtime takes one, the session to resume, and caller extra arguments, which go where the runtime's convention puts them (never after Claude's variadic `--add-dir`):
+
+```go
+binding, err = proj.ResolveTurn(roots, provider.TurnInput{
+    Prompt:   "continue",
+    ResumeID: sessionID, // --resume / --session / --conversation, per runtime
+}, []string{"--model", "sonnet"})
+```
+
+Each runtime's argv is built in one place (`provider/argv.go`). An adapter's `BuildArgs` resolves the same convention from its own fields (`MCPConfigPath`, `ProjectDir`, …), so the adapter path and the prepared path produce the same argv for the same launch.
+
 The current M06 capability matrix is available from `ProviderCapabilityMatrix()`:
 
 | Provider / mode | Fixture version | Projected here | Explicit later |

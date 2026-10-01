@@ -28,29 +28,30 @@ var (
 )
 
 // ProviderFeature is a named provider capability that callers may require
-// before accepting a projection.
-type ProviderFeature string
+// before accepting a projection. The vocabulary lives with the per-runtime
+// facts in package registry.
+type ProviderFeature = registry.Feature
 
 const (
-	FeatureInstructions ProviderFeature = "instructions"
-	FeatureNativeConfig ProviderFeature = "native-config"
-	FeatureMCP          ProviderFeature = "mcp"
-	FeatureSkillTrees   ProviderFeature = "skill-trees"
-	FeatureHooks        ProviderFeature = "hooks"
-	FeatureCommands     ProviderFeature = "commands"
-	FeatureSubagents    ProviderFeature = "subagents"
-	FeatureCredential   ProviderFeature = "credential"
-	FeatureTrust        ProviderFeature = "trust"
+	FeatureInstructions = registry.FeatureInstructions
+	FeatureNativeConfig = registry.FeatureNativeConfig
+	FeatureMCP          = registry.FeatureMCP
+	FeatureSkillTrees   = registry.FeatureSkillTrees
+	FeatureHooks        = registry.FeatureHooks
+	FeatureCommands     = registry.FeatureCommands
+	FeatureSubagents    = registry.FeatureSubagents
+	FeatureCredential   = registry.FeatureCredential
+	FeatureTrust        = registry.FeatureTrust
 )
 
 // CapabilitySupport records whether a feature is projected by this package,
 // known to the provider but left to another phase, or unsupported.
-type CapabilitySupport string
+type CapabilitySupport = registry.Support
 
 const (
-	SupportProjected   CapabilitySupport = "projected"
-	SupportExplicit    CapabilitySupport = "explicit-effect"
-	SupportUnsupported CapabilitySupport = "unsupported"
+	SupportProjected   = registry.SupportProjected
+	SupportExplicit    = registry.SupportExplicit
+	SupportUnsupported = registry.SupportUnsupported
 )
 
 // ProviderCapabilityRow is the exported capability matrix for provider
@@ -70,115 +71,27 @@ func (r ProviderCapabilityRow) Shape() layout.Shape {
 	return layout.Shape{Mode: r.Mode, Variant: r.Variant}
 }
 
-// projectionFacts are what the matrix says about one runtime's projection:
-// the harness version its contracts were checked against, which features it
-// projects, and a note per mode ("" = every mode).
-type projectionFacts struct {
-	testedVersion string
-	features      map[ProviderFeature]CapabilitySupport
-	notes         map[runtimes.Mode]string
-}
-
-var projectionFactsByRuntime = map[runtimes.ID]projectionFacts{
-	runtimes.Claude: {
-		testedVersion: "2.1.285",
-		features: map[ProviderFeature]CapabilitySupport{
-			FeatureInstructions: SupportProjected,
-			FeatureNativeConfig: SupportProjected,
-			FeatureMCP:          SupportProjected,
-			FeatureSkillTrees:   SupportProjected,
-			FeatureHooks:        SupportExplicit,
-			FeatureCommands:     SupportExplicit,
-			FeatureSubagents:    SupportExplicit,
-			FeatureCredential:   SupportExplicit,
-			FeatureTrust:        SupportExplicit,
-		},
-		notes: map[runtimes.Mode]string{
-			"": "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
-		},
-	},
-	runtimes.Codex: {
-		testedVersion: "0.154.0",
-		features: map[ProviderFeature]CapabilitySupport{
-			FeatureInstructions: SupportProjected,
-			FeatureNativeConfig: SupportProjected,
-			FeatureMCP:          SupportProjected,
-			FeatureSkillTrees:   SupportProjected,
-			FeatureHooks:        SupportExplicit,
-			FeatureCommands:     SupportUnsupported,
-			FeatureSubagents:    SupportExplicit,
-			FeatureCredential:   SupportExplicit,
-			FeatureTrust:        SupportUnsupported,
-		},
-		notes: map[runtimes.Mode]string{
-			runtimes.ModeSubprocessPerTurn: "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
-			runtimes.ModeJSONRPCStdio:      "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
-		},
-	},
-	runtimes.OpenCode: {
-		testedVersion: "1.18.30",
-		features: map[ProviderFeature]CapabilitySupport{
-			FeatureInstructions: SupportProjected,
-			FeatureNativeConfig: SupportProjected,
-			FeatureMCP:          SupportProjected,
-			FeatureSkillTrees:   SupportProjected,
-			FeatureHooks:        SupportUnsupported,
-			FeatureCommands:     SupportExplicit,
-			FeatureSubagents:    SupportExplicit,
-			FeatureCredential:   SupportExplicit,
-			FeatureTrust:        SupportUnsupported,
-		},
-		notes: map[runtimes.Mode]string{
-			runtimes.ModeSubprocessPerTurn: "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
-			runtimes.ModeHTTPSSE:           "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
-		},
-	},
-	runtimes.Antigravity: {
-		testedVersion: "1.2.7",
-		features: map[ProviderFeature]CapabilitySupport{
-			FeatureInstructions: SupportProjected,
-			FeatureNativeConfig: SupportProjected,
-			FeatureMCP:          SupportProjected,
-			FeatureSkillTrees:   SupportProjected,
-			FeatureHooks:        SupportExplicit,
-			FeatureCommands:     SupportExplicit,
-			FeatureSubagents:    SupportExplicit,
-			FeatureCredential:   SupportExplicit,
-			FeatureTrust:        SupportUnsupported,
-		},
-		notes: map[runtimes.Mode]string{
-			"": "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
-		},
-	},
-}
-
 // ProviderCapabilityMatrix returns a deterministic provider/version matrix for
 // the pure projection contracts in this package. Its rows come from the
 // registry: one per native mode of every runtime with a layout, each followed
 // by a row for every launch variant its layout rows name in that mode (Claude's
-// bare). ACP-only runtimes have no row: nothing is projected for them.
+// bare), carrying the descriptor's projection facts. ACP-only runtimes have no
+// row: nothing is projected for them.
 func ProviderCapabilityMatrix() []ProviderCapabilityRow {
 	var rows []ProviderCapabilityRow
 	for _, d := range registry.All() {
-		if !d.HasLayout() {
+		facts := d.Projection
+		if facts == nil {
 			continue
 		}
-		facts, ok := projectionFactsByRuntime[d.ID]
-		if !ok {
-			panic(fmt.Sprintf("provider: runtime %s has a layout but no projection facts", d.ID))
-		}
 		for _, shape := range projectionShapes(d) {
-			note, ok := facts.notes[shape.Mode]
-			if !ok {
-				note = facts.notes[""]
-			}
 			rows = append(rows, ProviderCapabilityRow{
 				Provider:      d.ID,
 				Mode:          shape.Mode,
 				Variant:       shape.Variant,
-				TestedVersion: facts.testedVersion,
-				Features:      featureMap(facts.features),
-				Notes:         note,
+				TestedVersion: facts.TestedVersion,
+				Features:      featureMap(facts.Features),
+				Notes:         facts.Note(shape.Mode),
 			})
 		}
 	}
@@ -278,10 +191,28 @@ const (
 type ArgKind string
 
 const (
+	// ArgLiteral is Value as one argument.
 	ArgLiteral ArgKind = "literal"
-	ArgPrompt  ArgKind = "prompt"
-	ArgRoot    ArgKind = "root"
-	ArgFile    ArgKind = "file"
+	// ArgPrompt is the turn's prompt as one argument.
+	ArgPrompt ArgKind = "prompt"
+	// ArgRoot is a launch root, after Value when Value names a flag.
+	ArgRoot ArgKind = "root"
+	// ArgFile is a file under a launch root, after Value when Value names a
+	// flag.
+	ArgFile ArgKind = "file"
+	// ArgPromptInline is the turn's prompt joined to Value in one argument,
+	// for a flag whose value must not stand apart (agy's -p=<prompt>).
+	ArgPromptInline ArgKind = "prompt-inline"
+	// ArgSystemPrompt is Value followed by the turn's system prompt. It is
+	// omitted when the turn has none.
+	ArgSystemPrompt ArgKind = "system-prompt"
+	// ArgResume is Value followed by the id of the session the turn
+	// resumes. It is omitted when the turn resumes nothing.
+	ArgResume ArgKind = "resume"
+	// ArgExtra is where a caller's extra arguments go. Each convention puts
+	// it where an extra argument can neither swallow the prompt nor be read
+	// as one of a variadic flag's values.
+	ArgExtra ArgKind = "extra"
 )
 
 // ArgTemplate stores argv as structured values so paths with spaces or unicode
@@ -292,6 +223,21 @@ type ArgTemplate struct {
 	Root      RootKind `json:"root,omitempty"`
 	RelPath   string   `json:"rel_path,omitempty"`
 	OmitEmpty bool     `json:"omit_empty,omitempty"`
+	// WithSystem, on ArgPrompt and ArgPromptInline, puts the turn's system
+	// prompt in front of the prompt, for a CLI with no system-prompt flag.
+	WithSystem bool `json:"with_system,omitempty"`
+	// FirstTurnOnly omits the argument on a turn that resumes a session.
+	FirstTurnOnly bool `json:"first_turn_only,omitempty"`
+}
+
+// TurnInput is what one turn adds to a launch convention's argv.
+type TurnInput struct {
+	// Prompt is the turn's prompt.
+	Prompt string
+	// SystemPrompt is passed where the convention has a place for it.
+	SystemPrompt string
+	// ResumeID is the CLI session the turn resumes; empty starts a new one.
+	ResumeID string
 }
 
 // EnvOperation describes how an environment delta is applied.
@@ -458,7 +404,7 @@ func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOpti
 		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   claudeLaunchConvention(a, shape, len(opts.Skills) > 0),
+		Launch:   claudeConvention(a, shape, claudeLayoutPaths(shape, len(opts.Skills) > 0)),
 		Effects: []ProviderEffect{
 			{Kind: EffectClaudeCredentialHelper, Destination: layoutRel(pid, shape, layout.NativeConfig, ""), Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
 			{Kind: EffectClaudeWorkspaceTrust, Reason: "workspace trust seeding mutates host state and is handled by explicit preparation"},
@@ -469,10 +415,7 @@ func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOpti
 
 // ProviderProjection renders a pure projection for a Codex adapter.
 func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	shape := shapePerTurn
-	if a.Mode == "app-server" {
-		shape = shapeJSONRPC
-	}
+	shape := codexShape(a)
 	config, err := a.ConfigDocument(ctx)
 	if err != nil {
 		return ProviderProjection{}, err
@@ -497,7 +440,7 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   codexLaunchConvention(shape),
+		Launch:   codexConvention(a, shape, pathArgs{projectDirs: layoutProjectDirs(runtimes.Codex, shape)}),
 		Effects: []ProviderEffect{
 			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, shape, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
 		},
@@ -527,7 +470,7 @@ func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts Projectio
 		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   antigravityLaunchConvention(a),
+		Launch:   antigravityConvention(a, pathArgs{projectDirs: layoutProjectDirs(pid, shape)}),
 		Effects: []ProviderEffect{
 			{Kind: EffectAntigravityAuth, Reason: "agy authenticates from OAuth credentials under ~/.gemini, shared with the desktop app; they are never projected or relocated"},
 		},
@@ -537,10 +480,7 @@ func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts Projectio
 
 // ProviderProjection renders a pure projection for an OpenCode adapter.
 func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	shape := shapePerTurn
-	if a.Mode == "serve-http" {
-		shape = shapeHTTPSSE
-	}
+	shape := opencodeShape(a)
 	agentName := ctx.AgentName
 	if agentName == "" {
 		agentName = a.Agent
@@ -567,190 +507,12 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   opencodeLaunchConvention(a, shape, agentName),
+		Launch:   opencodeConvention(a, shape, agentName, pathArgs{projectDirs: layoutProjectDirs(pid, shape)}),
 		Effects: []ProviderEffect{
 			{Kind: EffectOpencodeProviderAuth, Reason: "provider credentials are resolved by OpenCode or explicit runtime preparation"},
 		},
 	}
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)
-}
-
-func claudeProjectionShape(a *ClaudeAdapter) layout.Shape {
-	switch {
-	case a.Bare:
-		return shapeBare
-	case a.PTY:
-		return shapePTY
-	case a.InputMode == "stream-json":
-		return shapeStreaming
-	default:
-		return shapePerTurn
-	}
-}
-
-func claudeLaunchConvention(a *ClaudeAdapter, shape layout.Shape, withSkills bool) LaunchConvention {
-	const pid = runtimes.Claude
-	mcpArg := layoutFileArg(pid, shape, layout.MCP)
-	args := []ArgTemplate{}
-	switch shape {
-	case shapePTY:
-		args = append(args, mcpArg)
-	case shapeStreaming:
-		args = append(args,
-			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--input-format"},
-			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--output-format"},
-			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
-		)
-		args = append(args, mcpArg)
-	case shapeBare:
-		args = append(args,
-			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
-			ArgTemplate{Kind: ArgPrompt},
-			ArgTemplate{Kind: ArgLiteral, Value: "--output-format"},
-			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--bare"},
-			mcpArg,
-			layoutFileArg(pid, shape, layout.Instructions),
-			layoutFileArg(pid, shape, layout.NativeConfig),
-		)
-		if dir, ok := layoutProjectDirArg(pid, shape); ok {
-			args = append(args, dir)
-		}
-		// --bare reads no cwd skills; the boot root must be an --add-dir for
-		// projected skills to be discovered (probe C4, C5). Only added when
-		// skills are actually projected, so argv is otherwise unchanged.
-		if _, flag := skillRootFor(pid, shape); withSkills && flag != "" {
-			args = append(args, ArgTemplate{Kind: ArgRoot, Root: RootBoot, Value: flag, OmitEmpty: true})
-		}
-	default:
-		args = append(args,
-			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
-			ArgTemplate{Kind: ArgPrompt},
-			ArgTemplate{Kind: ArgLiteral, Value: "--output-format"},
-			ArgTemplate{Kind: ArgLiteral, Value: "stream-json"},
-			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
-			mcpArg,
-		)
-	}
-	// cwd is the boot root, so the project is reachable only as an extra
-	// directory. The layout's project-dir row holds in every mode; bare
-	// placed it above, before its skills --add-dir.
-	if shape != shapeBare {
-		if dir, ok := layoutProjectDirArg(pid, shape); ok {
-			args = append(args, dir)
-		}
-	}
-	if a.SkipPermissions {
-		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--dangerously-skip-permissions"})
-	}
-	cwd, configRoot, env := layoutLaunchBase(pid, shape)
-	return LaunchConvention{
-		Executable: "claude",
-		Mode:       shape.Mode,
-		Variant:    shape.Variant,
-		CWD:        cwd,
-		ConfigRoot: configRoot,
-		Argv:       args,
-		Env:        env,
-	}
-}
-
-func codexLaunchConvention(shape layout.Shape) LaunchConvention {
-	var args []ArgTemplate
-	if shape == shapeJSONRPC {
-		args = []ArgTemplate{{Kind: ArgLiteral, Value: "app-server"}}
-	} else {
-		args = []ArgTemplate{
-			{Kind: ArgLiteral, Value: "exec"},
-			{Kind: ArgPrompt},
-			{Kind: ArgLiteral, Value: "--json"},
-			{Kind: ArgLiteral, Value: "--skip-git-repo-check"},
-		}
-		if dir, ok := layoutProjectDirArg(runtimes.Codex, shape); ok {
-			args = append(args, dir)
-		}
-	}
-	cwd, configRoot, env := layoutLaunchBase(runtimes.Codex, shape)
-	return LaunchConvention{
-		Executable: "codex",
-		Mode:       shape.Mode,
-		Variant:    shape.Variant,
-		CWD:        cwd,
-		ConfigRoot: configRoot,
-		Argv:       args,
-		Env:        env,
-	}
-}
-
-func antigravityLaunchConvention(a *AntigravityAdapter) LaunchConvention {
-	const pid = runtimes.Antigravity
-	shape := shapePerTurn
-	args := []ArgTemplate{
-		{Kind: ArgLiteral, Value: "--output-format"},
-		{Kind: ArgLiteral, Value: "stream-json"},
-	}
-	if a.Model != "" {
-		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
-	}
-	if dir, ok := layoutProjectDirArg(pid, shape); ok {
-		args = append(args, dir)
-	}
-	// The prompt is the value of -p, so it goes last: agy's -p takes the
-	// next argument whatever it is. BuildArgs uses the inline -p=<prompt>
-	// form, which a template cannot express.
-	args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "-p"}, ArgTemplate{Kind: ArgPrompt})
-	cwd, configRoot, env := layoutLaunchBase(pid, shape)
-	return LaunchConvention{
-		Executable: "agy",
-		Mode:       shape.Mode,
-		Variant:    shape.Variant,
-		CWD:        cwd,
-		ConfigRoot: configRoot,
-		Argv:       args,
-		Env:        env,
-	}
-}
-
-func opencodeLaunchConvention(a *OpencodeAdapter, shape layout.Shape, agentName string) LaunchConvention {
-	var args []ArgTemplate
-	if shape == shapeHTTPSSE {
-		args = []ArgTemplate{
-			{Kind: ArgLiteral, Value: layoutEntry(runtimes.OpenCode, shape, layout.Runtime).Flag},
-			{Kind: ArgLiteral, Value: "--port"},
-			{Kind: ArgLiteral, Value: "0"},
-			{Kind: ArgLiteral, Value: "--hostname"},
-			{Kind: ArgLiteral, Value: "127.0.0.1"},
-		}
-	} else {
-		args = []ArgTemplate{
-			{Kind: ArgLiteral, Value: "run"},
-			{Kind: ArgLiteral, Value: "--format"},
-			{Kind: ArgLiteral, Value: "json"},
-			{Kind: ArgLiteral, Value: "--agent"},
-			{Kind: ArgLiteral, Value: firstNonEmpty(agentName, "default")},
-		}
-		if a.Model != "" {
-			args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
-		}
-		if dir, ok := layoutProjectDirArg(runtimes.OpenCode, shape); ok {
-			args = append(args, dir)
-		}
-		args = append(args, ArgTemplate{Kind: ArgPrompt})
-	}
-	cwd, configRoot, env := layoutLaunchBase(runtimes.OpenCode, shape)
-	return LaunchConvention{
-		Executable: "opencode",
-		Mode:       shape.Mode,
-		Variant:    shape.Variant,
-		CWD:        cwd,
-		ConfigRoot: configRoot,
-		Argv:       args,
-		Env:        env,
-	}
 }
 
 func firstNonEmpty(v, fallback string) string {
@@ -761,32 +523,58 @@ func firstNonEmpty(v, fallback string) string {
 }
 
 // ResolveLaunch resolves the projection's structured launch convention using
-// the supplied roots. It performs no IO and does not start a process.
+// the supplied roots, for a first turn with prompt. It performs no IO and
+// does not start a process.
 func (p ProviderProjection) ResolveLaunch(roots ProjectionRoots, prompt string) (LaunchBinding, error) {
+	return p.Launch.ResolveTurn(roots, TurnInput{Prompt: prompt}, nil)
+}
+
+// ResolveTurn resolves the projection's launch convention for one turn; see
+// [LaunchConvention.ResolveTurn].
+func (p ProviderProjection) ResolveTurn(roots ProjectionRoots, in TurnInput, extra []string) (LaunchBinding, error) {
+	return p.Launch.ResolveTurn(roots, in, extra)
+}
+
+// ResolveTurn resolves the convention for one turn: roots fill the path
+// arguments, in fills the prompt, system prompt and resume id, and extra goes
+// at the convention's ArgExtra (after everything, if it has none). It is the
+// one place a runtime's argv is produced: an adapter's BuildArgs resolves the
+// same convention, built from the adapter's own fields. It performs no IO and
+// does not start a process.
+func (c LaunchConvention) ResolveTurn(roots ProjectionRoots, in TurnInput, extra []string) (LaunchBinding, error) {
 	if roots.ConfigRoot == "" {
 		roots.ConfigRoot = roots.BootRoot
 	}
-	cwd, err := rootValue(roots, p.Launch.CWD)
+	cwd, err := rootValue(roots, c.CWD)
 	if err != nil {
 		return LaunchBinding{}, err
 	}
-	if cwd == "" && p.Launch.CWD == RootProject {
+	if cwd == "" && c.CWD == RootProject {
 		cwd = roots.BootRoot
 	}
-	configRoot, err := rootValue(roots, p.Launch.ConfigRoot)
+	configRoot, err := rootValue(roots, c.ConfigRoot)
 	if err != nil {
 		return LaunchBinding{}, err
 	}
-	argv := make([]string, 0, len(p.Launch.Argv))
-	for _, tmpl := range p.Launch.Argv {
-		values, err := resolveArgTemplate(roots, tmpl, prompt)
+	argv := make([]string, 0, len(c.Argv)+len(extra))
+	placedExtra := false
+	for _, tmpl := range c.Argv {
+		if tmpl.Kind == ArgExtra {
+			argv = append(argv, extra...)
+			placedExtra = true
+			continue
+		}
+		values, err := resolveArgTemplate(roots, tmpl, in)
 		if err != nil {
 			return LaunchBinding{}, err
 		}
 		argv = append(argv, values...)
 	}
-	env := make([]EnvDelta, 0, len(p.Launch.Env))
-	for _, delta := range p.Launch.Env {
+	if !placedExtra {
+		argv = append(argv, extra...)
+	}
+	env := make([]EnvDelta, 0, len(c.Env))
+	for _, delta := range c.Env {
 		resolved := delta
 		if RootKind(delta.Value) != "" {
 			if v, err := rootValue(roots, RootKind(delta.Value)); err == nil && v != "" {
@@ -798,7 +586,10 @@ func (p ProviderProjection) ResolveLaunch(roots ProjectionRoots, prompt string) 
 	return LaunchBinding{CWD: cwd, ConfigDir: configRoot, Argv: argv, Env: env}, nil
 }
 
-func resolveArgTemplate(roots ProjectionRoots, tmpl ArgTemplate, prompt string) ([]string, error) {
+func resolveArgTemplate(roots ProjectionRoots, tmpl ArgTemplate, in TurnInput) ([]string, error) {
+	if tmpl.FirstTurnOnly && in.ResumeID != "" {
+		return nil, nil
+	}
 	switch tmpl.Kind {
 	case ArgLiteral:
 		if tmpl.Value == "" && tmpl.OmitEmpty {
@@ -806,10 +597,24 @@ func resolveArgTemplate(roots ProjectionRoots, tmpl ArgTemplate, prompt string) 
 		}
 		return []string{tmpl.Value}, nil
 	case ArgPrompt:
+		prompt := in.Prompt
+		if tmpl.WithSystem {
+			prompt = prefixSystemPrompt(in.Prompt, in.SystemPrompt)
+		}
 		if prompt == "" && tmpl.OmitEmpty {
 			return nil, nil
 		}
 		return []string{prompt}, nil
+	case ArgPromptInline:
+		prompt := in.Prompt
+		if tmpl.WithSystem {
+			prompt = prefixSystemPrompt(in.Prompt, in.SystemPrompt)
+		}
+		return []string{tmpl.Value + prompt}, nil
+	case ArgSystemPrompt:
+		return flagValue(tmpl.Value, in.SystemPrompt), nil
+	case ArgResume:
+		return flagValue(tmpl.Value, in.ResumeID), nil
 	case ArgRoot:
 		value, err := rootValue(roots, tmpl.Root)
 		if err != nil {
@@ -838,6 +643,28 @@ func resolveArgTemplate(roots ProjectionRoots, tmpl ArgTemplate, prompt string) 
 	default:
 		return nil, fmt.Errorf("unsupported argv template kind %q", tmpl.Kind)
 	}
+}
+
+// flagValue is [flag, value], or [value] when there is no flag, and nothing
+// when value is empty.
+func flagValue(flag, value string) []string {
+	switch {
+	case value == "":
+		return nil
+	case flag == "":
+		return []string{value}
+	default:
+		return []string{flag, value}
+	}
+}
+
+// prefixSystemPrompt puts a system prompt in front of the prompt, for a CLI
+// that takes no system prompt of its own.
+func prefixSystemPrompt(prompt, systemPrompt string) string {
+	if systemPrompt == "" {
+		return prompt
+	}
+	return "System: " + systemPrompt + "\n\n" + prompt
 }
 
 func rootValue(roots ProjectionRoots, kind RootKind) (string, error) {
