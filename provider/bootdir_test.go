@@ -2,6 +2,8 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -608,6 +610,35 @@ func TestCodexBootDirSpec_InvalidApprovalPolicy(t *testing.T) {
 	}
 }
 
+// TestCodexBootDirSpec_UntrustedApprovalPolicyRefused pins that "untrusted"
+// fails the config.toml Render with an error naming the removal, rather than
+// planting a config codex-cli 0.159.2 refuses to load (CW-20261001-0127).
+// The rest of the vocabulary still renders.
+func TestCodexBootDirSpec_UntrustedApprovalPolicyRefused(t *testing.T) {
+	a := &CodexAdapter{ApprovalPolicy: "untrusted"}
+	if rel := a.BootDirSpec().PlantedFiles[2].RelPath; rel != "config.toml" {
+		t.Fatalf("PlantedFiles[2] is %q, want config.toml", rel)
+	}
+	_, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{AgentName: "codex-exec"})
+	if !errors.Is(err, errCodexUntrustedApproval) {
+		t.Fatalf("Render with ApprovalPolicy untrusted: err = %v, want errCodexUntrustedApproval", err)
+	}
+	if !strings.Contains(err.Error(), "no longer supports") || !strings.Contains(err.Error(), `"on-request"`) {
+		t.Errorf("error should say why and name the replacement: %v", err)
+	}
+	for _, policy := range []string{"on-failure", "on-request", "never"} {
+		a := &CodexAdapter{ApprovalPolicy: policy}
+		got, err := a.BootDirSpec().PlantedFiles[2].Render(PlantContext{AgentName: "codex-exec"})
+		if err != nil {
+			t.Errorf("ApprovalPolicy %q: Render: %v", policy, err)
+			continue
+		}
+		if want := fmt.Sprintf("approval_policy = %q\n", policy); !strings.HasPrefix(got, want) {
+			t.Errorf("ApprovalPolicy %q: config.toml starts %q, want %q", policy, got[:min(len(got), 40)], want)
+		}
+	}
+}
+
 // TestRenderCodexMCPServers covers the http + stdio shapes and ordering of
 // the extra-MCP-server blocks (PlantContext.MCPServers).
 func TestRenderCodexMCPServers(t *testing.T) {
@@ -864,6 +895,11 @@ func TestResolveCodexExecPolicy(t *testing.T) {
 
 	if _, _, err := resolveCodexExecPolicy("yolo", ""); err == nil {
 		t.Error("invalid ApprovalPolicy should error")
+	} else if strings.Contains(err.Error(), "untrusted") {
+		t.Errorf("the vocabulary error should not offer untrusted: %v", err)
+	}
+	if _, _, err := resolveCodexExecPolicy("untrusted", ""); !errors.Is(err, errCodexUntrustedApproval) {
+		t.Errorf("untrusted: err = %v, want errCodexUntrustedApproval", err)
 	}
 	if _, _, err := resolveCodexExecPolicy("", "wide-open"); err == nil {
 		t.Error("invalid SandboxMode should error")

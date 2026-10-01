@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -200,12 +201,18 @@ func (a *CodexAdapter) ConfigDocument(ctx PlantContext) (string, error) {
 }
 
 // codexApprovalPolicies is codex's `approval_policy` config vocabulary.
+// "untrusted" is not in it: codex-cli 0.159.2 fails to load a config that
+// sets it, from a config.toml or a -c override (CW-20261001-0127).
 var codexApprovalPolicies = map[string]bool{
-	"untrusted":  true,
 	"on-failure": true,
 	"on-request": true,
 	"never":      true,
 }
+
+// errCodexUntrustedApproval names the removed "untrusted" value so a caller
+// that still sets it learns why, rather than reading a generic vocabulary
+// error.
+var errCodexUntrustedApproval = errors.New(`invalid CodexAdapter.ApprovalPolicy "untrusted": codex-cli 0.159.2 no longer supports it and fails to load a config that sets it; the closest is "on-request" with SandboxMode "read-only", which the registry's default posture uses`)
 
 // codexSandboxModes is codex's `sandbox_mode` config vocabulary.
 var codexSandboxModes = map[string]bool{
@@ -225,8 +232,11 @@ func resolveCodexExecPolicy(approvalPolicy, sandboxMode string) (approval, sandb
 	if approval == "" {
 		approval = "never"
 	}
+	if approval == "untrusted" {
+		return "", "", errCodexUntrustedApproval
+	}
 	if !codexApprovalPolicies[approval] {
-		return "", "", fmt.Errorf("invalid CodexAdapter.ApprovalPolicy %q (want one of: untrusted, on-failure, on-request, never)", approvalPolicy)
+		return "", "", fmt.Errorf("invalid CodexAdapter.ApprovalPolicy %q (want one of: on-failure, on-request, never)", approvalPolicy)
 	}
 	sandbox = sandboxMode
 	if sandbox == "" {

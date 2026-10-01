@@ -50,11 +50,15 @@ type CodexAdapter struct {
 	// approval vocabulary:
 	//
 	//	""             — resolves to "never" (the headless-safe default).
-	//	"untrusted"    — prompt before running anything not on the trusted
-	//	                 list.
 	//	"on-failure"   — run in the sandbox; prompt only if a command fails.
 	//	"on-request"   — the model decides when to escalate for approval.
 	//	"never"        — never prompt for approval.
+	//
+	// "untrusted" is refused with an error that says why: codex-cli
+	// 0.159.2 fails to load a config that sets it (CW-20261001-0127). The
+	// app-server's per-thread thread/start approvalPolicy is a separate
+	// surface and still accepted it on 0.159.2 (fixture
+	// codex/app_server_tool_approval).
 	//
 	// The default is "never" — NOT codex's own interactive default —
 	// because BootDirSpec materializes a HEADLESS per-task boot dir with

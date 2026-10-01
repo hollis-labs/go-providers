@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.40.1 — 2026-10-01
+
+`CodexAdapter` refuses approval policy "untrusted" (CW-20261001-0127).
+
+### Fixed
+
+- **`CodexAdapter.ApprovalPolicy` "untrusted"** now fails the config.toml
+  render, with an error that says codex-cli 0.159.2 no longer supports it
+  and names "on-request" with SandboxMode "read-only" as the closest
+  replacement. Before, it planted a config that codex then refused to load.
+  Measured on codex-cli 0.159.2 against an empty CODEX_HOME:
+  - "untrusted" in config.toml, or as `-c approval_policy="untrusted"`,
+    fails with "failed to load configuration".
+  - "on-failure", "on-request" and "never" load.
+
+  The vocabulary error no longer lists "untrusted". The app-server's
+  per-thread `thread/start` `approvalPolicy` is a separate surface: it
+  still accepted "untrusted" on 0.159.2 (fixture
+  `codex/app_server_tool_approval`), and this change does not touch it.
+
 ## v0.40.0 — 2026-10-01
 
 Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
