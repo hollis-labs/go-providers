@@ -4,6 +4,12 @@
 // under providertest/fixtures and scrubs them for a public repository.
 //
 //	go run hack/capturefixtures/main.go -runtimes claude,codex
+//	go run hack/capturefixtures/main.go -runtimes claude -only stream_interrupt
+//
+// -only re-records just the named fixtures (and runs, without writing, the
+// captures they depend on), merging into the runtime's captured.json. It
+// refuses when the CLI's version differs from the manifest's: a manifest
+// names one version for every fixture it lists.
 //
 // It makes real model calls (the cheapest model each CLI offers, trivial
 // prompts) and the CLIs write their usual session files under their own
@@ -44,12 +50,14 @@ var (
 	claudeModel = flag.String("claude-model", "haiku", "claude --model")
 	codexModel  = flag.String("codex-model", "gpt-6-luna", "codex -m")
 	timeout     = flag.Duration("timeout", 3*time.Minute, "per-capture timeout")
+	onlyArg     = flag.String("only", "", "comma-separated fixture stems to re-record; empty records all")
 )
 
 const (
 	trivialPrompt = "say hi"
 	secondPrompt  = "say bye"
 	toolPrompt    = "Run the shell command `echo providertest` and reply with its output only."
+	slowPrompt    = "Run the shell command `ping -c 30 127.0.0.1` and reply with its last line only."
 	// writePrompt needs a permission the default posture does not grant.
 	writePrompt = "Run the shell command `touch providertest.txt`, then say done."
 	// lostID is already a placeholder, so the scrubber leaves it alone and
@@ -100,6 +108,22 @@ func newCapturer(runtime, work, proj string) *capturer {
 	return &capturer{runtime: runtime, dir: dir, proj: proj, scrub: newScrubber(work, proj), argv: map[string][]string{}}
 }
 
+// want reports whether any of stems is to be recorded: always, unless -only
+// names others.
+func (c *capturer) want(stems ...string) bool {
+	if *onlyArg == "" {
+		return true
+	}
+	for _, only := range strings.Split(*onlyArg, ",") {
+		for _, stem := range stems {
+			if strings.TrimSpace(only) == stem {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // --- claude ---------------------------------------------------------------
 
 // claudeIsolation keeps the operator's own settings, hooks, MCP servers and
@@ -116,13 +140,24 @@ func (c *capturer) claudePrint(stem string, pre []string, prompt string, extra .
 
 func (c *capturer) claude() {
 	c.version = cliVersion("claude")
-	t1 := c.claudePrint("print_turn1", nil, trivialPrompt)
-	sid := t1.sessionID()
-	c.claudePrint("print_turn2_resume", []string{"--resume", sid}, secondPrompt)
-	c.claudePrint("print_resume_unknown_id", []string{"--resume", lostID}, trivialPrompt)
-	c.claudePrint("print_tool_use", nil, toolPrompt, "--allowedTools", "Bash(echo:*)")
-	c.claudePrint("print_tool_denied", nil, writePrompt)
-	c.perTurn("print_error_unknown_model", "claude", append([]string{"-p", trivialPrompt, "--output-format", "stream-json", "--verbose", "--model", "claude-nonexistent-0"}, claudeIsolation...))
+	if c.want("print_turn1", "print_turn2_resume") {
+		t1 := c.claudePrint("print_turn1", nil, trivialPrompt)
+		if c.want("print_turn2_resume") {
+			c.claudePrint("print_turn2_resume", []string{"--resume", t1.sessionID()}, secondPrompt)
+		}
+	}
+	if c.want("print_resume_unknown_id") {
+		c.claudePrint("print_resume_unknown_id", []string{"--resume", lostID}, trivialPrompt)
+	}
+	if c.want("print_tool_use") {
+		c.claudePrint("print_tool_use", nil, toolPrompt, "--allowedTools", "Bash(echo:*)")
+	}
+	if c.want("print_tool_denied") {
+		c.claudePrint("print_tool_denied", nil, writePrompt)
+	}
+	if c.want("print_error_unknown_model") {
+		c.perTurn("print_error_unknown_model", "claude", append([]string{"-p", trivialPrompt, "--output-format", "stream-json", "--verbose", "--model", "claude-nonexistent-0"}, claudeIsolation...))
+	}
 
 	streamArgs := func(pre ...string) []string {
 		args := append([]string{}, pre...)
@@ -135,22 +170,46 @@ func (c *capturer) claude() {
 	}
 	untilResult := func(line []byte) bool { return jsonField(line, "type") == "result" }
 
-	var streamSID string
-	c.duplex("stream_two_turns", "claude", streamArgs(), func(d *duplexSession) {
-		d.send(user(trivialPrompt))
-		res := d.readUntil(untilResult)
-		streamSID = jsonField(res, "session_id")
-		d.send(user(secondPrompt))
-		d.readUntil(untilResult)
-	})
-	c.duplex("stream_resume", "claude", streamArgs("--resume", streamSID), func(d *duplexSession) {
-		d.send(user(secondPrompt))
-		d.readUntil(untilResult)
-	})
-	c.duplex("stream_resume_unknown_id", "claude", streamArgs("--resume", lostID), func(d *duplexSession) {
-		d.send(user(trivialPrompt))
-		d.readUntil(untilResult)
-	})
+	if c.want("stream_two_turns", "stream_resume") {
+		var streamSID string
+		c.duplex("stream_two_turns", "claude", streamArgs(), func(d *duplexSession) {
+			d.send(user(trivialPrompt))
+			res := d.readUntil(untilResult)
+			streamSID = jsonField(res, "session_id")
+			d.send(user(secondPrompt))
+			d.readUntil(untilResult)
+		})
+		if c.want("stream_resume") {
+			c.duplex("stream_resume", "claude", streamArgs("--resume", streamSID), func(d *duplexSession) {
+				d.send(user(secondPrompt))
+				d.readUntil(untilResult)
+			})
+		}
+	}
+	if c.want("stream_resume_unknown_id") {
+		c.duplex("stream_resume_unknown_id", "claude", streamArgs("--resume", lostID), func(d *duplexSession) {
+			d.send(user(trivialPrompt))
+			d.readUntil(untilResult)
+		})
+	}
+	// A turn interrupted mid-tool by a control_request, then a turn on the
+	// same process: the interrupt ends the turn (a control_response, the
+	// tool rejected, an error_during_execution result) and keeps the
+	// process (CW-20261001-0103). The 30-second ping keeps the tool running
+	// while the interrupt goes in; it is allowed and nothing else is. Claude
+	// Code refuses a sleep outright ("Blocked: standalone sleep"), so a
+	// sleep would end the tool before the interrupt arrived.
+	if c.want("stream_interrupt") {
+		c.duplex("stream_interrupt", "claude", streamArgs("--allowedTools", "Bash(ping:*)"), func(d *duplexSession) {
+			d.send(user(slowPrompt))
+			d.readUntil(func(line []byte) bool { return bytes.Contains(line, []byte(`"type":"tool_use"`)) })
+			time.Sleep(time.Second)
+			d.send([]byte(`{"type":"control_request","request_id":"req_interrupt_1","request":{"subtype":"interrupt"}}`))
+			d.readUntil(untilResult)
+			d.send(user(secondPrompt))
+			d.readUntil(untilResult)
+		})
+	}
 }
 
 // --- codex ----------------------------------------------------------------
@@ -256,6 +315,9 @@ func (c *capturer) perTurn(stem, bin string, args []string) result {
 	code := exitCode(cmd.Run())
 
 	lines := splitLines(stdout.Bytes())
+	if !c.want(stem) {
+		return result{stdout: lines}
+	}
 	var out bytes.Buffer
 	for _, l := range lines {
 		out.Write(c.scrub.line(l))
@@ -333,6 +395,9 @@ func (c *capturer) duplex(stem, bin string, args []string, drive func(*duplexSes
 	}
 	d.mu.Unlock()
 	d.steps = append(d.steps, fmt.Sprintf(`{"exit":%d}`, code))
+	if !c.want(stem) {
+		return
+	}
 	c.write(stem+".transcript.jsonl", []byte(strings.Join(d.steps, "\n")+"\n"))
 	c.argv[stem] = c.scrub.args(append([]string{bin}, args...))
 }
@@ -530,11 +595,31 @@ func (c *capturer) write(name string, data []byte) {
 }
 
 func (c *capturer) writeManifest() {
+	argv := c.argv
+	if *onlyArg != "" {
+		var prev struct {
+			Version string              `json:"version"`
+			Argv    map[string][]string `json:"argv"`
+		}
+		b, err := os.ReadFile(filepath.Join(c.dir, "captured.json"))
+		if err != nil || json.Unmarshal(b, &prev) != nil {
+			log.Fatalf("-only needs an existing %s/captured.json to merge into", c.dir)
+		}
+		if prev.Version != c.version {
+			log.Fatalf("-only: %s is %s, the manifest records %s; re-record every fixture", c.runtime, c.version, prev.Version)
+		}
+		for stem, a := range c.argv {
+			if c.want(stem) {
+				prev.Argv[stem] = a
+			}
+		}
+		argv = prev.Argv
+	}
 	m := map[string]any{
 		"runtime":  c.runtime,
 		"version":  c.version,
 		"captured": time.Now().UTC().Format("2006-01-02"),
-		"argv":     c.argv,
+		"argv":     argv,
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
 	c.write("captured.json", append(b, '\n'))

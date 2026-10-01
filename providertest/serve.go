@@ -326,6 +326,9 @@ func (e *engine) recv(raw json.RawMessage) bool {
 			if want.isRequest() {
 				e.ids[canonicalID(want.id())] = got.id()
 			}
+			if want.isControlRequest() {
+				e.ids[controlKey(want.str("request_id"))] = got.obj["request_id"]
+			}
 			return true
 		case want.isNotification():
 			e.pending = line
@@ -362,9 +365,13 @@ func (e *engine) replyError(req frame) {
 	e.writeLine(e.stdout, string(b))
 }
 
-// remap gives a response the id of the live request it answers.
+// remap gives a response the id of the live request it answers: a JSON-RPC
+// response's id, or a Claude control_response's response.request_id.
 func (e *engine) remap(raw json.RawMessage) json.RawMessage {
 	f := parseFrame(raw)
+	if f.str("type") == "control_response" {
+		return e.remapControl(f, raw)
+	}
 	if !f.isResponse() {
 		return raw
 	}
@@ -379,6 +386,35 @@ func (e *engine) remap(raw json.RawMessage) json.RawMessage {
 	}
 	return b
 }
+
+// remapControl rewrites a Claude control_response's response.request_id to
+// the id of the live control_request it answers. Claude's stream-json control
+// protocol pairs a request and its response by request_id, as JSON-RPC does by
+// id, so a replay must answer the id the live client chose.
+func (e *engine) remapControl(f frame, raw json.RawMessage) json.RawMessage {
+	inner := parseFrame(f.obj["response"])
+	if inner.obj == nil {
+		return raw
+	}
+	live, ok := e.ids[controlKey(inner.str("request_id"))]
+	if !ok {
+		return raw
+	}
+	inner.obj["request_id"] = live
+	b, err := json.Marshal(inner.obj)
+	if err != nil {
+		return raw
+	}
+	f.obj["response"] = b
+	if b, err = json.Marshal(f.obj); err != nil {
+		return raw
+	}
+	return b
+}
+
+// controlKey keys a Claude control request id in engine.ids apart from the
+// JSON-RPC ids.
+func controlKey(id string) string { return "control:" + id }
 
 // frame is a JSON line seen through JSON-RPC eyes; non-objects have a nil
 // obj.
@@ -402,10 +438,13 @@ func (f frame) str(key string) string {
 	return s
 }
 
-func (f frame) method() string       { return f.str("method") }
-func (f frame) id() json.RawMessage  { return f.obj["id"] }
-func (f frame) hasID() bool          { _, ok := f.obj["id"]; return ok }
-func (f frame) isRequest() bool      { return f.method() != "" && f.hasID() }
+func (f frame) method() string      { return f.str("method") }
+func (f frame) id() json.RawMessage { return f.obj["id"] }
+func (f frame) hasID() bool         { _, ok := f.obj["id"]; return ok }
+func (f frame) isRequest() bool     { return f.method() != "" && f.hasID() }
+func (f frame) isControlRequest() bool {
+	return f.str("type") == "control_request" && f.str("request_id") != ""
+}
 func (f frame) isNotification() bool { return f.method() != "" && !f.hasID() }
 func (f frame) isResponse() bool {
 	if f.method() != "" || !f.hasID() {
