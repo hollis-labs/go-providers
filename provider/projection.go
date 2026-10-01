@@ -601,6 +601,14 @@ func claudeLaunchConvention(a *ClaudeAdapter, shape layout.Shape, withSkills boo
 			mcpArg,
 		)
 	}
+	// cwd is the boot root, so the project is reachable only as an extra
+	// directory. The layout's project-dir row holds in every mode; bare
+	// placed it above, before its skills --add-dir.
+	if shape != shapeBare {
+		if dir, ok := layoutProjectDirArg(pid, shape); ok {
+			args = append(args, dir)
+		}
+	}
 	if a.SkipPermissions {
 		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--dangerously-skip-permissions"})
 	}

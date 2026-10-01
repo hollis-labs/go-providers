@@ -16,7 +16,7 @@ Where each agent CLI reads its files, skills and config, relative to which launc
 | subprocess-per-turn+bare | native-config | boot | `.claude/settings.json` |  |  | `--settings` |  | boot | CFG2 | --bare skips cwd discovery, so the file is passed explicitly |
 | all | skills | boot | `.claude/skills` | dir |  |  |  | boot | C1, C2 | &lt;cwd&gt;/.claude/skills/&lt;name&gt;/SKILL.md; flat &lt;name&gt;.md is not read |
 | subprocess-per-turn+bare | skills | boot | `.claude/skills` | dir |  | `--add-dir` |  | boot | C4, C5 | --bare reads no cwd or user skills (C4); only &lt;--add-dir dir&gt;/.claude/skills (C5), so the boot root must itself be --add-dir'ed when skills are projected |
-| all | project-dir | project |  |  |  | `--add-dir` |  | boot | C3, C5 | extra directory, not a working root; accepted in every mode. The built-in launch convention passes it under the bare variant only (AK adds it otherwise) |
+| all | project-dir | project |  |  |  | `--add-dir` |  | boot | C3, C5 | extra directory, not a working root; accepted in every mode, and the built-in launch convention passes it in every mode |
 
 ## codex
 

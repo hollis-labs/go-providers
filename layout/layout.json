@@ -105,7 +105,7 @@
         "C3",
         "C5"
       ],
-      "note": "extra directory, not a working root; accepted in every mode. The built-in launch convention passes it under the bare variant only (AK adds it otherwise)"
+      "note": "extra directory, not a working root; accepted in every mode, and the built-in launch convention passes it in every mode"
     },
     {
       "provider": "codex",

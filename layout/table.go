@@ -34,7 +34,7 @@ var table = []Entry{
 		Note:  "--bare reads no cwd or user skills (C4); only <--add-dir dir>/.claude/skills (C5), so the boot root must itself be --add-dir'ed when skills are projected"},
 	{Provider: runtimes.Claude, Concern: ProjectDir, Root: RootProject, Flag: "--add-dir", CWD: RootBoot,
 		Probe: []string{"C3", "C5"},
-		Note:  "extra directory, not a working root; accepted in every mode. The built-in launch convention passes it under the bare variant only (AK adds it otherwise)"},
+		Note:  "extra directory, not a working root; accepted in every mode, and the built-in launch convention passes it in every mode"},
 
 	// ---- Codex. Launch: cwd = boot, CODEX_HOME = boot. ----
 	{Provider: runtimes.Codex, Concern: Instructions, Root: RootBoot, Rel: "AGENTS.md", CWD: RootBoot,

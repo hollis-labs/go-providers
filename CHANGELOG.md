@@ -39,6 +39,9 @@
     native mode, plus Claude's bare variant), so an ACP-only runtime has none.
 - The adapters' `Detect` resolves through the registry descriptor. The
   `~/.opencode/bin` fallback now applies to OpenCode only.
+- Claude's projected launch convention passes the layout's project-dir
+  argument (`--add-dir <project>`) in every mode, not only under bare, so the
+  projection's argv is complete. agentkit no longer has to append it.
 
 ### Removed
 

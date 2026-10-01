@@ -236,8 +236,8 @@ func TestClaudeBareSkillsAddBootDir(t *testing.T) {
 	pr := &ClaudeAdapter{}
 	p2, _ := pr.ProviderProjection(PlantContext{}, ProjectionOptions{Skills: []SkillPackage{fixtureSkill()}})
 	b2, _ := p2.ResolveLaunch(roots, "x")
-	if strings.Contains(strings.Join(b2.Argv, " "), "--add-dir") {
-		t.Errorf("non-bare claude reads boot skills from cwd and needs no --add-dir: %v", b2.Argv)
+	if got := strings.Join(b2.Argv, " "); strings.Contains(got, "--add-dir /p/boot") || !strings.HasSuffix(got, "--add-dir /p/project") {
+		t.Errorf("non-bare claude reads boot skills from cwd (no boot --add-dir) and reaches the project by --add-dir: %v", b2.Argv)
 	}
 }
 
