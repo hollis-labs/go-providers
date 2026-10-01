@@ -55,7 +55,7 @@ func (a *AntigravityAdapter) BootDirSpec() BootDirSpec {
 				RelPath: layoutRel(pid, shape, layout.MCP, ""),
 				Mode:    layoutFileMode(pid, shape, layout.MCP),
 				Render: func(ctx PlantContext) (string, error) {
-					return renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},
 			},
 		},
@@ -72,8 +72,14 @@ func renderAntigravityPluginJSON() string {
 // renderAntigravityMCPConfig renders a plugin mcp_config.json in the shape
 // `agy mcp add` writes: an http server is {"serverUrl"}, a stdio server is
 // {"command","args","env"}.
-func renderAntigravityMCPConfig(loopbackURL string, mux muxEntry) string {
+func renderAntigravityMCPConfig(loopbackURL string, mux muxEntry, extra []MCPServerSpec) (string, error) {
+	if err := validateMCPServers(extra); err != nil {
+		return "", err
+	}
 	servers := map[string]any{}
+	for _, s := range extra {
+		servers[s.Name] = antigravityMCPEntry(s)
+	}
 	if loopbackURL != "" {
 		servers["loopback"] = map[string]any{"serverUrl": loopbackURL}
 	}
@@ -89,5 +95,5 @@ func renderAntigravityMCPConfig(loopbackURL string, mux muxEntry) string {
 		servers["mux"] = entry
 	}
 	out, _ := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
-	return string(out) + "\n"
+	return string(out) + "\n", nil
 }

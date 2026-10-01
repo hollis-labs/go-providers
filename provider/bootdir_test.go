@@ -296,7 +296,7 @@ func TestClaudeBootDirSpec_EmptyMCP(t *testing.T) {
 // codex/opencode adapters that share renderMCPJSON inherit the same correct
 // shape transparently.
 func TestRenderMCPJSON_PopulatedShape(t *testing.T) {
-	got := renderMCPJSON("http://127.0.0.1:65535/mcp", muxEntry{})
+	got, _ := renderMCPJSON("http://127.0.0.1:65535/mcp", muxEntry{}, nil)
 	want := `{
   "mcpServers": {
     "loopback": {
@@ -315,7 +315,7 @@ func TestRenderMCPJSON_PopulatedShape(t *testing.T) {
 // TestClaudeBootDirSpec_EmptyMCP but at the function level for direct
 // regression coverage of renderMCPJSON's two branches).
 func TestRenderMCPJSON_Empty(t *testing.T) {
-	got := renderMCPJSON("", muxEntry{})
+	got, _ := renderMCPJSON("", muxEntry{}, nil)
 	if strings.TrimSpace(got) != `{"mcpServers":{}}` {
 		t.Errorf("renderMCPJSON(\"\") should emit `{\"mcpServers\":{}}`, got %q", got)
 	}
@@ -340,7 +340,7 @@ func TestRenderMCPJSON_LoopbackPlusMux(t *testing.T) {
 			"--scopes", "session.write,message.write",
 		},
 	}
-	got := renderMCPJSON("http://127.0.0.1:65535/mcp", mux)
+	got, _ := renderMCPJSON("http://127.0.0.1:65535/mcp", mux, nil)
 
 	wants := []string{
 		`"mcpServers"`,
@@ -393,10 +393,10 @@ func TestRenderMCPJSON_LoopbackPlusMux(t *testing.T) {
 // deliberately disables the loopback (e.g. by passing nil
 // LoopbackBuilder in a unit test).
 func TestRenderMCPJSON_MuxOnly(t *testing.T) {
-	got := renderMCPJSON("", muxEntry{
+	got, _ := renderMCPJSON("", muxEntry{
 		Command: "/path/to/mux",
 		Args:    []string{"mcp", "--proxy"},
-	})
+	}, nil)
 	wants := []string{
 		`"mcpServers"`,
 		`"mux"`,
@@ -418,11 +418,11 @@ func TestRenderMCPJSON_MuxOnly(t *testing.T) {
 // `env` key. Operators use this for Mux-scoped overrides (e.g. a
 // non-default token via env without recompiling the daemon).
 func TestRenderMCPJSON_MuxEnv(t *testing.T) {
-	got := renderMCPJSON("http://127.0.0.1:1/mcp", muxEntry{
+	got, _ := renderMCPJSON("http://127.0.0.1:1/mcp", muxEntry{
 		Command: "/bin/mux",
 		Args:    []string{"mcp"},
 		Env:     []string{"MUX_TOKEN=secret-xyz", "MUX_VERBOSE=1"},
-	})
+	}, nil)
 	wants := []string{
 		`"env"`,
 		`"MUX_TOKEN": "secret-xyz"`,

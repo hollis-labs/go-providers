@@ -71,7 +71,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: layoutRel(pid, shape, layout.MCP, ""),
 				Render: func(ctx PlantContext) (string, error) {
-					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},
 			},
 		},
@@ -638,8 +638,14 @@ func indexEq(s string) int {
 // non-bare auto-discovery. The stdio shape uses `type: "stdio"` (the
 // canonical user-shell shape from ~/.claude.json — verified against the
 // installed claude 2.1.x revision).
-func renderMCPJSON(loopbackURL string, mux muxEntry) string {
+func renderMCPJSON(loopbackURL string, mux muxEntry, extra []MCPServerSpec) (string, error) {
+	if err := validateMCPServers(extra); err != nil {
+		return "", err
+	}
 	servers := map[string]any{}
+	for _, s := range extra {
+		servers[s.Name] = claudeMCPEntry(s)
+	}
 	if loopbackURL != "" {
 		servers["loopback"] = map[string]any{
 			"type": "http",
@@ -668,9 +674,9 @@ func renderMCPJSON(loopbackURL string, mux muxEntry) string {
 		// fails claude's schema validation when referenced via
 		// --mcp-config (bare mode), which requires `mcpServers` to be
 		// a record. Emitting `{"mcpServers":{}}` is valid for both.
-		return `{"mcpServers":{}}` + "\n"
+		return `{"mcpServers":{}}` + "\n", nil
 	}
 	cfg := map[string]any{"mcpServers": servers}
 	out, _ := json.MarshalIndent(cfg, "", "  ")
-	return string(out) + "\n"
+	return string(out) + "\n", nil
 }

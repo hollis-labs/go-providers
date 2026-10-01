@@ -141,7 +141,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 					// shapes). Mux entry from PlantContext is included for
 					// the same parity reason; it has no effect on codex itself
 					// (see top-of-file Mux note).
-					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},
 				// Mode 0o600: mirrors config.toml — the loopback URL is the
 				// same shape and the same sensitivity.
@@ -302,10 +302,11 @@ func tomlStringArray(values []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-// codexReservedMCPNames are the [mcp_servers.<name>] keys renderCodexConfigTOML
-// already emits from MCPLoopbackURL / the Mux* fields. An MCPServerSpec may
-// not reuse one — a duplicate TOML table is invalid and codex rejects it.
-var codexReservedMCPNames = map[string]bool{"loopback": true, "mux": true}
+// reservedMCPNames are the server names every renderer already emits from
+// MCPLoopbackURL / the Mux* fields. An MCPServerSpec may not reuse one: a
+// duplicate TOML table is invalid for codex, and in the JSON configs it would
+// silently replace the loopback or mux entry.
+var reservedMCPNames = map[string]bool{"loopback": true, "mux": true}
 
 // validMCPServerName reports whether name is a safe bare TOML table key:
 // non-empty and limited to [A-Za-z0-9_-]. Anything else would need TOML
@@ -335,26 +336,13 @@ func validMCPServerName(name string) bool {
 // error so the misconfiguration fails the config.toml Render rather than
 // planting a broken file.
 func renderCodexMCPServers(servers []MCPServerSpec) (string, error) {
+	if err := validateMCPServers(servers); err != nil {
+		return "", err
+	}
 	var b strings.Builder
-	seen := make(map[string]bool, len(servers))
 	for _, s := range servers {
-		switch {
-		case !validMCPServerName(s.Name):
-			return "", fmt.Errorf("MCPServerSpec: invalid name %q (want non-empty [A-Za-z0-9_-]+)", s.Name)
-		case codexReservedMCPNames[s.Name]:
-			return "", fmt.Errorf("MCPServerSpec %q: name is reserved — loopback/mux come from MCPLoopbackURL/Mux*", s.Name)
-		case seen[s.Name]:
-			return "", fmt.Errorf("MCPServerSpec %q: duplicate name", s.Name)
-		}
-		seen[s.Name] = true
-
-		hasHTTP, hasStdio := s.HTTPURL != "", s.Command != ""
-		if hasHTTP == hasStdio {
-			return "", fmt.Errorf("MCPServerSpec %q: set exactly one of HTTPURL or Command", s.Name)
-		}
-
 		fmt.Fprintf(&b, "\n[mcp_servers.%s]\n", s.Name)
-		if hasHTTP {
+		if s.HTTPURL != "" {
 			fmt.Fprintf(&b, "url = %q\n", s.HTTPURL)
 			continue
 		}

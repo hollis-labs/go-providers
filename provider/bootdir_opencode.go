@@ -73,7 +73,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 			{
 				RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName),
 				Render: func(ctx PlantContext) (string, error) {
-					return renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},
 			},
 			{
@@ -86,7 +86,7 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				RelPath: layoutRel(pid, shape, layout.MCP, agentName),
 				Mode:    0o600,
 				Render: func(ctx PlantContext) (string, error) {
-					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
+					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},
 			},
 		},
@@ -119,7 +119,10 @@ func renderOpencodeAgentMD(agentName string, ctx PlantContext) string {
 	return b.String()
 }
 
-func renderOpencodeJSON(mcpLoopbackURL string, mux muxEntry) string {
+func renderOpencodeJSON(mcpLoopbackURL string, mux muxEntry, extra []MCPServerSpec) (string, error) {
+	if err := validateMCPServers(extra); err != nil {
+		return "", err
+	}
 	cfg := map[string]any{}
 	// opencode's MCP config lives under the top-level "mcp" key in
 	// opencode.json (opencode 1.14.x). The transport keywords differ
@@ -144,6 +147,9 @@ func renderOpencodeJSON(mcpLoopbackURL string, mux muxEntry) string {
 	// global so an empty map would still be valid, but a missing key
 	// is the cleaner signal-of-absence.
 	mcp := map[string]any{}
+	for _, s := range extra {
+		mcp[s.Name] = opencodeMCPEntry(s)
+	}
 	if mcpLoopbackURL != "" {
 		mcp["loopback"] = map[string]any{
 			"type":    "remote",
@@ -176,5 +182,5 @@ func renderOpencodeJSON(mcpLoopbackURL string, mux muxEntry) string {
 		cfg["mcp"] = mcp
 	}
 	out, _ := json.MarshalIndent(cfg, "", "  ")
-	return string(out) + "\n"
+	return string(out) + "\n", nil
 }
