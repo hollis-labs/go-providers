@@ -33,6 +33,15 @@ func TestValidateBuiltinRules(t *testing.T) {
 		"projection facts without a version":       {func(d *Descriptor) { d.Projection.TestedVersion = "" }, "no tested version"},
 		"projection facts missing a feature":       {func(d *Descriptor) { delete(d.Projection.Features, FeatureTrust) }, `feature "trust"`},
 		"projection facts with an unknown feature": {func(d *Descriptor) { d.Projection.Features["telepathy"] = SupportProjected }, "outside registry.Features"},
+		"MCP exclusivity for a mode the runtime lacks": {func(d *Descriptor) {
+			d.Projection.MCPExclusive = map[runtimes.Mode]MCPExclusivity{runtimes.ModeACPStdio: MCPExclusivityFlag}
+		}, "MCP exclusivity names mode"},
+		"MCP exclusivity with no value": {func(d *Descriptor) {
+			d.Projection.MCPExclusive[runtimes.ModeSubprocessPerTurn] = MCPExclusivityNone
+		}, "is not flag, projected-layout or absent"},
+		"MCP exclusivity with an unknown value": {func(d *Descriptor) {
+			d.Projection.MCPExclusive[runtimes.ModeSubprocessPerTurn] = "telepathy"
+		}, "is not flag, projected-layout or absent"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -59,4 +68,21 @@ func TestRegisterPanicsOnABadBuiltin(t *testing.T) {
 	}()
 	d, _ := Lookup("pi")
 	register(d)
+}
+
+// Only a flag and a projected layout are mechanisms: a mode measured to have
+// none, and one never measured, both leave a launch able to load the user's
+// servers.
+func TestMCPExclusivityExclusive(t *testing.T) {
+	for x, want := range map[MCPExclusivity]bool{
+		MCPExclusivityFlag:            true,
+		MCPExclusivityProjectedLayout: true,
+		MCPExclusivityAbsent:          false,
+		MCPExclusivityNone:            false,
+		"telepathy":                   false,
+	} {
+		if got := x.Exclusive(); got != want {
+			t.Errorf("%q.Exclusive() = %v, want %v", x, got, want)
+		}
+	}
 }

@@ -47,7 +47,9 @@ import "slices"
 // binary). The same extras swallow opencode run's "--" and agy's --add-dir.
 // An extra that starts with a non-flag token joins the variadic flag in front
 // of the slot: on Claude, "--mcp-config f plainword" reads plainword as a
-// second config file. Pass a value-taking flag with its value.
+// second config file; with MCPExclusive on, --strict-mcp-config ends that list
+// first, so it becomes a stray positional (a PTY initial prompt). Pass a
+// value-taking flag with its value.
 type ExtraArgsBuilder interface {
 	BuildArgsWithExtras(prompt, systemPrompt, cliSessionID string, extras []string) []string
 }

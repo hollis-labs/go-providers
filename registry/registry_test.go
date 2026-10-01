@@ -154,12 +154,16 @@ func TestDescriptorsAreCopies(t *testing.T) {
 	d.Modes[0].Mode = "mutated"
 	d.Projection.Features[registry.FeatureMCP] = "mutated"
 	d.Projection.Notes[""] = "mutated"
+	d.Projection.MCPExclusive[runtimes.ModePTY] = "mutated"
 	again := mustLookup(t, "claude")
 	if again.Aliases[0] == "mutated" || again.Modes[0].Mode == "mutated" || again.Modes[0].Capabilities[0] == "mutated" {
 		t.Fatal("a caller's edit reached the registry")
 	}
 	if again.Projection.Features[registry.FeatureMCP] == "mutated" || again.Projection.Notes[""] == "mutated" {
 		t.Fatal("a caller's edit to projection facts reached the registry")
+	}
+	if again.MCPExclusivity(runtimes.ModePTY) != registry.MCPExclusivityFlag {
+		t.Fatal("a caller's edit to the MCP exclusivity facts reached the registry")
 	}
 	if _, ok := registry.Lookup("mutated"); ok {
 		t.Fatal("an edited alias became resolvable")

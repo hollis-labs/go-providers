@@ -11,12 +11,21 @@ extras API's limits are documented and tested (CW-20261001-0219).
   servers the launch passes with `--mcp-config`. Without it Claude also loads
   the user's own servers (the top-level `mcpServers` of `~/.claude.json`) next
   to the planted ones, so a host's allow-list for the planted servers does not
-  cover them.
+  cover them. Measured on claude 2.1.286: it also leaves out a `.mcp.json` in
+  the working directory. Not measured, so not claimed: account connectors,
+  managed and plugin servers.
   - It adds `--strict-mcp-config` in every shape (per-turn, bare,
     streaming-stdio, PTY), right after the `--mcp-config` pair, in the one
     convention in `argv.go`. A host must not spell the flag itself.
-  - With nothing planted it still adds the flag, and Claude then loads no MCP
-    server at all.
+  - **Nothing planted means nothing.** With no `--mcp-config` in the argv it
+    still adds the flag, and Claude then loads no MCP server at all, with no
+    error. A host that planted servers and needs them checks the argv carries
+    `--mcp-config` (`CheckMCPExclusive` checks the mechanism, not that servers
+    were passed).
+  - Anthropic's documentation, not measured here, says a deployed
+    `managed-mcp.json` makes Claude exit at startup when the flag is passed,
+    and that before Claude Code v2.1.246 a strict session still waited on
+    approval for project servers it was not loading.
   - It ends the variadic `--mcp-config` list, so an extra that starts with a
     non-flag token can no longer join it as another config file.
   - Off by default, and then the argv is byte-for-byte what it was.
@@ -25,28 +34,37 @@ extras API's limits are documented and tested (CW-20261001-0219).
   through. The projection applies the mode's mechanism itself, so it works for
   an adapter the host pinned or a custom resolver built, and it never changes
   the caller's adapter (Claude's convention gets the flag on a copy). A mode
-  with no measured mechanism makes `ProviderProjection` fail with
+  with no mechanism makes `ProviderProjection` fail with
   **`ErrMCPExclusiveUnsupported`**: the request is refused, never ignored, so a
   host cannot launch non-exclusive without knowing. It trusts neither side
   alone: the registry must declare a mechanism, and the projection's own launch
   convention must carry it (the flag, or the `CODEX_HOME` config root).
-  Every refusal names the provider and mode.
+  Every refusal names the provider and mode, and says which kind of "no" it
+  is: measured absent (OpenCode), not measured (Antigravity), not a native mode
+  (ACP), or an unknown runtime.
 - **`provider.CheckMCPExclusive(proj)`**: the same check as a function on a
   projection. A host whose adapter is not one of these, so may ignore
   `ProjectionOptions.MCPExclusive`, runs it on the projection it got back and
   never launches on the strength of a request alone.
-- **`registry.MCPExclusivity`**, so a host can ask whether a runtime and mode
-  can be made exclusive: `Descriptor.MCPExclusivity(mode)` and
+- **`registry.MCPExclusivity`**, so a host can ask what was measured about
+  making a runtime and mode exclusive: `Descriptor.MCPExclusivity(mode)` and
   `ProjectionFacts.MCPExclusive`, which holds a value only for a measured mode.
+  `MCPExclusivity.Exclusive()` is true for the two mechanisms.
   - `flag`: the adapter's `MCPExclusive` adds a CLI flag. Claude, in all three
     of its native modes.
-  - `layout`: the planted layout already excludes the user's servers, because
-    the runtime reads MCP config only from the root the layout sets. Codex exec
-    and app-server (`CODEX_HOME` = the boot dir). There is nothing to pass,
-    and it holds only for a launch that sets that root.
-  - No value: no mechanism was measured. A host that requires exclusivity
-    refuses these modes. That is OpenCode (below) and Antigravity.
-  - Registration refuses a value for a mode the runtime lacks.
+  - `projected-layout`: the runtime reads MCP config only from the root the
+    projection sets, so a launch that sets it excludes the user's servers.
+    Codex exec and app-server (`CODEX_HOME` = the boot dir). There is nothing
+    to pass. It holds only where `ProviderProjection`'s launch sets that root
+    and nothing overrides it; `BuildArgs` run in a host's own environment is
+    not that. Project-level servers stayed out because Codex did not trust the
+    project (the planted `config.toml` has no trust entry); a trusted project
+    was not measured, and neither were Codex account connectors or plugins.
+  - `absent`: measured, no MCP-only switch. OpenCode (below). Not a mechanism.
+  - No value: not measured. Antigravity, and every ACP mode. A host that
+    requires exclusivity refuses these modes.
+  - Registration refuses a value for a mode the runtime lacks, and any value
+    that is not one of these.
 - **`hack/probe-mcp-exclusive.sh`** and its golden
   `provider/testdata/mcp-exclusive/2026-10-01-claude-2.1.286-codex-0.159.3-opencode-1.18.33.tsv`.
   Each CLI runs under `env -i` with a scratch `HOME` holding a user-level
@@ -60,26 +78,34 @@ extras API's limits are documented and tested (CW-20261001-0219).
     nothing passed loads nothing, a working-directory `.mcp.json` included.
   - **Codex:** the user's server loads with `CODEX_HOME` unset and not with it
     set to the boot dir, which also leaves a project `.codex/config.toml`
-    unapplied. Measured by `codex mcp list` and by what `codex exec` spawned.
-    The app-server reads the same config and was confirmed by hand, not in the
-    script.
-  - **OpenCode has no MCP-only switch.** With `OPENCODE_CONFIG_DIR` the
+    unapplied. Measured by `codex mcp list`, and by what `codex exec` and
+    `codex app-server` spawned (the app-server rows drive it to `thread/start`
+    with a small python3 client, no turn and no model call).
+  - **OpenCode has no MCP-only switch (`absent`).** With `OPENCODE_CONFIG_DIR` the
     user's and the project's servers load next to the planted ones. Only
     whole-config isolation removed them (`XDG_CONFIG_HOME` at an empty
     directory, and `OPENCODE_DISABLE_PROJECT_CONFIG=1`), which also drops every
     other user and project setting. So none is offered.
   - **Antigravity was not measured:** `agy` will not start without a login.
-  - **Not covered anywhere:** Claude's account connectors (they need a login)
-    and managed or plugin servers.
+  - **Not covered anywhere:** Claude's account connectors (they need a login),
+    managed and plugin servers, and Codex account connectors and plugins.
+  - **Versions:** measured on claude 2.1.286, codex-cli 0.159.3 and opencode
+    1.18.33, newer than the registry's `TestedVersion` stamps. Those record
+    the layout contracts, which this probe did not re-measure, so they are not
+    bumped.
 - **Tests:** literal argv per shape, off and on, with and without a planted
   config; the flag's position; every Claude shape added to the argv parity
   cases, so the adapter path equals `ResolveTurn` for each; the registry's
   claims against the adapters (a flag mode's adapter adds the flag when asked,
-  a layout mode's launch sets `CODEX_HOME`, and nothing else claims anything);
+  a projected-layout mode's launch sets `CODEX_HOME`, and nothing else claims a
+  mechanism);
   each claim against the recorded golden; and the projection path for all nine
   shapes (Claude's bare variant included): the flag where declared, nothing
-  added for a layout mode, a refusal for the rest, the option and the field
-  never doubling the flag, and the caller's adapter left alone.
+  added for a projected-layout mode, a refusal for the rest, the option and the
+  field never doubling the flag, and the caller's adapter left alone. The
+  registry's guards (the clone, a value for a mode the runtime lacks, an empty
+  or unknown value) are each tested, and every refusal is held to name the
+  provider and mode and to say which kind of "no" it is.
 
 ### Documented
 

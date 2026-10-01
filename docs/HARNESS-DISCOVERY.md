@@ -68,8 +68,8 @@ does each CLI load next to the ones a launch plants? A scratch `HOME` holds a
 user-level server (`user-probe`); the planted set is passed the way the launch
 conventions pass it (`planted-probe`); every probe runs under `env -i`. No
 model call: Claude's API base is a closed port and its `system/init` lists the
-MCP servers; Codex lists its config and, for `exec`, runs against a closed port
-with a dummy key; OpenCode prints its resolved config. Stdio marker servers
+MCP servers; Codex lists its config and, for `exec` and `app-server`, runs
+against a closed port with a dummy key; OpenCode prints its resolved config. Stdio marker servers
 record that they were spawned, so a result is also a spawn, not only a listing.
 
 | Runtime | Probe | Launch | Loaded |
@@ -82,6 +82,7 @@ record that they were spawned, so a result is also a spawn, not only a listing.
 | Codex | MCP1 / MCP2 | `codex mcp list`, `CODEX_HOME` unset / the boot dir | user / planted |
 | Codex | MCP3 / MCP4 | the same with a project `.codex/config.toml` | planted / user (the project's is not applied) |
 | Codex | MCP5 / MCP6 | `codex exec` (spawned servers), `CODEX_HOME` unset / the boot dir | user / planted |
+| Codex | MCP7 / MCP8 | `codex app-server`, driven to `thread/start` and killed (spawned servers), `CODEX_HOME` unset / the boot dir | user / planted |
 | OpenCode | MCP1 | `OPENCODE_CONFIG_DIR` = the boot dir | planted + project + user |
 | OpenCode | MCP2 / MCP3 / MCP4 | `XDG_CONFIG_HOME` empty / `OPENCODE_DISABLE_PROJECT_CONFIG=1` / both | planted + project / planted + user / planted |
 
@@ -89,17 +90,24 @@ Claude's PTY starts MCP servers only after its first-run dialogs, so MCP9 and
 MCP10 pre-approve onboarding, the dummy API key and the project's MCP servers
 in the scratch config and drive the TUI through a pty (the script needs
 `python3` for those two). Claude `--bare` never loads the user's server, with
-or without the flag. Codex's app-server reads the same `config.toml` as exec; a
-by-hand run of `thread/start` spawned only the planted server, but it is not
-in the script. OpenCode's config view was also confirmed by spawning, with
+or without the flag. Codex's app-server starts its MCP servers on `thread/start`,
+so MCP7 and MCP8 drive it that far with a small python3 client, with no turn and
+no model call. OpenCode's config view was also confirmed by spawning, with
 `opencode run`, which uses OpenCode's built-in free model: that is why the
 script does not.
 
-OpenCode has no MCP-only switch: the two isolations that remove the user's and
-the project's servers remove all of their other config as well, and
-`XDG_CONFIG_HOME` is read by other tools too. Not measured: Antigravity (it
-will not start without a login), Claude's account connectors (a login), and
-managed or plugin servers.
+OpenCode has no MCP-only switch (the registry's `absent` value): the two
+isolations that remove the user's and the project's servers remove all of their
+other config as well, and `XDG_CONFIG_HOME` is read by other tools too.
+
+What the rows cover is user-level and working-directory MCP config, on the
+versions in the golden's `V` line. Not measured: Antigravity (it will not start
+without a login), Claude's account connectors (a login), managed and plugin
+servers, Codex account connectors and plugins, and a Codex project Codex
+trusts. Codex's project-level exclusion (MCP3) rests on Codex not trusting the
+project: the planted `config.toml` has no trust entry for it. These versions are
+newer than the `TestedVersion` stamps in the registry, which record the layout
+contracts and were not re-measured.
 
 ## Supplementary measurement (not in the golden)
 

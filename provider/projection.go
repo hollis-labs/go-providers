@@ -105,11 +105,21 @@ type ProjectionOptions struct {
 	// MCPExclusive requires the launch to load only the MCP servers it
 	// plants, not also the user's own (CW-20261001-0225). The projection
 	// applies the mode's mechanism, as registry.MCPExclusivity declares it:
-	// Claude's launch convention gains --strict-mcp-config, and a layout mode
-	// (Codex) is already exclusive. A mode with no measured mechanism makes
-	// ProviderProjection fail with ErrMCPExclusiveUnsupported rather than
-	// launch non-exclusive. An adapter's own MCPExclusive field is the same
-	// request for the adapter path.
+	// Claude's launch convention gains --strict-mcp-config, and a projected-
+	// layout mode (Codex) already sets its config root. A mode with no
+	// mechanism, measured absent, unmeasured or unknown, makes
+	// ProviderProjection fail with ErrMCPExclusiveUnsupported, which names the
+	// mode and says which, rather than launch non-exclusive. An adapter's own
+	// MCPExclusive field is the same request for the adapter path.
+	//
+	// It covers what was measured: user-level and working-directory MCP
+	// config. Account connectors, managed servers and plugins were not
+	// measured, so it does not claim them. NOTHING PLANTED MEANS NOTHING: if
+	// the launch plants no MCP config, Claude's argv has --strict-mcp-config
+	// and no --mcp-config, so the agent has no MCP servers and no error says
+	// so. A host that planted servers and needs them checks the argv carries
+	// --mcp-config; CheckMCPExclusive checks the mechanism, not that servers
+	// were passed.
 	MCPExclusive bool
 }
 

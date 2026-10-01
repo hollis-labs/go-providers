@@ -15,6 +15,8 @@ R	codex	MCP3-CODEX_HOME=boot,cwd=project	mcp=planted-probe
 R	codex	MCP4-CODEX_HOME=default,cwd=project	mcp=user-probe
 R	codex	MCP5-exec,CODEX_HOME=default	spawned=user-probe
 R	codex	MCP6-exec,CODEX_HOME=boot	spawned=planted-probe
+R	codex	MCP7-app-server,CODEX_HOME=default	spawned=user-probe
+R	codex	MCP8-app-server,CODEX_HOME=boot	spawned=planted-probe
 R	opencode	MCP1-OPENCODE_CONFIG_DIR=boot	mcp=planted-probe,project-probe,user-probe
 R	opencode	MCP2-XDG_CONFIG_HOME=empty	mcp=planted-probe,project-probe
 R	opencode	MCP3-DISABLE_PROJECT_CONFIG	mcp=planted-probe,user-probe

@@ -86,15 +86,20 @@ var wantMCPExclusivity = map[runtimes.ID]map[runtimes.Mode]registry.MCPExclusivi
 		runtimes.ModePTY:               registry.MCPExclusivityFlag,
 	},
 	runtimes.Codex: {
-		runtimes.ModeJSONRPCStdio:      registry.MCPExclusivityLayout,
-		runtimes.ModeSubprocessPerTurn: registry.MCPExclusivityLayout,
+		runtimes.ModeJSONRPCStdio:      registry.MCPExclusivityProjectedLayout,
+		runtimes.ModeSubprocessPerTurn: registry.MCPExclusivityProjectedLayout,
+	},
+	// Measured to have no MCP-only switch (the golden's opencode rows).
+	runtimes.OpenCode: {
+		runtimes.ModeSubprocessPerTurn: registry.MCPExclusivityAbsent,
+		runtimes.ModeHTTPSSE:           registry.MCPExclusivityAbsent,
 	},
 }
 
 // The registry's claim for each native mode is what the code does: a "flag"
-// mode's adapter adds the flag when asked and not otherwise, a "layout" mode's
-// projection sets the config root that excludes the user's servers, and no
-// other mode claims anything.
+// mode's adapter adds the flag when asked and not otherwise, a
+// "projected-layout" mode's projection sets the config root that excludes the
+// user's servers, and no other mode claims a mechanism.
 func TestMCPExclusivityMatchesTheAdapters(t *testing.T) {
 	roots := ProjectionRoots{ProjectRoot: "/p/project", BootRoot: "/p/boot"}
 	for _, d := range registry.All() {
@@ -108,9 +113,9 @@ func TestMCPExclusivityMatchesTheAdapters(t *testing.T) {
 				t.Fatalf("%s/%s: %v", d.ID, m, err)
 			}
 			switch got {
-			case registry.MCPExclusivityNone:
-				// No claim, so nothing to hold the code to; the table above
-				// already fails a mode that claims without evidence.
+			case registry.MCPExclusivityNone, registry.MCPExclusivityAbsent:
+				// No mechanism claimed, so nothing to hold the code to; the
+				// table above already fails a mode that claims without evidence.
 			case registry.MCPExclusivityFlag:
 				c, ok := a.(*ClaudeAdapter)
 				if !ok {
@@ -124,7 +129,7 @@ func TestMCPExclusivityMatchesTheAdapters(t *testing.T) {
 				if n := countOf(c.BuildArgs("hi", "", ""), strictMCPFlag); n != 1 {
 					t.Errorf("%s/%s with MCPExclusive has %s %d times, want once", d.ID, m, strictMCPFlag, n)
 				}
-			case registry.MCPExclusivityLayout:
+			case registry.MCPExclusivityProjectedLayout:
 				p, ok := a.(ProjectionProvider)
 				if !ok {
 					t.Fatalf("%s/%s: %T is not a ProjectionProvider", d.ID, m, a)
@@ -138,7 +143,7 @@ func TestMCPExclusivityMatchesTheAdapters(t *testing.T) {
 					t.Fatalf("%s/%s: %v", d.ID, m, err)
 				}
 				if !envIs(b, "CODEX_HOME", roots.BootRoot) {
-					t.Errorf("%s/%s declares layout exclusivity, but the launch does not set CODEX_HOME to the boot root: %v", d.ID, m, b.Env)
+					t.Errorf("%s/%s declares projected-layout exclusivity, but the launch does not set CODEX_HOME to the boot root: %v", d.ID, m, b.Env)
 				}
 			}
 		}
@@ -253,6 +258,10 @@ func TestMCPExclusivityClaimsAreMeasured(t *testing.T) {
 		eq(t, "codex", "MCP4", "mcp", []string{user}) // CODEX_HOME unset, project .codex ignored
 		eq(t, "codex", "MCP5", "spawned", []string{user})
 		eq(t, "codex", "MCP6", "spawned", only)
+		// The app-server (jsonrpc-stdio) starts its MCP servers on thread/start,
+		// without a turn: the same split, by the servers it spawned.
+		eq(t, "codex", "MCP7", "spawned", []string{user})
+		eq(t, "codex", "MCP8", "spawned", only)
 	})
 	t.Run("opencode has no MCP-only switch", func(t *testing.T) {
 		eq(t, "opencode", "MCP1", "mcp", []string{planted, project, user}) // OPENCODE_CONFIG_DIR alone merges all three
@@ -261,8 +270,8 @@ func TestMCPExclusivityClaimsAreMeasured(t *testing.T) {
 		eq(t, "opencode", "MCP4", "mcp", only)
 		d, _ := registry.Lookup("opencode")
 		for _, m := range d.NativeModes() {
-			if x := d.MCPExclusivity(m); x != registry.MCPExclusivityNone {
-				t.Errorf("opencode/%s declares %q; no MCP-only mechanism was found", m, x)
+			if x := d.MCPExclusivity(m); x != registry.MCPExclusivityAbsent {
+				t.Errorf("opencode/%s declares %q; no MCP-only mechanism was found, which is the absent value", m, x)
 			}
 		}
 	})
@@ -296,9 +305,9 @@ func TestProjectionMCPExclusive(t *testing.T) {
 			adapter := c.adapter()
 			proj, err := adapter.ProviderProjection(ctx, ProjectionOptions{MCPExclusive: true})
 			switch how {
-			case registry.MCPExclusivityNone:
+			case registry.MCPExclusivityNone, registry.MCPExclusivityAbsent:
 				if !errors.Is(err, ErrMCPExclusiveUnsupported) {
-					t.Fatalf("a mode with no measured mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
+					t.Fatalf("a mode with no mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
 				}
 				wantNamed(t, err, string(c.provider), string(c.mode.Mode))
 			case registry.MCPExclusivityFlag:
@@ -341,7 +350,7 @@ func TestProjectionMCPExclusive(t *testing.T) {
 				if ca, ok := adapter.(*ClaudeAdapter); ok && ca.MCPExclusive {
 					t.Error("ProviderProjection set MCPExclusive on the caller's adapter")
 				}
-			case registry.MCPExclusivityLayout:
+			case registry.MCPExclusivityProjectedLayout:
 				if err != nil {
 					t.Fatalf("projection: %v", err)
 				}
@@ -392,6 +401,28 @@ func TestRequireMCPExclusiveChecksTheConvention(t *testing.T) {
 		t.Errorf("a mode with no mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
 	}
 	wantNamed(t, err, "opencode", string(runtimes.ModeSubprocessPerTurn))
+	// The refusal says which kind of "no": measured absent, not measured, a
+	// mode the registry does not measure, or a runtime it does not know.
+	for _, c := range []struct {
+		name string
+		proj ProviderProjection
+		want string
+	}{
+		{"measured absent", ProviderProjection{Provider: runtimes.OpenCode, Mode: runtimes.ModeHTTPSSE}, "was measured and has no switch"},
+		{"native but not measured", ProviderProjection{Provider: runtimes.Antigravity, Mode: runtimes.ModeSubprocessPerTurn}, "was not measured"},
+		{"not a native mode", ProviderProjection{Provider: runtimes.Claude, Mode: runtimes.ModeACPStdio}, "not a native mode"},
+		{"not in the registry", ProviderProjection{Provider: "no-such-runtime", Mode: runtimes.ModeSubprocessPerTurn}, "not a runtime in the registry"},
+	} {
+		kindErr := requireMCPExclusive(c.proj, ProjectionOptions{MCPExclusive: true})
+		if !errors.Is(kindErr, ErrMCPExclusiveUnsupported) {
+			t.Errorf("%s: err = %v, want ErrMCPExclusiveUnsupported", c.name, kindErr)
+			continue
+		}
+		wantNamed(t, kindErr, string(c.proj.Provider), string(c.proj.Mode))
+		if !strings.Contains(kindErr.Error(), c.want) {
+			t.Errorf("%s: error %q does not say %q", c.name, kindErr, c.want)
+		}
+	}
 	if err = requireMCPExclusive(flagless, ProjectionOptions{}); err != nil {
 		t.Errorf("no request, no check: %v", err)
 	}

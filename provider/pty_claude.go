@@ -35,14 +35,23 @@ type ClaudeAdapter struct {
 	SkipPermissions bool
 
 	// MCPExclusive adds --strict-mcp-config, which keeps claude to the MCP
-	// servers this launch passes with --mcp-config and ignores every other
-	// MCP configuration: the user's own servers in ~/.claude.json, and a
-	// .mcp.json in the working directory. Without it claude loads those
-	// next to the planted ones, so an MCP allow-list the host applies to
-	// the planted servers does not cover them. With no MCP config passed
-	// it loads no MCP servers at all. Off by default, which leaves the argv
-	// as it was. Measured in every shape (registry.MCPExclusivityFlag);
-	// --bare already skips the user's servers, and the flag is harmless there.
+	// servers this launch passes with --mcp-config. Measured on claude
+	// 2.1.286: it leaves out the user-level top-level mcpServers of
+	// ~/.claude.json and a .mcp.json in the working directory, which claude
+	// otherwise loads next to the planted ones, past any MCP allow-list the
+	// host applies to the planted ones. Not measured, so not claimed: claude.ai
+	// account connectors, managed servers and plugin servers. Anthropic's
+	// documentation (not measured here) says a deployed managed-mcp.json makes
+	// claude exit at startup when the flag is passed, and that before Claude
+	// Code v2.1.246 a strict session still waited on approval for project
+	// servers it was not loading.
+	//
+	// NOTHING PLANTED MEANS NOTHING: with no --mcp-config in the argv (no
+	// MCPConfigPath on the adapter path) the flag leaves claude with no MCP
+	// servers and no error. A host that planted servers and needs them checks
+	// that the argv carries --mcp-config. Off by default, which leaves the argv
+	// as it was. Measured in every shape (registry.MCPExclusivityFlag); --bare
+	// already skips the user's servers, and the flag is harmless there.
 	// ProjectionOptions.MCPExclusive is the same request on the prepared path.
 	MCPExclusive bool
 

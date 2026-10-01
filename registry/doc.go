@@ -38,14 +38,19 @@
 // # MCP exclusivity
 //
 // A CLI normally loads the user's own MCP servers next to the ones a launch
-// plants. [Descriptor.MCPExclusivity] says, per native mode, how a launch is
-// kept to its own: [MCPExclusivityFlag] (the adapter's MCPExclusive field adds
-// a CLI flag: Claude), [MCPExclusivityLayout] (the planted layout already
-// excludes the user's servers: Codex, whose config root is CODEX_HOME), or
-// [MCPExclusivityNone], where no mechanism was measured and a host that needs
-// exclusivity must refuse the mode. Like a capability it is declared only
-// where hack/probe-mcp-exclusive.sh measured it; OpenCode has no MCP-only
-// switch, and Antigravity could not be measured.
+// plants. [Descriptor.MCPExclusivity] says, per native mode, what was measured
+// about keeping a launch to its own: [MCPExclusivityFlag] (a CLI flag the
+// launch adds: Claude's --strict-mcp-config), [MCPExclusivityProjectedLayout]
+// (the runtime reads its MCP servers only from the config root the projection
+// sets: Codex, CODEX_HOME=<boot>; it does not hold for BuildArgs run in a
+// host's own environment), [MCPExclusivityAbsent] (measured, no MCP-only
+// switch: OpenCode), or [MCPExclusivityNone], where nothing was measured
+// (Antigravity could not be, and an ACP mode has none) and a host that needs
+// exclusivity must refuse the mode. [MCPExclusivity.Exclusive] is true for the
+// first two. Like a capability it is declared only where
+// hack/probe-mcp-exclusive.sh measured it, and only for what it measured:
+// user-level and working-directory MCP config. Account connectors, managed
+// servers and plugins were not measured.
 //
 // # Permission posture
 //

@@ -8,10 +8,10 @@
 #
 # No model call: Claude's API base is a closed port and only the first
 # stream-json line (system/init, which lists the MCP servers) is read; Codex
-# lists its config (`codex mcp list`) and, for exec, is pointed at a closed
-# port with a dummy key; OpenCode prints its resolved config (`debug config`).
+# lists its config (`codex mcp list`) and, for exec and app-server, is pointed at
+# a closed port with a dummy key; OpenCode prints its resolved config (`debug config`).
 # The stdio marker servers record that they were spawned.
-# Needs: claude, codex, opencode, jq, perl; python3 (stdlib pty) for the Claude PTY probes only.
+# Needs: claude, codex, opencode, jq, perl; python3 (stdlib) for the Claude PTY and Codex app-server probes only.
 #
 # Output: tab-separated lines like the layout probe's golden.
 #   V  <versions>
@@ -121,6 +121,36 @@ codex_list MCP3-CODEX_HOME=boot,cwd=project      "$CXP" CODEX_HOME="$CXB"
 codex_list MCP4-CODEX_HOME=default,cwd=project   "$CXP"
 codex_exec MCP5-exec,CODEX_HOME=default          "$CXB"
 codex_exec MCP6-exec,CODEX_HOME=boot             "$CXB" CODEX_HOME="$CXB"
+# `codex app-server` (the jsonrpc-stdio mode): started, driven just far enough to begin a thread (which starts
+# the MCP servers), then killed. No turn runs, so no model call.
+cat > "$W/appserver-drive.py" <<'EOP'
+import json, subprocess, sys, time
+cwd = sys.argv[1]
+p = subprocess.Popen(["codex", "app-server"], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+def until(id_, t=20):
+    end = time.time() + t
+    while time.time() < end:
+        line = p.stdout.readline()
+        if not line: return None
+        try: m = json.loads(line)
+        except Exception: continue
+        if m.get("id") == id_ and "method" not in m: return m
+    return None
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "probe", "version": "0"}}}); until(1)
+send({"jsonrpc": "2.0", "method": "initialized"})
+send({"jsonrpc": "2.0", "id": 2, "method": "thread/start", "params": {"cwd": cwd}}); until(2)
+time.sleep(4)
+p.kill()
+EOP
+codex_appserver() { local id=$1 cwd=$2; shift 2; clear_marks
+  if command -v python3 >/dev/null; then
+    (cd "$cwd" && E OPENAI_API_KEY=sk-dummy OPENAI_BASE_URL=http://127.0.0.1:9 "$@" "${PA[@]}" python3 "$W/appserver-drive.py" "$cwd" >/dev/null 2>&1)
+    sleep 1; say codex "$id" "spawned=$(spawned)"
+  else say codex "$id" "skipped (no python3)"; fi
+}
+codex_appserver MCP7-app-server,CODEX_HOME=default "$CXB"
+codex_appserver MCP8-app-server,CODEX_HOME=boot    "$CXB" CODEX_HOME="$CXB"
 
 # ---------- OpenCode. Observation = the resolved config's mcp servers (`opencode debug config`) ----------
 # User-level server in the scratch ~/.config/opencode/opencode.json; planted set in <ocboot>/opencode.json

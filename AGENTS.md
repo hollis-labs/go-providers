@@ -85,8 +85,9 @@ rate-budget primitives in `go-llm-contracts`. Reintroducing an HTTP chat or
 embedding adapter here reverses a deliberate split — this library bridges CLIs.
 
 An MCP-exclusivity claim is a security statement, so it needs evidence: a
-mode gets a `registry.MCPExclusivity` value only when the probe's golden shows
-the user's server absent with it
+mode gets a `registry.MCPExclusivity` mechanism (`flag`, `projected-layout`) only
+when the probe's golden shows the user's server absent with it, and `absent` only
+for what the probe measured to have no MCP-only switch
 (`TestMCPExclusivityClaimsAreMeasured`), and the claim must match the code
 (`TestMCPExclusivityMatchesTheAdapters`). The flag is spelled in
 `claudeConvention` only, with a literal argv test per shape

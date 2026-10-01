@@ -74,9 +74,11 @@ func init() {
 			// system/init reports and the stdio markers that were spawned:
 			// per-turn MCP1/MCP2 (and MCP3, MCP4), bare MCP5/MCP6 (--bare
 			// already skips the user's servers; the flag changes nothing there),
-			// streaming MCP7/MCP8, PTY MCP9/MCP10. Not measured: the claude.ai
-			// account connectors, which need a login, and managed or plugin
-			// servers. TestMCPExclusivityMatchesTheAdapters checks the flag.
+			// streaming MCP7/MCP8, PTY MCP9/MCP10. A .mcp.json in the working
+			// directory was left out the same way. Not measured, so not
+			// claimed: the claude.ai account connectors (they need a login),
+			// and managed or plugin servers. TestMCPExclusivityMatchesTheAdapters
+			// checks the flag.
 			MCPExclusive: map[runtimes.Mode]MCPExclusivity{
 				runtimes.ModeStreamingStdio:    MCPExclusivityFlag,
 				runtimes.ModeSubprocessPerTurn: MCPExclusivityFlag,
@@ -139,18 +141,20 @@ func init() {
 			},
 			// Codex reads MCP servers from $CODEX_HOME/config.toml only. With the
 			// layout's CODEX_HOME=<boot> the user's ~/.codex servers are not
-			// loaded, and a project .codex/config.toml is not applied
-			// (untrusted); with CODEX_HOME unset they are. So the planted layout
-			// is exclusive by itself and there is nothing to pass. Measured by
-			// hack/probe-mcp-exclusive.sh on codex-cli 0.159.3: `codex mcp list`
-			// MCP1-MCP4, and servers spawned by `codex exec` MCP5/MCP6. The
-			// app-server reads the same config; it was confirmed by hand
-			// (thread/start spawned only the planted server) but is not in the
-			// script. TestMCPExclusivityMatchesTheAdapters checks that the
-			// projection sets CODEX_HOME.
+			// loaded; with CODEX_HOME unset they are. So the planted layout is
+			// exclusive by itself, but only where the launch sets that root:
+			// the value is "projected-layout", and the projection's launch
+			// convention must set CODEX_HOME (CheckMCPExclusive verifies it).
+			// Measured by hack/probe-mcp-exclusive.sh on codex-cli 0.159.3:
+			// `codex mcp list` MCP1-MCP4, servers spawned by `codex exec`
+			// MCP5/MCP6 and by `codex app-server` MCP7/MCP8. A project
+			// .codex/config.toml was not applied (MCP3), because Codex did not
+			// trust the project: the planted config.toml has no trust entry
+			// for it. A trusted project was not measured. Not measured, so not
+			// claimed: Codex account connectors and plugins.
 			MCPExclusive: map[runtimes.Mode]MCPExclusivity{
-				runtimes.ModeJSONRPCStdio:      MCPExclusivityLayout,
-				runtimes.ModeSubprocessPerTurn: MCPExclusivityLayout,
+				runtimes.ModeJSONRPCStdio:      MCPExclusivityProjectedLayout,
+				runtimes.ModeSubprocessPerTurn: MCPExclusivityProjectedLayout,
 			},
 		},
 	})
@@ -191,7 +195,7 @@ func init() {
 				runtimes.ModeSubprocessPerTurn: "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
 				runtimes.ModeHTTPSSE:           "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
 			},
-			// No MCPExclusive entry, on purpose. OPENCODE_CONFIG_DIR is merged
+			// Measured to have no MCP-only switch. OPENCODE_CONFIG_DIR is merged
 			// with the user's ~/.config/opencode and the project's
 			// opencode.json, so both sets of servers load next to the planted
 			// ones (hack/probe-mcp-exclusive.sh opencode MCP1, confirmed by
@@ -200,8 +204,13 @@ func init() {
 			// directory (MCP2) and OPENCODE_DISABLE_PROJECT_CONFIG=1 (MCP3),
 			// together MCP4. Neither is MCP-specific: they also drop every other
 			// user and project setting (providers, models, permissions), and
-			// XDG_CONFIG_HOME is a variable other tools the agent runs read too. No
-			// MCP-only switch was found in opencode 1.18.33, so none is claimed.
+			// XDG_CONFIG_HOME is a variable other tools the agent runs read too.
+			// No MCP-only switch was found in opencode 1.18.33, so none is
+			// offered: a request for exclusivity is refused.
+			MCPExclusive: map[runtimes.Mode]MCPExclusivity{
+				runtimes.ModeSubprocessPerTurn: MCPExclusivityAbsent,
+				runtimes.ModeHTTPSSE:           MCPExclusivityAbsent,
+			},
 		},
 	})
 
