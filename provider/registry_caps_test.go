@@ -92,11 +92,11 @@ func adapterImplements(a CLIAdapter, c runtimes.Capability) (checked, ok bool) {
 //
 // Every mode of a runtime shares one Go type, so an interface check cannot
 // tell modes apart. For typed events, the claim the registry makes most often
-// per mode, the check is behavioural: the mode's captured session, parsed by
+// per mode, the check is behavioral: the mode's captured session, parsed by
 // the mode's adapter, must yield typed events (typedEventsEvidence). The
 // classifiers, preflight and resume-keeps-id are methods that do not depend
 // on the mode, so the interface check on the mode's adapter is the per-mode
-// check; their behaviour is pinned by each adapter's own fixture tests.
+// check; their behavior is pinned by each adapter's own fixture tests.
 func TestDeclaredCapabilitiesMatchAdapters(t *testing.T) {
 	for _, d := range registry.All() {
 		for _, m := range d.NativeModes() {
