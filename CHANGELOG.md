@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.34.0 — 2026-10-01
+
+### Added
+
+- `Binary` and `ExtraArgs` on `ClaudeAdapter`, `CodexAdapter`,
+  `OpencodeAdapter` and `AntigravityAdapter` (CW-20260930-0134, the
+  capability-forwarding half of CW-20260930-0137). `Detect` returns a set
+  `Binary` as-is, before the env override and PATH. `BuildArgs` places
+  `ExtraArgs` at the convention's extra slot:
+  - before the variadic `--add-dir` (Claude, agy);
+  - before `--json` (codex exec);
+  - before the trailing message (opencode run);
+  - last for codex app-server and opencode serve.
+
+  Hosts set these fields instead of wrapping the adapter, which hid its
+  optional interfaces (`EventParser`, the classifiers, `Preflighter`,
+  `SessionResumeVerifier`, `BootDirProvider`).
+- `provider.NewAdapter(id, mode)` and `ErrNoAdapter`: the one constructor
+  table for native runtimes. It returns a fresh adapter in the shape the mode
+  needs, for example Claude's streaming adapter for `streaming-stdio`, which
+  agentkit's `DefaultResolver` got wrong by always building print mode.
+  agentkit's `DefaultResolver` and go-agent-wrapper's `launch` factories build
+  from it instead of keeping their own per-runtime switches. ACP modes are
+  `ErrNoAdapter`. `TestNewAdapterCoversTheRegistry` holds the table to the
+  registry's native modes.
+
+### Changed
+
+- Codex's app-server mode (`jsonrpc-stdio`) declares `resume`
+  (CW-20261001-0052). `thread/resume` was measured live, in the codex-cli
+  0.159.2 capture `providertest/fixtures/codex/app_server_resume`, and
+  agentkit's `turn.CodexAppServerSession` implements it (agentkit v0.11.0).
+  It still declares no `session-lost-classifier`: agentkit's `turn` package
+  classifies a lost thread from the JSON-RPC error, not `CodexAdapter`.
+
 ## v0.33.0 — 2026-10-01
 
 One argv owner (CW-20260930-0135, go-providers half). Each runtime's argv is

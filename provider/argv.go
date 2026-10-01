@@ -94,10 +94,11 @@ func newConvention(id runtimes.ID, shape layout.Shape, args []ArgTemplate) Launc
 }
 
 // resolveAdapterTurn is every adapter's BuildArgs: its convention resolved
-// for one turn. Built from fields, the convention has no root or file
-// arguments, so resolving it cannot fail.
-func resolveAdapterTurn(c LaunchConvention, prompt, systemPrompt, sessionID string) []string {
-	b, err := c.ResolveTurn(ProjectionRoots{}, TurnInput{Prompt: prompt, SystemPrompt: systemPrompt, ResumeID: sessionID}, nil)
+// for one turn, with the adapter's ExtraArgs at the convention's extra slot.
+// Built from fields, the convention has no root or file arguments, so
+// resolving it cannot fail.
+func resolveAdapterTurn(c LaunchConvention, prompt, systemPrompt, sessionID string, extra []string) []string {
+	b, err := c.ResolveTurn(ProjectionRoots{}, TurnInput{Prompt: prompt, SystemPrompt: systemPrompt, ResumeID: sessionID}, extra)
 	if err != nil {
 		panic("provider: resolve adapter argv: " + err.Error())
 	}

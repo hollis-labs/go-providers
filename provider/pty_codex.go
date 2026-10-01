@@ -27,6 +27,18 @@ import (
 //     correlation, and event mapping live in the consumer runtime
 //     (go-agent-sessions jsonRpcStdio kind), not in this adapter.
 type CodexAdapter struct {
+	// Binary, when set, is the executable Detect returns, used as-is: no
+	// env override and no PATH search. It pins a binary per adapter so a
+	// host never has to wrap the adapter for it; a wrapper hides the
+	// adapter's optional interfaces (EventParser, the classifiers, ...).
+	Binary string
+
+	// ExtraArgs are a caller's extra arguments. BuildArgs places them at
+	// the convention's extra slot (ArgExtra), never blindly at the end:
+	// for Claude and agy that is before the variadic --add-dir <project>,
+	// for codex exec and opencode run before the prompt.
+	ExtraArgs []string
+
 	// Mode selects the argv shape. "" or "exec" → `codex exec`
 	// (single-turn subprocess). "app-server" → `codex app-server`
 	// (long-lived JSON-RPC daemon over stdio).
@@ -120,7 +132,7 @@ func (a *CodexAdapter) Name() string { return "codex" }
 func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
 	shape := codexShape(a)
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Codex, shape, a.ProjectDir)}
-	return resolveAdapterTurn(codexConvention(a, shape, p), prompt, systemPrompt, cliSessionID)
+	return resolveAdapterTurn(codexConvention(a, shape, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
 }
 
 func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -138,7 +150,7 @@ func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 }
 
 func (a *CodexAdapter) Detect() (string, bool) {
-	return detect(runtimes.Codex)
+	return detect(runtimes.Codex, a.Binary)
 }
 
 // Codex JSONL event types.

@@ -110,6 +110,11 @@ func TestCapabilitiesPerMode(t *testing.T) {
 	if !codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapApprovals) || codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapApprovals) {
 		t.Error("codex asks for approval in app-server mode only")
 	}
+	// thread/resume measured live (providertest codex/app_server_resume);
+	// exec's adapter does not resume.
+	if !codex.Has(runtimes.ModeJSONRPCStdio, runtimes.CapResume) || codex.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapResume) {
+		t.Error("codex resumes in app-server mode only")
+	}
 	claude := mustLookup(t, "claude")
 	if claude.Has(runtimes.ModePTY, runtimes.CapTypedEvents) || !claude.Has(runtimes.ModeStreamingStdio, runtimes.CapTypedEvents) {
 		t.Error("claude's TUI emits no typed events; stream-json does")

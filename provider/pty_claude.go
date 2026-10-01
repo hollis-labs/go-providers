@@ -15,6 +15,18 @@ import (
 // `subtype: "error"`. llmtypes.EventUsage is emitted alongside llmtypes.EventDone when token
 // usage is available on the `result` event.
 type ClaudeAdapter struct {
+	// Binary, when set, is the executable Detect returns, used as-is: no
+	// env override and no PATH search. It pins a binary per adapter so a
+	// host never has to wrap the adapter for it; a wrapper hides the
+	// adapter's optional interfaces (EventParser, the classifiers, ...).
+	Binary string
+
+	// ExtraArgs are a caller's extra arguments. BuildArgs places them at
+	// the convention's extra slot (ArgExtra), never blindly at the end:
+	// for Claude and agy that is before the variadic --add-dir <project>,
+	// for codex exec and opencode run before the prompt.
+	ExtraArgs []string
+
 	// SkipPermissions adds --dangerously-skip-permissions to CLI args.
 	// Only set when developer_mode is enabled; never set for production.
 	SkipPermissions bool
@@ -252,7 +264,7 @@ func (a *ClaudeAdapter) Name() string { return "claude" }
 // boot-dir layout.
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
 	shape := claudeProjectionShape(a)
-	return resolveAdapterTurn(claudeConvention(a, shape, a.fieldPaths(shape)), prompt, systemPrompt, cliSessionID)
+	return resolveAdapterTurn(claudeConvention(a, shape, a.fieldPaths(shape)), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
 }
 
 func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -260,7 +272,7 @@ func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 }
 
 func (a *ClaudeAdapter) Detect() (string, bool) {
-	return detect(runtimes.Claude)
+	return detect(runtimes.Claude, a.Binary)
 }
 
 // Claude Code stream-json event types.

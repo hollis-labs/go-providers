@@ -61,6 +61,18 @@ import (
 //     BootDirSpec therefore projects into the workspace customization root
 //     <boot>/.agents, with cwd = boot and the project attached by --add-dir.
 type AntigravityAdapter struct {
+	// Binary, when set, is the executable Detect returns, used as-is: no
+	// env override and no PATH search. It pins a binary per adapter so a
+	// host never has to wrap the adapter for it; a wrapper hides the
+	// adapter's optional interfaces (EventParser, the classifiers, ...).
+	Binary string
+
+	// ExtraArgs are a caller's extra arguments. BuildArgs places them at
+	// the convention's extra slot (ArgExtra), never blindly at the end:
+	// for Claude and agy that is before the variadic --add-dir <project>,
+	// for codex exec and opencode run before the prompt.
+	ExtraArgs []string
+
 	// Model is passed as --model (see `agy models`). Empty keeps agy's default.
 	Model string
 
@@ -90,7 +102,7 @@ func (a *AntigravityAdapter) Name() string { return "antigravity" }
 // from the adapter's fields.
 func (a *AntigravityAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Antigravity, shapePerTurn, a.AddDirs...)}
-	return resolveAdapterTurn(antigravityConvention(a, p), prompt, systemPrompt, cliSessionID)
+	return resolveAdapterTurn(antigravityConvention(a, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
 }
 
 func (a *AntigravityAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -100,7 +112,7 @@ func (a *AntigravityAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, err
 // Detect resolves AGY_CLI_PATH, then agy on PATH and the usual install
 // directories (the installer puts it in ~/.local/bin).
 func (a *AntigravityAdapter) Detect() (string, bool) {
-	return detect(runtimes.Antigravity)
+	return detect(runtimes.Antigravity, a.Binary)
 }
 
 // agy authenticates from the macOS Keychain, not from
