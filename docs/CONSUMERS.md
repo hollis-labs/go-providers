@@ -1,23 +1,24 @@
 # Consumers: pinning your table to `layout`
 
 `layout.Table()` is the one answer to "which file, skill, flag or environment
-variable does agent CLI X need, relative to which root". Nothing outside
-go-providers uses it yet; adopting it is each consumer's decision. This page
-lists every place the workspace answers that question today and the
-`layouttest` call that would pin it in that repo's own tests. Locations were
-measured 2026-09-25 (file:line, plus or minus a few); re-check before relying
-on them.
+variable does agent CLI X need, relative to which root". agentkit
+(`agentlaunch`) and go-agent-wrapper (`plant`) read it through `layout.Find`
+and `layout.SkillRoot`; adopting the `layouttest` pins is each consumer's
+decision. This page lists every place the workspace answered that question
+when it was surveyed and the `layouttest` call that would pin it in that
+repo's own tests. Locations were measured 2026-09-25 (file:line, plus or
+minus a few) and predate those reads; re-check before relying on them.
 
 Values passed to the calls below are the ones the table holds today. Where a
 consumer's current value differs, the call fails, which is the point: the
-difference is a finding, and each one is recorded in `CHANGELOG.md` (Unreleased,
-"What consumers can delete") and `docs/HARNESS-DISCOVERY.md`. Import paths:
+difference is a finding, and each one is recorded in `CHANGELOG.md` (v0.27.0,
+"What consumers can delete after adopting `layout`") and `docs/HARNESS-DISCOVERY.md`. Import paths:
 `github.com/hollis-labs/go-providers/layout` and
 `github.com/hollis-labs/go-providers/layout/layouttest`. Consumers need
 `go >= 1.26.6` and a go-providers release that contains this package.
 
 Non-Go readers (Cairn YAML layouts, agent-launcher) read
-`layout/layout.json` instead: `{"schema":1,"entries":[{provider, mode, concern, root, rel, form, file_mode, flag, env, cwd, aliases, probe, unprobed, note}]}`.
+`layout/layout.json` instead: `{"schema":1,"entries":[{provider, mode, variant, concern, root, rel, form, file_mode, flag, env, cwd, probe, unprobed, note}]}`.
 A conformance test there loads the JSON and applies the same three comparisons
 as the calls below.
 
@@ -25,7 +26,7 @@ as the calls below.
 
 | # | Table (location) | Pin with | Expected today |
 |---|---|---|---|
-| 1 | go-providers legacy `BootDirSpec` (`provider/bootdir_{claude,codex,opencode}.go`) | already pinned in-repo: `TestBootDirSpecEqualsLayout` | derived from the table |
+| 1 | go-providers legacy `BootDirSpec` (`provider/bootdir_{claude,codex,opencode,antigravity}.go`) | already pinned in-repo: `TestBootDirSpecEqualsLayout` | derived from the table |
 | 2 | go-providers `ProviderProjection` + `LaunchConvention` (`provider/projection.go`) | already pinned in-repo: `TestLayoutRegression_NonSkillProjectionUnchanged`, `TestProjectedSkillPlacementIsReadByHarness` | derived from the table |
 | 3 | agentkit legacy skill path, two copies (`agentlaunch/providerplant/plant.go:386`, `agentlaunch/materialize.go:407`) | `layouttest.AssertSkillPlacement(t, runtimes.Claude, layout.Shape{Mode: runtimes.ModeSubprocessPerTurn}, layout.RootBoot, ".claude/skills")`, `...(t, runtimes.Codex, layout.Shape{Mode: runtimes.ModeSubprocessPerTurn}, layout.RootBoot, "skills")`, `...(t, runtimes.OpenCode, layout.Shape{Mode: runtimes.ModeSubprocessPerTurn}, layout.RootBoot, "skills")` with the prefix the mapping actually returns; also assert the form is directory (`<prefix>/<id>/SKILL.md`) | fails: flat `<id>.md`, opencode `.opencode/skills`, codex `skills/<id>.md`. Status: the opencode path was fixed in agentkit v0.7.0 and the claude path in v0.9.0 |
 | 4 | agentkit provider by runtime legality + boot renderer (`agentlaunch/matrix/matrix.go:125`) | not a layout concern (support matrix); out of scope | n/a |
@@ -38,7 +39,7 @@ as the calls below.
 
 ## The five skill authors
 
-Every author must place skills at `layout.SkillRoot(provider, mode)` in the
+Every author must place skills at `layout.SkillRoot(runtime, shape)` in the
 directory form. Content pinning uses `provider.SkillPackage.Hash` /
 `TreeHash`, which is go-agentdef's `sha256:<hex>` over the sorted whole skill
 tree.

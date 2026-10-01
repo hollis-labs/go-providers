@@ -7,7 +7,7 @@ pattern against the supported CLI adapters:
 |---|---|---|---|
 | [`claude_bare/`](./claude_bare) | `ClaudeAdapter` (`Bare: true`) | `SubprocessBridge` | Bare-mode Claude — explicit context injection via `--mcp-config`, `--append-system-prompt-file`, `--settings`, and `--add-dir`, plus the planted `.claude/settings.json` `apiKeyHelper` field for OAuth-via-keychain auth. |
 | [`codex_bootdir/`](./codex_bootdir) | `CodexAdapter` | direct `os/exec` using `ProviderProjection.ResolveLaunch` | Codex via `codex exec --json`, with pure projection for `AGENTS.md` + `boot.md` + `config.toml`, caller-approved `auth.json` preparation via `-auth-json`, and project access via `--cd`. |
-| [`opencode_bootdir/`](./opencode_bootdir) | `OpencodeAdapter` | `SubprocessBridge` | opencode with `agents/<name>.md` + `agents.json` + `opencode.json` planted into a config dir, `OPENCODE_CONFIG_DIR` set, and project access via `--dir`. |
+| [`opencode_bootdir/`](./opencode_bootdir) | `OpencodeAdapter` | `SubprocessBridge` | opencode with `agents/<name>.md` + `opencode.json` (plus `boot.md` and a `.mcp.json` mirror) planted into a config dir, `OPENCODE_CONFIG_DIR` set, and project access via `--dir`. |
 
 ## Common shape
 

@@ -2,8 +2,8 @@
 // pattern for the opencode CLI.
 //
 // opencode treats its config dir (not cwd) as the source of truth for
-// agents.json + opencode.json + agents/<name>.md. This example plants
-// those three files plus boot.md + .mcp.json into a fresh bootDir,
+// opencode.json + agents/<name>.md. This example plants those two files
+// plus boot.md + .mcp.json into a fresh bootDir,
 // sets OPENCODE_CONFIG_DIR=<bootDir>, and invokes
 // `opencode run --agent <name> --dir <projectDir>` with cwd =
 // projectDir.
@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// 1. Construct the adapter, naming the agent that the planted
-	//    agents.json entry will declare.
+	//    agents/<name>.md file will declare.
 	adapter := provider.NewOpencodeAdapter()
 	adapter.Agent = *agentName
 	adapter.Dir = absProject
@@ -82,7 +82,7 @@ func main() {
 	}
 
 	// 3. Apply EnvAmendments — opencode wants OPENCODE_CONFIG_DIR set
-	//    so it loads agents.json + opencode.json from the bootDir.
+	//    so it loads agents/<name>.md + opencode.json from the bootDir.
 	for _, amend := range spec.EnvAmendments {
 		// {{.BootDir}} / {{.ProjectDir}} substitution
 		amend = strings.ReplaceAll(amend, "{{.BootDir}}", bootDir)

@@ -10,8 +10,9 @@ import (
 //
 // Two argv shapes are supported, selected by the Mode field:
 //
-//   - "" (default, run mode): emits `opencode run --agent <Agent>
-//     [--model <Model>] [--dir <Dir>] "<prompt>"`.
+//   - "" (default, run mode): emits `opencode run --format json --agent
+//     <Agent> [--model <Model>] [--dir <Dir>] [--session <id>] [extra] --
+//     <prompt>` (see opencodeConvention).
 //
 //   - "serve-http": emits `opencode serve --port 0 --hostname 127.0.0.1`.
 //     One long-lived subprocess exposes an HTTP API and server-sent events.

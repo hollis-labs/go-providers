@@ -4,11 +4,13 @@
 // and Pi have no rows: they are launched only over ACP and have no boot dir.
 //
 // The table is a Go literal (compile-checked). Every row names the launch
-// root it is relative to, and carries the Step 0 probe ids
+// root it is relative to, and carries either the Step 0 probe ids
 // (hack/probe-harness-layout.sh, provider/testdata/harness-discovery) whose
-// measured harness behaviour justifies it. The provider package derives its
-// ProviderProjection, LaunchConvention and legacy BootDirSpec of the built-in
-// adapters from this table; layout/gen renders docs/LAYOUT.md and
+// measured harness behavior justifies it or an Unprobed reason (Antigravity's
+// rows were verified live, outside the probe). The provider package derives
+// its ProviderProjection, LaunchConvention (and so every adapter's BuildArgs
+// flags) and legacy BootDirSpec of the built-in adapters from this table,
+// including each MCP or config file's FileMode; layout/gen renders docs/LAYOUT.md and
 // layout/layout.json from it for non-Go readers; layout/layouttest lets other
 // modules pin their own path tables against it.
 //

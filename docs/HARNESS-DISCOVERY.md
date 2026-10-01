@@ -7,8 +7,10 @@ directory, runs each harness under `env -i` with a fixture `HOME`, and records
 what the harness reports. It makes no model call and no network use. The raw
 output is committed as the golden
 `provider/testdata/harness-discovery/2026-09-29-claude-2.1.285-codex-0.154.0-opencode-1.18.30.tsv`.
-Every row of `layout.Table()` cites probe ids from that golden (`Entry.Probe`),
-and a test fails when an id is missing.
+Every row of `layout.Table()` cites probe ids from that golden (`Entry.Probe`)
+or says why it has none (`Entry.Unprobed`), and a test fails when a cited id
+is missing. Antigravity is not in the probe: its rows are `Unprobed`, verified
+live against agy 1.2.7.
 
 | | |
 |---|---|

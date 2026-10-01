@@ -538,7 +538,8 @@ func (p ProviderProjection) ResolveTurn(roots ProjectionRoots, in TurnInput, ext
 
 // ResolveTurn resolves the convention for one turn: roots fill the path
 // arguments, in fills the prompt, system prompt and resume id, and extra goes
-// at the convention's ArgExtra (after everything, if it has none). It is the
+// at the convention's ArgExtra (if it has none, before the prompt, or last
+// when there is no prompt either). It is the
 // one place a runtime's argv is produced: an adapter's BuildArgs resolves the
 // same convention, built from the adapter's own fields. It performs no IO and
 // does not start a process.
