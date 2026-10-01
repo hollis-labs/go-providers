@@ -36,15 +36,18 @@
     "exec_resume_unknown_id": [
       "codex",
       "exec",
-      "resume",
-      "00000000-0000-4000-8000-0000000000ff",
-      "say hi",
-      "--json",
-      "--skip-git-repo-check",
       "-m",
       "gpt-6-luna",
       "-c",
-      "model_reasoning_effort=\"low\""
+      "model_reasoning_effort=\"low\"",
+      "--json",
+      "--skip-git-repo-check",
+      "--cd",
+      "/work/project",
+      "resume",
+      "00000000-0000-4000-8000-0000000000ff",
+      "--",
+      "say hi"
     ],
     "exec_tool_use": [
       "codex",
@@ -73,15 +76,18 @@
     "exec_turn2_resume": [
       "codex",
       "exec",
-      "resume",
-      "00000000-0000-4000-8000-000000000001",
-      "say bye",
-      "--json",
-      "--skip-git-repo-check",
       "-m",
       "gpt-6-luna",
       "-c",
-      "model_reasoning_effort=\"low\""
+      "model_reasoning_effort=\"low\"",
+      "--json",
+      "--skip-git-repo-check",
+      "--cd",
+      "/work/project",
+      "resume",
+      "00000000-0000-4000-8000-000000000001",
+      "--",
+      "say bye"
     ]
   },
   "captured": "2026-10-01",

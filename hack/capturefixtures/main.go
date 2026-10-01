@@ -225,14 +225,21 @@ func (c *capturer) codex() {
 	codexExec := func(stem string, args ...string) result {
 		return c.perTurn(stem, "codex", append(append([]string{"exec"}, args...), model...))
 	}
+	// codexResume is a resume turn as CodexAdapter builds it: every exec
+	// option in front of the resume subcommand, where codex applies it to the
+	// resumed turn, and the prompt last, after "--" (CW-20261001-0109).
+	codexResume := func(stem, thread, prompt string) result {
+		args := append(append([]string{"exec"}, model...), "--json", "--skip-git-repo-check", "--cd", c.proj, "resume", thread, "--", prompt)
+		return c.perTurn(stem, "codex", args)
+	}
 	if c.want("exec_turn1", "exec_turn2_resume") {
 		t1 := codexExec("exec_turn1", trivialPrompt, "--json", "--skip-git-repo-check")
 		if c.want("exec_turn2_resume") {
-			codexExec("exec_turn2_resume", "resume", t1.field("thread_id"), secondPrompt, "--json", "--skip-git-repo-check")
+			codexResume("exec_turn2_resume", t1.field("thread_id"), secondPrompt)
 		}
 	}
 	if c.want("exec_resume_unknown_id") {
-		codexExec("exec_resume_unknown_id", "resume", lostID, trivialPrompt, "--json", "--skip-git-repo-check")
+		codexResume("exec_resume_unknown_id", lostID, trivialPrompt)
 	}
 	if c.want("exec_tool_use") {
 		codexExec("exec_tool_use", toolPrompt, "--json", "--skip-git-repo-check", "-s", "read-only")
