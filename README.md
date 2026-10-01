@@ -139,9 +139,19 @@ the planted-file render.
 
 The one list of agent CLI runtimes (Claude Code, Codex, OpenCode, Copilot CLI, Pi, Antigravity). Ids, modes and capability names come from [agent-contracts-leaf `runtimes`](https://github.com/hollis-labs/agent-contracts-leaf); the facts live here.
 
-- `Descriptor` — `ID`, `Aliases`, `Binary`, `EnvOverride`, `LookupDirs`, `Modes` (each a `ModeSupport{Mode, Capabilities}`: capabilities are declared per mode), `DefaultMode`, and a `Posture` hook (nil until the posture enum lands). Methods: `Supports`, `Capabilities`, `Has`, `NativeModes`, `Layout` (the runtime's rows of the `layout` table, read rather than copied), `HasLayout`, `LookPath`.
+- `Descriptor` — `ID`, `Aliases`, `Binary`, `EnvOverride`, `LookupDirs`, `Modes` (each a `ModeSupport{Mode, Capabilities}`: capabilities are declared per mode), `DefaultMode`, and a `Posture` hook. Methods: `Supports`, `Capabilities`, `Has`, `NativeModes`, `Layout` (the runtime's rows of the `layout` table, read rather than copied), `HasLayout`, `LookPath`, `PostureFor`.
 - `Lookup(idOrAlias)` and `All()`. The set is closed and compiled in; there is no out-of-tree registration. `RegisterForTest` adds a fake for one test and removes it at cleanup.
 - Copilot and Pi are ACP-only: no native mode, no layout rows, no boot dir.
+- Permission posture is [go-permission](https://github.com/hollis-labs/go-permission)'s `Mode` (`default`, `accept-edits`, `plan`, `yolo`; D-72). `Descriptor.PostureFor(mode, runtimeMode)` returns a `PostureLaunch{Args, Env}`: flags for the launch convention's extra-argument slot (always before `--`) and environment variables. Apps pass only the Mode.
+
+  | posture | claude | codex (exec and app-server) | opencode (`OPENCODE_PERMISSION`) | agy |
+  |---|---|---|---|---|
+  | default | `--permission-mode default` | `-c sandbox_mode="read-only" -c approval_policy="on-request"` | `{"edit":"ask","bash":"ask"}` | none (its request-review default) |
+  | accept-edits | `--permission-mode acceptEdits` | `workspace-write`, `on-request` | `{"edit":"allow","bash":"ask"}` | `--mode accept-edits` |
+  | plan | `--permission-mode plan` | `read-only`, `never` | `{"edit":"deny","bash":"ask"}` | `--mode plan` |
+  | yolo | `--permission-mode bypassPermissions` | `danger-full-access`, `never` | every permission `allow` | `--dangerously-skip-permissions` |
+
+  Headless, an action that needs approval is denied (claude `-p`, codex exec, opencode run, agy) or, on codex app-server, sent to the host as an approval request for agentkit's `CodexApprovalResponder` to answer from the same Mode. ACP modes have no launch mapping (`ErrNoPostureMapping`): an ACP agent's permission requests are the ACP client's to answer, best effort. The registry package doc has the measurements.
 
 ### Provider registry (`provider/registry.go`)
 

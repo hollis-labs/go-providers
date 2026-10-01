@@ -142,16 +142,6 @@ func TestCapabilitiesPerMode(t *testing.T) {
 	}
 }
 
-// The posture enum lands with CW-20260930-0138; until then no descriptor maps
-// one.
-func TestNoPostureMappingYet(t *testing.T) {
-	for _, d := range registry.All() {
-		if d.Posture != nil {
-			t.Errorf("%s has a posture mapping before the posture enum exists", d.ID)
-		}
-	}
-}
-
 func TestDescriptorsAreCopies(t *testing.T) {
 	d := mustLookup(t, "claude")
 	d.Aliases[0] = "mutated"

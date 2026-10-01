@@ -42,10 +42,9 @@ type Descriptor struct {
 	// runtime. It is set exactly when the runtime has a layout.
 	Projection *ProjectionFacts `json:"projection,omitempty"`
 
-	// Posture maps a permission posture onto the runtime's own launch
-	// flags. Nil means the runtime has no posture mapping yet; every
-	// descriptor's is nil until CW-20260930-0138. The hook's signature is
-	// provisional: see [PostureFunc].
+	// Posture maps a permission posture, go-permission's Mode (D-72), onto
+	// the runtime's own launch flags or environment. Nil means the runtime
+	// has no mapping. Callers go through [Descriptor.PostureFor].
 	Posture PostureFunc `json:"-"`
 }
 
@@ -55,17 +54,6 @@ type ModeSupport struct {
 	Mode         runtimes.Mode         `json:"mode"`
 	Capabilities []runtimes.Capability `json:"capabilities,omitempty"`
 }
-
-// PostureFunc returns the argv a runtime needs, in mode, to run under
-// posture.
-//
-// The string parameter is a placeholder, not the settled type. Per D-72 the
-// posture vocabulary is go-permission's Mode (default, acceptEdits, plan,
-// yolo), and this parameter becomes that type when CW-20260930-0138 lands. That
-// task may also change what the hook returns: whether a posture is argv,
-// config or both is decided there, together with the one argv owner
-// (CW-20260930-0135).
-type PostureFunc func(posture string, mode runtimes.Mode) ([]string, error)
 
 // Supports reports whether d can be driven in mode m.
 func (d Descriptor) Supports(m runtimes.Mode) bool {
