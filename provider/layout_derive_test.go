@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -21,58 +22,43 @@ type projectingAdapter interface {
 }
 
 var builtinModes = []struct {
-	provider ProviderID
-	mode     ProviderMode
+	provider runtimes.ID
+	mode     layout.Shape
 	adapter  func() projectingAdapter
 }{
-	{ProviderClaude, ModeClaudePrint, func() projectingAdapter {
+	{runtimes.Claude, shapePerTurn, func() projectingAdapter {
 		return &ClaudeAdapter{}
 	}},
-	{ProviderClaude, ModeClaudeBare, func() projectingAdapter {
+	{runtimes.Claude, shapeBare, func() projectingAdapter {
 		return &ClaudeAdapter{Bare: true}
 	}},
-	{ProviderClaude, ModeClaudePTY, func() projectingAdapter {
+	{runtimes.Claude, shapePTY, func() projectingAdapter {
 		return &ClaudeAdapter{PTY: true}
 	}},
-	{ProviderClaude, ModeClaudeStreamingStdio, func() projectingAdapter {
+	{runtimes.Claude, shapeStreaming, func() projectingAdapter {
 		return &ClaudeAdapter{InputMode: "stream-json"}
 	}},
-	{ProviderCodex, ModeCodexExec, func() projectingAdapter {
+	{runtimes.Codex, shapePerTurn, func() projectingAdapter {
 		return NewCodexAdapter()
 	}},
-	{ProviderCodex, ModeCodexAppServer, func() projectingAdapter {
+	{runtimes.Codex, shapeJSONRPC, func() projectingAdapter {
 		return &CodexAdapter{Mode: "app-server"}
 	}},
-	{ProviderOpencode, ModeOpencodeRun, func() projectingAdapter {
+	{runtimes.OpenCode, shapePerTurn, func() projectingAdapter {
 		return &OpencodeAdapter{Agent: "fixture-agent"}
 	}},
-	{ProviderOpencode, ModeOpencodeServeHTTP, func() projectingAdapter {
+	{runtimes.OpenCode, shapeHTTPSSE, func() projectingAdapter {
 		return &OpencodeAdapter{Mode: "serve-http", Agent: "fixture-agent"}
 	}},
-	{ProviderAntigravity, ModeAntigravityPrint, func() projectingAdapter {
+	{runtimes.Antigravity, shapePerTurn, func() projectingAdapter {
 		return NewAntigravityAdapter()
 	}},
 }
 
-// layout must not import provider, so its Mode and Root strings are guarded
-// here.
+// layout must not import provider, so its Root strings are guarded here. Its
+// modes are the runtimes vocabulary itself; the table may use only native
+// modes and the variants the built-in adapters project.
 func TestLayoutVocabularyMirrorsProvider(t *testing.T) {
-	modes := map[ProviderMode]layout.Mode{
-		ModeClaudePrint:          layout.ModeClaudePrint,
-		ModeClaudeBare:           layout.ModeClaudeBare,
-		ModeClaudePTY:            layout.ModeClaudePTY,
-		ModeClaudeStreamingStdio: layout.ModeClaudeStreamingStdio,
-		ModeCodexExec:            layout.ModeCodexExec,
-		ModeCodexAppServer:       layout.ModeCodexAppServer,
-		ModeOpencodeRun:          layout.ModeOpenCodeRun,
-		ModeOpencodeServeHTTP:    layout.ModeOpenCodeServeHTTP,
-		ModeAntigravityPrint:     layout.ModeAntigravityPrint,
-	}
-	for pm, lm := range modes {
-		if string(pm) != string(lm) {
-			t.Errorf("mode %q != layout %q", pm, lm)
-		}
-	}
 	roots := map[RootKind]layout.Root{
 		RootBoot: layout.RootBoot, RootProject: layout.RootProject,
 		RootConfig: layout.RootConfig, RootState: layout.RootState,
@@ -82,29 +68,20 @@ func TestLayoutVocabularyMirrorsProvider(t *testing.T) {
 			t.Errorf("root %q != layout %q", rk, lr)
 		}
 	}
-	for id, lp := range map[ProviderID]layout.Provider{
-		ProviderClaude: layout.Claude, ProviderCodex: layout.Codex, ProviderOpencode: layout.OpenCode,
-		ProviderAntigravity: layout.Antigravity,
-	} {
-		if string(id) != string(lp) {
-			t.Errorf("provider %q != layout %q", id, lp)
-		}
-	}
-	// Every table row names only modes and roots the provider package knows.
-	knownModes := map[layout.Mode]bool{"": true}
-	for _, lm := range modes {
-		knownModes[lm] = true
+	known := map[layout.Shape]bool{}
+	for _, c := range builtinModes {
+		known[c.mode] = true
 	}
 	for _, e := range layout.Table() {
-		if !knownModes[e.Mode] {
-			t.Errorf("table row %s/%s/%s uses unknown mode %q", e.Provider, e.Mode, e.Concern, e.Mode)
+		if e.Shape() != (layout.Shape{}) && !known[e.Shape()] {
+			t.Errorf("table row %s/%s/%s pins a shape no built-in adapter projects", e.Provider, e.Shape(), e.Concern)
 		}
 		for _, r := range append([]layout.Root{e.Root, e.CWD}, envRoots(e)...) {
 			if r == "" {
 				continue
 			}
 			if _, err := rootValue(ProjectionRoots{}, RootKind(r)); err != nil {
-				t.Errorf("table row %s/%s/%s uses root %q unknown to provider: %v", e.Provider, e.Mode, e.Concern, r, err)
+				t.Errorf("table row %s/%s/%s uses root %q unknown to provider: %v", e.Provider, e.Shape(), e.Concern, r, err)
 			}
 		}
 	}
@@ -125,13 +102,13 @@ func TestLayoutTableCoversBuiltInAdapters(t *testing.T) {
 		ctx := PlantContext{AgentName: "fixture-agent", MCPLoopbackURL: "http://127.0.0.1:1/mcp"}
 		proj, err := c.adapter().ProviderProjection(ctx, ProjectionOptions{Skills: []SkillPackage{fixtureSkill()}})
 		if err != nil {
-			t.Fatalf("%s: %v", c.mode, err)
+			t.Fatalf("%s/%s: %v", c.provider, c.mode, err)
 		}
-		if proj.Mode != c.mode {
-			t.Errorf("%s: projected mode %s", c.mode, proj.Mode)
+		if got := (layout.Shape{Mode: proj.Mode, Variant: proj.Variant}); got != c.mode {
+			t.Errorf("%s/%s: projected shape %s", c.provider, c.mode, got)
 		}
-		if _, ok := layout.SkillRoot(layoutProviderOf(c.provider), layout.Mode(c.mode)); !ok {
-			t.Errorf("%s: no skill root", c.mode)
+		if _, ok := layout.SkillRoot(c.provider, c.mode); !ok {
+			t.Errorf("%s/%s: no skill root", c.provider, c.mode)
 		}
 	}
 }
@@ -152,12 +129,12 @@ func TestBootDirSpecEqualsLayout(t *testing.T) {
 		// The legacy spec is mode-independent: claude reads print rows, opencode run rows.
 		legacyMode := c.mode
 		switch c.provider {
-		case ProviderClaude:
-			legacyMode = ModeClaudePrint
-		case ProviderOpencode:
-			legacyMode = ModeOpencodeRun
+		case runtimes.Claude:
+			legacyMode = shapePerTurn
+		case runtimes.OpenCode:
+			legacyMode = shapePerTurn
 		}
-		rows := layout.For(layoutProviderOf(c.provider), layout.Mode(legacyMode))
+		rows := layout.For(c.provider, legacyMode)
 
 		wantFiles := map[string]bool{}
 		var wantEnv []string
@@ -165,7 +142,7 @@ func TestBootDirSpecEqualsLayout(t *testing.T) {
 		for _, e := range rows {
 			switch e.Concern {
 			case layout.Instructions, layout.Boot, layout.MCP, layout.NativeConfig, layout.Auth, layout.Agents:
-				if e.Mode != "" && e.Mode != layout.Mode(legacyMode) {
+				if e.Shape() != (layout.Shape{}) && e.Shape() != legacyMode {
 					continue
 				}
 				if e.Root == layout.RootBoot {
@@ -190,20 +167,20 @@ func TestBootDirSpecEqualsLayout(t *testing.T) {
 		}
 		for f := range wantFiles {
 			if !gotFiles[f] {
-				t.Errorf("%s: BootDirSpec lacks layout file %q (has %v)", c.mode, f, keys(gotFiles))
+				t.Errorf("%s/%s: BootDirSpec lacks layout file %q (has %v)", c.provider, c.mode, f, keys(gotFiles))
 			}
 		}
 		for f := range gotFiles {
 			if !wantFiles[f] {
-				t.Errorf("%s: BootDirSpec plants %q which layout does not list", c.mode, f)
+				t.Errorf("%s/%s: BootDirSpec plants %q which layout does not list", c.provider, c.mode, f)
 			}
 		}
 		sort.Strings(wantEnv)
 		if strings.Join(spec.EnvAmendments, ",") != strings.Join(wantEnv, ",") {
-			t.Errorf("%s: env %v != layout %v", c.mode, spec.EnvAmendments, wantEnv)
+			t.Errorf("%s/%s: env %v != layout %v", c.provider, c.mode, spec.EnvAmendments, wantEnv)
 		}
 		if spec.ProjectDirArg != wantProjectArg {
-			t.Errorf("%s: ProjectDirArg %q != layout %q", c.mode, spec.ProjectDirArg, wantProjectArg)
+			t.Errorf("%s/%s: ProjectDirArg %q != layout %q", c.provider, c.mode, spec.ProjectDirArg, wantProjectArg)
 		}
 	}
 }
@@ -228,7 +205,7 @@ func TestProviderCapabilityMatrixAgreesWithLayoutTable(t *testing.T) {
 	}
 	for _, row := range ProviderCapabilityMatrix() {
 		for feature, concern := range concerns {
-			_, inTable := layout.Find(layoutProviderOf(row.Provider), layout.Mode(row.Mode), concern)
+			_, inTable := layout.Find(row.Provider, row.Shape(), concern)
 			projected := row.Features[string(feature)] == string(SupportProjected)
 			if projected != inTable {
 				t.Errorf("%s/%s: matrix says %s=%s, table has %s row = %v", row.Provider, row.Mode, feature, row.Features[string(feature)], concern, inTable)
@@ -259,8 +236,8 @@ func TestClaudeBareSkillsAddBootDir(t *testing.T) {
 	pr := &ClaudeAdapter{}
 	p2, _ := pr.ProviderProjection(PlantContext{}, ProjectionOptions{Skills: []SkillPackage{fixtureSkill()}})
 	b2, _ := p2.ResolveLaunch(roots, "x")
-	if strings.Contains(strings.Join(b2.Argv, " "), "--add-dir") {
-		t.Errorf("non-bare claude reads boot skills from cwd and needs no --add-dir: %v", b2.Argv)
+	if got := strings.Join(b2.Argv, " "); strings.Contains(got, "--add-dir /p/boot") || !strings.HasSuffix(got, "--add-dir /p/project") {
+		t.Errorf("non-bare claude reads boot skills from cwd (no boot --add-dir) and reaches the project by --add-dir: %v", b2.Argv)
 	}
 }
 
@@ -317,22 +294,22 @@ func TestProjectedSkillPlacementIsReadByHarness(t *testing.T) {
 		hidden  string // fixture at the pre-change location; must not be visible ("" = none)
 	}
 	cases := []struct {
-		provider ProviderID
-		mode     ProviderMode
+		provider runtimes.ID
+		mode     layout.Shape
 		launch   func(b LaunchBinding, roots ProjectionRoots) bool // the probe launch matches this binding
 		want     check
 	}{
-		{ProviderClaude, ModeClaudePrint, func(b LaunchBinding, r ProjectionRoots) bool { return b.CWD == r.BootRoot }, check{"C2", "c-boot-claude-dir", ""}},
-		{ProviderCodex, ModeCodexExec, func(b LaunchBinding, r ProjectionRoots) bool {
+		{runtimes.Claude, shapePerTurn, func(b LaunchBinding, r ProjectionRoots) bool { return b.CWD == r.BootRoot }, check{"C2", "c-boot-claude-dir", ""}},
+		{runtimes.Codex, shapePerTurn, func(b LaunchBinding, r ProjectionRoots) bool {
 			return b.CWD == r.BootRoot && hasArgPair(b.Argv, "--cd", r.ProjectRoot) && envIs(b, "CODEX_HOME", r.BootRoot)
 		}, check{"X3", "x-boot-root-dir", "x-boot-agents-dir"}},
-		{ProviderCodex, ModeCodexAppServer, func(b LaunchBinding, r ProjectionRoots) bool {
+		{runtimes.Codex, shapeJSONRPC, func(b LaunchBinding, r ProjectionRoots) bool {
 			return b.CWD == r.BootRoot && envIs(b, "CODEX_HOME", r.BootRoot)
 		}, check{"X2", "x-boot-root-dir", ""}},
-		{ProviderOpencode, ModeOpencodeRun, func(b LaunchBinding, r ProjectionRoots) bool {
+		{runtimes.OpenCode, shapePerTurn, func(b LaunchBinding, r ProjectionRoots) bool {
 			return b.CWD == r.ProjectRoot && envIs(b, "OPENCODE_CONFIG_DIR", r.BootRoot)
 		}, check{"O2", "o-cfg-skills-dir", "o-cfg-dotopencode-dir"}},
-		{ProviderOpencode, ModeOpencodeServeHTTP, func(b LaunchBinding, r ProjectionRoots) bool {
+		{runtimes.OpenCode, shapeHTTPSSE, func(b LaunchBinding, r ProjectionRoots) bool {
 			return b.CWD == r.ProjectRoot && envIs(b, "OPENCODE_CONFIG_DIR", r.BootRoot)
 		}, check{"O2", "o-cfg-skills-dir", "o-cfg-dotopencode-dir"}},
 	}
@@ -340,8 +317,9 @@ func TestProjectedSkillPlacementIsReadByHarness(t *testing.T) {
 	for _, c := range cases {
 		var adapter ProjectionProvider
 		for _, m := range builtinModes {
-			if m.mode == c.mode {
+			if m.provider == c.provider && m.mode == c.mode {
 				adapter = m.adapter()
+				break
 			}
 		}
 		proj, err := adapter.ProviderProjection(PlantContext{AgentName: "fixture-agent"}, ProjectionOptions{Skills: []SkillPackage{fixtureSkill()}})
@@ -353,7 +331,7 @@ func TestProjectedSkillPlacementIsReadByHarness(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !c.launch(bind, roots) {
-			t.Errorf("%s: launch %+v is not the convention probe %s ran", c.mode, bind, c.want.probe)
+			t.Errorf("%s/%s: launch %+v is not the convention probe %s ran", c.provider, c.mode, bind, c.want.probe)
 		}
 		var placed []string
 		for _, f := range proj.Files {
@@ -362,14 +340,14 @@ func TestProjectedSkillPlacementIsReadByHarness(t *testing.T) {
 			}
 		}
 		if len(placed) == 0 || path.Base(placed[0]) != "SKILL.md" || path.Base(path.Dir(placed[0])) != "fixture-skill" {
-			t.Errorf("%s: skills not placed in <name>/SKILL.md form: %v", c.mode, placed)
+			t.Errorf("%s/%s: skills not placed in <name>/SKILL.md form: %v", c.provider, c.mode, placed)
 		}
 		result := golden[string(c.provider)][c.want.probe]
 		if !seen(result, c.want.visible) {
-			t.Errorf("%s: probe %s (%q) does not show %s: skills projected at %v would be unread", c.mode, c.want.probe, result, c.want.visible, placed)
+			t.Errorf("%s/%s: probe %s (%q) does not show %s: skills projected at %v would be unread", c.provider, c.mode, c.want.probe, result, c.want.visible, placed)
 		}
 		if c.want.hidden != "" && seen(result, c.want.hidden) {
-			t.Errorf("%s: probe %s shows %s: the pre-layout location is readable again, revisit the table", c.mode, c.want.probe, c.want.hidden)
+			t.Errorf("%s/%s: probe %s shows %s: the pre-layout location is readable again, revisit the table", c.provider, c.mode, c.want.probe, c.want.hidden)
 		}
 	}
 

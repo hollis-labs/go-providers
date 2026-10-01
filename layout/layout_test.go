@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -24,20 +25,20 @@ func newestGolden(t *testing.T) string {
 }
 
 // goldenIDs returns provider -> set of probe ids from a golden TSV.
-func goldenIDs(t *testing.T, file string) map[layout.Provider][]string {
+func goldenIDs(t *testing.T, file string) map[runtimes.ID][]string {
 	t.Helper()
 	f, err := os.Open(file)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	out := map[layout.Provider][]string{}
+	out := map[runtimes.ID][]string{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		cols := strings.Split(sc.Text(), "\t")
 		if len(cols) >= 3 && cols[0] == "R" {
-			p := layout.Provider(cols[1])
+			p := runtimes.ID(cols[1])
 			out[p] = append(out[p], cols[2])
 		}
 	}
@@ -59,9 +60,9 @@ func hasProbe(golden []string, id string) bool {
 }
 
 func TestTableNoDuplicateRows(t *testing.T) {
-	seen := map[[5]string]int{}
+	seen := map[[6]string]int{}
 	for i, e := range layout.Table() {
-		k := [5]string{string(e.Provider), string(e.Mode), string(e.Concern), string(e.Root), e.Rel}
+		k := [6]string{string(e.Provider), string(e.Mode), string(e.Variant), string(e.Concern), string(e.Root), e.Rel}
 		if j, dup := seen[k]; dup {
 			t.Errorf("row %d duplicates row %d: %v", i, j, k)
 		}
@@ -72,7 +73,7 @@ func TestTableNoDuplicateRows(t *testing.T) {
 func TestTableEveryEntryIsJustified(t *testing.T) {
 	golden := goldenIDs(t, newestGolden(t))
 	for i, e := range layout.Table() {
-		name := string(e.Provider) + "/" + string(e.Mode) + "/" + string(e.Concern) + "/" + e.Rel
+		name := string(e.Provider) + "/" + e.Shape().String() + "/" + string(e.Concern) + "/" + e.Rel
 		if (len(e.Probe) == 0) == (e.Unprobed == "") {
 			t.Errorf("row %d %s: want exactly one of Probe and Unprobed", i, name)
 		}
@@ -86,10 +87,17 @@ func TestTableEveryEntryIsJustified(t *testing.T) {
 
 func TestTableShape(t *testing.T) {
 	for i, e := range layout.Table() {
-		switch e.Provider {
-		case layout.Claude, layout.Codex, layout.OpenCode, layout.Antigravity:
-		default:
-			t.Errorf("row %d: unknown provider %q", i, e.Provider)
+		if !e.Provider.Valid() {
+			t.Errorf("row %d: unknown runtime %q", i, e.Provider)
+		}
+		if e.Mode != "" && !e.Mode.Valid() {
+			t.Errorf("row %d: unknown mode %q", i, e.Mode)
+		}
+		if e.Mode.ACP() {
+			t.Errorf("row %d: an ACP mode has no boot-dir layout", i)
+		}
+		if e.Variant != "" && e.Variant != layout.VariantBare {
+			t.Errorf("row %d: unknown variant %q", i, e.Variant)
 		}
 		if e.Concern == layout.Skills {
 			if e.Form != layout.FormDir {
@@ -118,9 +126,9 @@ func TestTableReturnsACopy(t *testing.T) {
 			t.Fatal("Table exposes its backing slice")
 		}
 	}
-	e, _ := layout.SkillRoot(layout.Codex, layout.ModeCodexExec)
+	e, _ := layout.SkillRoot(runtimes.Codex, perTurn)
 	e.Env["CODEX_HOME"] = "mutated"
-	e2, _ := layout.SkillRoot(layout.Codex, layout.ModeCodexExec)
+	e2, _ := layout.SkillRoot(runtimes.Codex, perTurn)
 	if e2.Env["CODEX_HOME"] != "boot" {
 		t.Fatal("Env map is shared with the table")
 	}
@@ -128,19 +136,19 @@ func TestTableReturnsACopy(t *testing.T) {
 
 func TestSkillRoot(t *testing.T) {
 	cases := []struct {
-		p    layout.Provider
-		m    layout.Mode
+		p    runtimes.ID
+		m    layout.Shape
 		root layout.Root
 		rel  string
 		flag string
 	}{
-		{layout.Claude, layout.ModeClaudePrint, layout.RootBoot, ".claude/skills", ""},
-		{layout.Claude, layout.ModeClaudePTY, layout.RootBoot, ".claude/skills", ""},
-		{layout.Claude, layout.ModeClaudeBare, layout.RootBoot, ".claude/skills", "--add-dir"},
-		{layout.Codex, layout.ModeCodexExec, layout.RootBoot, "skills", ""},
-		{layout.Codex, layout.ModeCodexAppServer, layout.RootBoot, "skills", ""},
-		{layout.OpenCode, layout.ModeOpenCodeRun, layout.RootBoot, "skills", ""},
-		{layout.OpenCode, layout.ModeOpenCodeServeHTTP, layout.RootBoot, "skills", ""},
+		{runtimes.Claude, perTurn, layout.RootBoot, ".claude/skills", ""},
+		{runtimes.Claude, pty, layout.RootBoot, ".claude/skills", ""},
+		{runtimes.Claude, bare, layout.RootBoot, ".claude/skills", "--add-dir"},
+		{runtimes.Codex, perTurn, layout.RootBoot, "skills", ""},
+		{runtimes.Codex, jsonRPC, layout.RootBoot, "skills", ""},
+		{runtimes.OpenCode, perTurn, layout.RootBoot, "skills", ""},
+		{runtimes.OpenCode, httpSSE, layout.RootBoot, "skills", ""},
 	}
 	for _, c := range cases {
 		e, ok := layout.SkillRoot(c.p, c.m)
@@ -148,22 +156,76 @@ func TestSkillRoot(t *testing.T) {
 			t.Errorf("SkillRoot(%s,%s) = %+v, %v", c.p, c.m, e, ok)
 		}
 	}
-	if _, ok := layout.SkillRoot("nope", ""); ok {
+	if _, ok := layout.SkillRoot("nope", layout.Shape{}); ok {
 		t.Error("SkillRoot of an unknown provider must report false")
 	}
 }
 
 func TestForIncludesEveryModeRows(t *testing.T) {
 	var sawBare, sawAny bool
-	for _, e := range layout.For(layout.Claude, layout.ModeClaudePrint) {
-		if e.Mode == layout.ModeClaudeBare {
+	for _, e := range layout.For(runtimes.Claude, perTurn) {
+		if e.Variant == layout.VariantBare {
 			sawBare = true
 		}
-		if e.Mode == "" {
+		if e.Shape() == (layout.Shape{}) {
 			sawAny = true
 		}
 	}
 	if sawBare || !sawAny {
 		t.Errorf("For(claude, print): bare rows leaked=%v, every-mode rows present=%v", sawBare, sawAny)
+	}
+}
+
+func TestFindPrefersTheMostSpecificRow(t *testing.T) {
+	cases := []struct {
+		name  string
+		s     layout.Shape
+		c     layout.Concern
+		flag  string
+		found bool
+	}{
+		{"every-mode row for plain print", perTurn, layout.Instructions, "", true},
+		{"mode+variant row beats every-mode row", bare, layout.Instructions, "--append-system-prompt-file", true},
+		{"bare only applies in its own mode", layout.Shape{Mode: runtimes.ModeStreamingStdio, Variant: layout.VariantBare}, layout.NativeConfig, "", true},
+		{"zero shape sees every-mode rows", layout.Shape{}, layout.MCP, "--mcp-config", true},
+	}
+	for _, c := range cases {
+		e, ok := layout.Find(runtimes.Claude, c.s, c.c)
+		if ok != c.found || e.Flag != c.flag {
+			t.Errorf("%s: Find(claude, %s, %s) = flag %q ok %v, want %q %v", c.name, c.s, c.c, e.Flag, ok, c.flag, c.found)
+		}
+	}
+	if _, ok := layout.Find(runtimes.Codex, jsonRPC, layout.ProjectDir); ok {
+		t.Error("codex app-server (jsonrpc-stdio) has no project-dir row; the subprocess-per-turn row must not leak")
+	}
+	if e, ok := layout.Find(runtimes.Codex, perTurn, layout.ProjectDir); !ok || e.Flag != "--cd" {
+		t.Errorf("codex exec project-dir = %+v %v, want --cd", e, ok)
+	}
+}
+
+// Copilot and Pi are ACP-only: no boot-dir rows.
+func TestRuntimesWithLayout(t *testing.T) {
+	got := layout.Runtimes()
+	want := []runtimes.ID{runtimes.Claude, runtimes.Codex, runtimes.OpenCode, runtimes.Antigravity}
+	if len(got) != len(want) {
+		t.Fatalf("Runtimes() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Runtimes() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestShapeString(t *testing.T) {
+	for s, want := range map[layout.Shape]string{
+		{}:                            "all",
+		perTurn:                       "subprocess-per-turn",
+		bare:                          "subprocess-per-turn+bare",
+		{Variant: layout.VariantBare}: "+bare",
+	} {
+		if s.String() != want {
+			t.Errorf("%#v.String() = %q, want %q", s, s.String(), want)
+		}
 	}
 }

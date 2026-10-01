@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -18,42 +19,40 @@ import (
 // TestLayoutTableCoversBuiltInAdapters, so these helpers panic rather than
 // thread an error through every projection.
 
-func layoutProviderOf(id ProviderID) layout.Provider { return layout.Provider(id) }
-
-// layoutEntry returns the table row for (provider, mode, concern).
-func layoutEntry(id ProviderID, mode ProviderMode, c layout.Concern) layout.Entry {
-	e, ok := layout.Find(layoutProviderOf(id), layout.Mode(mode), c)
+// layoutEntry returns the table row for (runtime, shape, concern).
+func layoutEntry(id runtimes.ID, shape layout.Shape, c layout.Concern) layout.Entry {
+	e, ok := layout.Find(id, shape, c)
 	if !ok {
-		panic(fmt.Sprintf("provider: layout table has no %s row for %s/%s", c, id, mode))
+		panic(fmt.Sprintf("provider: layout table has no %s row for %s/%s", c, id, shape))
 	}
 	return e
 }
 
-// layoutEntryOK is layoutEntry for concerns a mode may legitimately lack.
-func layoutEntryOK(id ProviderID, mode ProviderMode, c layout.Concern) (layout.Entry, bool) {
-	return layout.Find(layoutProviderOf(id), layout.Mode(mode), c)
+// layoutEntryOK is layoutEntry for concerns a shape may legitimately lack.
+func layoutEntryOK(id runtimes.ID, shape layout.Shape, c layout.Concern) (layout.Entry, bool) {
+	return layout.Find(id, shape, c)
 }
 
 // layoutRel returns the boot-relative path of a file row, substituting the
 // agent name for layout.AgentPlaceholder.
-func layoutRel(id ProviderID, mode ProviderMode, c layout.Concern, agent string) string {
-	e := layoutEntry(id, mode, c)
+func layoutRel(id runtimes.ID, shape layout.Shape, c layout.Concern, agent string) string {
+	e := layoutEntry(id, shape, c)
 	if e.Root != layout.RootBoot {
-		panic(fmt.Sprintf("provider: layout row %s for %s/%s is relative to %q, not the boot root", c, id, mode, e.Root))
+		panic(fmt.Sprintf("provider: layout row %s for %s/%s is relative to %q, not the boot root", c, id, shape, e.Root))
 	}
 	return strings.ReplaceAll(e.Rel, layout.AgentPlaceholder, agent)
 }
 
 // layoutFileArg builds the ArgFile template for a file row that carries a flag.
-func layoutFileArg(id ProviderID, mode ProviderMode, c layout.Concern) ArgTemplate {
-	e := layoutEntry(id, mode, c)
+func layoutFileArg(id runtimes.ID, shape layout.Shape, c layout.Concern) ArgTemplate {
+	e := layoutEntry(id, shape, c)
 	return ArgTemplate{Kind: ArgFile, Root: RootKind(e.Root), RelPath: e.Rel, Value: e.Flag, OmitEmpty: true}
 }
 
 // layoutProjectDirArg builds the ArgRoot template for the project-dir row,
-// or reports false when the mode has none.
-func layoutProjectDirArg(id ProviderID, mode ProviderMode) (ArgTemplate, bool) {
-	e, ok := layoutEntryOK(id, mode, layout.ProjectDir)
+// or reports false when the shape has none.
+func layoutProjectDirArg(id runtimes.ID, shape layout.Shape) (ArgTemplate, bool) {
+	e, ok := layoutEntryOK(id, shape, layout.ProjectDir)
 	if !ok {
 		return ArgTemplate{}, false
 	}
@@ -63,8 +62,8 @@ func layoutProjectDirArg(id ProviderID, mode ProviderMode) (ArgTemplate, bool) {
 // layoutLaunchBase returns the working directory, config root and environment
 // deltas the provider's launch convention needs. They hang off the native
 // config row: that is the file the harness finds through them.
-func layoutLaunchBase(id ProviderID, mode ProviderMode) (cwd, configRoot RootKind, env []EnvDelta) {
-	e := layoutEntry(id, mode, layout.NativeConfig)
+func layoutLaunchBase(id runtimes.ID, shape layout.Shape) (cwd, configRoot RootKind, env []EnvDelta) {
+	e := layoutEntry(id, shape, layout.NativeConfig)
 	keys := sortedEnvKeys(e.Env)
 	for _, k := range keys {
 		env = append(env, EnvDelta{Name: k, Value: e.Env[k], Operation: EnvSet, Precedence: EnvProviderWins})
@@ -95,8 +94,8 @@ func legacyRootTemplate(r string) string {
 
 // layoutLegacyEnv renders the native-config row's environment as BootDirSpec
 // EnvAmendments.
-func layoutLegacyEnv(id ProviderID, mode ProviderMode) []string {
-	e := layoutEntry(id, mode, layout.NativeConfig)
+func layoutLegacyEnv(id runtimes.ID, shape layout.Shape) []string {
+	e := layoutEntry(id, shape, layout.NativeConfig)
 	var out []string
 	for _, k := range sortedEnvKeys(e.Env) {
 		out = append(out, k+"="+legacyRootTemplate(e.Env[k]))
@@ -106,8 +105,8 @@ func layoutLegacyEnv(id ProviderID, mode ProviderMode) []string {
 
 // layoutLegacyCwd renders the native-config row's working directory as a
 // CwdPreference.
-func layoutLegacyCwd(id ProviderID, mode ProviderMode) CwdPreference {
-	switch e := layoutEntry(id, mode, layout.NativeConfig); e.CWD {
+func layoutLegacyCwd(id runtimes.ID, shape layout.Shape) CwdPreference {
+	switch e := layoutEntry(id, shape, layout.NativeConfig); e.CWD {
 	case layout.RootProject:
 		return CwdProjectDir
 	default:
@@ -116,9 +115,9 @@ func layoutLegacyCwd(id ProviderID, mode ProviderMode) CwdPreference {
 }
 
 // layoutLegacyProjectDirArg renders the project-dir row as a BootDirSpec
-// ProjectDirArg ("" when the mode has no such flag).
-func layoutLegacyProjectDirArg(id ProviderID, mode ProviderMode) string {
-	e, ok := layoutEntryOK(id, mode, layout.ProjectDir)
+// ProjectDirArg ("" when the shape has no such flag).
+func layoutLegacyProjectDirArg(id runtimes.ID, shape layout.Shape) string {
+	e, ok := layoutEntryOK(id, shape, layout.ProjectDir)
 	if !ok {
 		return ""
 	}
@@ -126,12 +125,12 @@ func layoutLegacyProjectDirArg(id ProviderID, mode ProviderMode) string {
 }
 
 // skillRootFor returns the boot-relative prefix skill packages are placed
-// under for (provider, mode), and the launch flag that must accompany it
+// under for (runtime, shape), and the launch flag that must accompany it
 // ("" when the harness scans the root without one).
-func skillRootFor(id ProviderID, mode ProviderMode) (prefix, flag string) {
-	e := layoutEntry(id, mode, layout.Skills)
+func skillRootFor(id runtimes.ID, shape layout.Shape) (prefix, flag string) {
+	e := layoutEntry(id, shape, layout.Skills)
 	if e.Root != layout.RootBoot || e.Form != layout.FormDir {
-		panic(fmt.Sprintf("provider: layout skills row for %s/%s must be boot-relative directory form", id, mode))
+		panic(fmt.Sprintf("provider: layout skills row for %s/%s must be boot-relative directory form", id, shape))
 	}
 	return e.Rel, e.Flag
 }
@@ -176,6 +175,6 @@ func (p SkillPackage) TreeHash() (string, error) {
 }
 
 // layoutFileMode returns the file permission the table records for a row.
-func layoutFileMode(id ProviderID, mode ProviderMode, c layout.Concern) os.FileMode {
-	return os.FileMode(layoutEntry(id, mode, c).FileMode)
+func layoutFileMode(id runtimes.ID, shape layout.Shape, c layout.Concern) os.FileMode {
+	return os.FileMode(layoutEntry(id, shape, c).FileMode)
 }

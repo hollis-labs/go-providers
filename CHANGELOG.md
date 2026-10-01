@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.31.0 — 2026-10-01
+
+### Added
+
+- Package `registry`: the runtime descriptor registry (CW-20260930-0132), the
+  one list of agent CLI runtimes that libraries and apps read in place of
+  their own provider lists. A `Descriptor` per runtime — Claude, Codex,
+  OpenCode, Copilot, Pi, Antigravity — carries its id and lookup aliases
+  (`claude-code`, `agy`, ...), binary, env override (`CLAUDE_CLI_PATH`, ...)
+  and extra lookup dirs, its modes with the capabilities each declares, its
+  default mode (Codex: `jsonrpc-stdio`, per D-74), a posture hook (nil until
+  CW-20260930-0138), and its layout, read from the `layout` table. `Lookup`
+  takes an id or alias; `All` enumerates. The set is closed: there is no
+  out-of-tree registration, and `RegisterForTest` exists only for test fakes.
+  Copilot and Pi are ACP-only, with no layout rows.
+- `layout.Shape` and `layout.Variant` (`VariantBare`), and `layout.Runtimes`.
+- `ProviderEffectKind.Class` (`EffectClassCredential`, `EffectClassHostConfig`)
+  and `ProviderEffectKind.Secret`, so hosts classify and redact projection
+  effects from go-providers rather than keeping a per-kind table. An unknown
+  kind is a secret credential.
+
+### Changed
+
+- New module dependency: `github.com/hollis-labs/agent-contracts-leaf` v0.3.0
+  (standard library only), for the `runtimes` vocabulary.
+- **Breaking:** the runtime vocabulary is agent-contracts-leaf `runtimes`
+  (v0.3.0, D-73), with no aliases for the old spellings (D-22):
+  - `layout.Entry.Provider` is a `runtimes.ID`; `layout.Entry.Mode` is a
+    `runtimes.Mode`, and a new `Variant` field carries Claude's `bare`.
+  - `layout.For`, `Find` and `SkillRoot` take `(runtimes.ID, layout.Shape)`,
+    and the most specific applicable row wins. `layout.Providers` is now
+    `layout.Runtimes`, in canonical order.
+  - `layouttest` assertions take `(runtimes.ID, layout.Shape)`.
+  - `ProviderProjection`, `LaunchConvention`, `ProviderCapabilityRow` and
+    `CredentialRequest` carry `Provider runtimes.ID`, `Mode runtimes.Mode` and
+    `Variant layout.Variant`. The mode values change: `claude-print`,
+    `codex-exec`, `opencode-run` and `antigravity-print` are all
+    `subprocess-per-turn`; `claude-bare` is `subprocess-per-turn` with variant
+    `bare`; `claude-pty` is `pty`; `claude-streaming-stdio` is
+    `streaming-stdio`; `codex-app-server` is `jsonrpc-stdio`;
+    `opencode-serve-http` is `http-sse`.
+  - `ProviderCapabilityMatrix` derives its rows from the registry (one per
+    native mode, plus Claude's bare variant), so an ACP-only runtime has none.
+    The row order follows each descriptor's modes: Claude is now
+    streaming-stdio, subprocess-per-turn, subprocess-per-turn+bare, pty
+    (was print, bare, pty, streaming), and Codex jsonrpc-stdio then
+    subprocess-per-turn (was exec, app-server). Look rows up by runtime and
+    shape, not by index.
+  - Known downstream break: Torque's
+    `internal/runtime/agent/codex_auth.go:47` uses `provider.ProviderCodex`;
+    it becomes `runtimes.Codex` at Torque's next bump. agentkit's
+    `agentlaunch/provider_projection_bridge.go` (CW-20260930-0133) is the
+    other consumer of the removed names.
+- The adapters' `Detect` resolves through the registry descriptor. The
+  `~/.opencode/bin` fallback now applies to OpenCode only, still searched
+  before `/usr/local/bin` as it was.
+- Claude's projected launch convention passes the layout's project-dir
+  argument (`--add-dir <project>`) in every mode, not only under bare, so the
+  projection's argv is complete. agentkit no longer has to append it.
+
+### Removed
+
+- **Breaking:** `layout.Mode` and its constants, `layout.Provider` and its
+  constants, `provider.ProviderMode` and its constants, and
+  `provider.ProviderID` and its constants. Use `runtimes.ID`, `runtimes.Mode`
+  and `layout.Shape`.
+- `layout.Entry.Aliases`. Its only use was the old `serve-http`/`http-sse`
+  spelling of OpenCode's HTTP mode, which is now the mode itself.
+
 ## v0.30.0 — 2026-09-30
 
 ### Changed
