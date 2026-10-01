@@ -118,12 +118,12 @@ func serve(dir string) int {
 	if err != nil {
 		return fail(err)
 	}
-	rec, err := openRecorder(filepath.Join(dir, callsDir, fmt.Sprintf("%06d.jsonl", seq)))
+	wd, _ := os.Getwd()
+	rec, err := openRecorder(filepath.Join(dir, callsDir, fmt.Sprintf("%06d.jsonl", seq)),
+		record{Start: &startRecord{Seq: seq, Run: idx, Args: args, Dir: wd, Env: os.Environ(), PID: os.Getpid()}})
 	if err != nil {
 		return fail(err)
 	}
-	wd, _ := os.Getwd()
-	rec.write(record{Start: &startRecord{Seq: seq, Run: idx, Args: args, Dir: wd, Env: os.Environ(), PID: os.Getpid()}})
 	if idx < 0 {
 		msg := fmt.Sprintf("no run left for invocation %d %q", seq, args)
 		rec.write(record{Error: msg})
@@ -188,9 +188,31 @@ type recorder struct {
 	f  *os.File
 }
 
-func openRecorder(path string) (*recorder, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o644)
+// openRecorder creates the call file at path with start already in it, so
+// the file never exists without its start record: Calls() lists every
+// *.jsonl in the calls directory, and a call file created empty and filled
+// afterwards was read, in between, as a call with no Args
+// (CW-20261001-0119). The record goes into a temp file whose name Calls()
+// ignores, which is then hard-linked to path. link(2) fails if path exists,
+// which keeps the uniqueness the O_EXCL create gave. Later records append
+// through the same descriptor, to the same file.
+func openRecorder(path string, start record) (*recorder, error) {
+	b, err := json.Marshal(start)
 	if err != nil {
+		return nil, err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".call-*.tmp")
+	if err != nil {
+		return nil, err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if err := os.Link(tmp, path); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	return &recorder{f: f}, nil

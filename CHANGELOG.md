@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.39.2 — 2026-10-01
+
+### Fixed
+
+- **providertest: a call file appears only once its start record is in it**
+  (CW-20261001-0119).
+  - The fake created `calls/NNNNNN.jsonl` with `O_CREATE|O_EXCL` and wrote
+    the start record (Args, Dir, Env, PID) afterwards. A `Fake.Calls()` that
+    ran in between read a call with no Args, so a consumer test that
+    asserted argv right after a launch could fail at random.
+  - The start record now goes into a temp file (`.call-*.tmp`, which
+    `Calls()` ignores), which is then hard-linked to the call name.
+    `link(2)` fails if the name exists, so uniqueness is kept as `O_EXCL`
+    kept it. Later records append to the same file.
+- **Tested:** `TestCallsNeverSeeAStartlessCall` runs 200 concurrent launches
+  while 8 goroutines call `Calls()`. On main it saw torn calls in 3 of 10
+  runs; with the fix, 0 in 10 runs under `-race`.
+
 ## v0.39.1 — 2026-10-01
 
 ### Fixed
