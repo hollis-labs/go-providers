@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.39.3 — 2026-10-01
+
+### Fixed
+
+- **`PTYBridge.CompleteWithUsage` names the adapter that failed**
+  (CW-20260930-0048).
+  - A CLI error was always reported as `claude cli error: …`, a leftover
+    from when the PTY bridge was Claude-only. `NewPTYBridgeWithAdapter`
+    takes any `CLIAdapter`, so a codex or opencode failure was mislabelled.
+  - It now reads `<adapter name> cli error: …`: `codex cli error: …`, and
+    unchanged for Claude.
+  - `TestPTYBridge_CompleteErrorNamesTheAdapter` replays real codex and
+    claude error captures through the PTY bridge.
+
 ## v0.39.2 — 2026-10-01
 
 ### Fixed

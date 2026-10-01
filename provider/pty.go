@@ -72,7 +72,10 @@ func (p *PTYBridge) CompleteWithUsage(ctx context.Context, in llmtypes.ChatReque
 		case llmtypes.EventUsage:
 			usage = ev.Usage
 		case llmtypes.EventError:
-			return llmtypes.CompleteResult{}, fmt.Errorf("claude cli error: %s", ev.Error)
+			// Named after the adapter: a PTYBridge drives any CLIAdapter, so
+			// a codex or opencode failure must not read "claude cli error"
+			// (CW-20260930-0048). Claude's own message is unchanged.
+			return llmtypes.CompleteResult{}, fmt.Errorf("%s cli error: %s", p.adapter.Name(), ev.Error)
 		}
 	}
 	return llmtypes.CompleteResult{Text: sb.String(), Usage: usage}, nil
@@ -91,7 +94,7 @@ func (p *PTYBridge) Capabilities() llmtypes.ProviderCapabilities {
 	}
 }
 
-// streamCLI spawns the Claude CLI in a PTY and streams parsed events.
+// streamCLI spawns the adapter's CLI in a PTY and streams parsed events.
 func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages []llmtypes.ChatMessage) (<-chan llmtypes.StreamEvent, error) {
 	// Extract the last user message as the prompt.
 	var prompt string
