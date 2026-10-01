@@ -32,6 +32,18 @@ import (
 // runtime's own session.idle/session.error SSE handling; this ParseLine
 // method returns no events at all in that mode (see below).
 type OpencodeAdapter struct {
+	// Binary, when set, is the executable Detect returns, used as-is: no
+	// env override and no PATH search. It pins a binary per adapter so a
+	// host never has to wrap the adapter for it; a wrapper hides the
+	// adapter's optional interfaces (EventParser, the classifiers, ...).
+	Binary string
+
+	// ExtraArgs are a caller's extra arguments. BuildArgs places them at
+	// the convention's extra slot (ArgExtra), never blindly at the end:
+	// for Claude and agy that is before the variadic --add-dir <project>,
+	// for codex exec and opencode run before the prompt.
+	ExtraArgs []string
+
 	// Mode selects the argv shape. "" or "run" → `opencode run`
 	// (single-turn subprocess). "serve-http" → `opencode serve`
 	// (long-lived HTTP server for go-agent-sessions ServeHTTP runtime).
@@ -66,7 +78,7 @@ func (a *OpencodeAdapter) Name() string { return "opencode" }
 func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
 	shape := opencodeShape(a)
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.OpenCode, shape, a.Dir)}
-	return resolveAdapterTurn(opencodeConvention(a, shape, a.Agent, p), prompt, systemPrompt, cliSessionID)
+	return resolveAdapterTurn(opencodeConvention(a, shape, a.Agent, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
 }
 
 func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -80,5 +92,5 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {
-	return detect(runtimes.OpenCode)
+	return detect(runtimes.OpenCode, a.Binary)
 }
