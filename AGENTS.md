@@ -1,32 +1,41 @@
 # go-providers
 
-One `Provider` interface over CLI-bridge adapters (Claude Code, Codex, Gemini
-CLI, Aider, Copilot, Junie, Kiro, Opencode, Qwen) driven through PTY or plain
-subprocess, plus the cross-cutting adapter primitives: registry, boot-dir
-specs, cost monitoring, scope guarding, progress-loop detection, typed per-line
-events and a decorator pipeline. It is CLI/PTY-only — it does not own LLM
-contracts, rate budgets, or any direct HTTP chat or embedding path.
+The facts about six agent CLI runtimes, and the adapters that drive four of
+them. `registry` describes claude, codex, opencode, antigravity (`agy`),
+copilot and pi. Claude Code, Codex, OpenCode and Antigravity have native
+`CLIAdapter`s here, run through PTY or plain subprocess behind one `Provider`
+interface. Copilot and Pi are ACP-only: the registry describes them, and
+go-agent-wrapper's ACP clients drive them. Around the adapters sit the
+cross-cutting primitives: boot-dir specs and pure projections, per-turn argv,
+cost monitoring, scope guarding, progress-loop detection, typed per-line events
+and a decorator pipeline. It is CLI/PTY-only — it does not own LLM contracts,
+rate budgets, or any direct HTTP chat or embedding path.
 
 ## Start Here
 
+- `registry/` is the one list of runtimes: a `Descriptor` per runtime (binary,
+  env override, modes with per-mode capabilities, default mode, posture hook,
+  projection facts) over the agent-contracts-leaf `runtimes` vocabulary. Its
+  layout is read from `layout/`, never copied. Start here to learn what a
+  runtime is and what it can do.
+- `provider/new_adapter.go` is the one table of native adapters:
+  `NewAdapter(runtime, mode)` returns the adapter in that mode's shape, and
+  `ErrNoAdapter` for an ACP mode.
+- `provider/argv.go` is the one owner of each runtime's argv: a convention
+  builder per runtime, which `ProviderProjection` resolves against launch roots
+  and each adapter's `BuildArgs` resolves from its own fields, both through
+  `LaunchConvention.ResolveTurn`.
 - `README.md` states the CLI/PTY-only scope and the minimum viable call shape.
-- `provider/provider.go` declares the interface; `provider/registry.go` owns
-  adapter lookup.
-- `provider/bootdir.go` plus `bootdir_claude.go`, `bootdir_codex.go` and
-  `bootdir_opencode.go` own the per-provider boot-dir specs.
+- `provider/provider.go` declares the interface; `provider/registry.go` is a
+  name-keyed registry of `Provider` instances (not the runtime registry).
+- `provider/bootdir.go` plus `bootdir_claude.go`, `bootdir_codex.go`,
+  `bootdir_opencode.go` and `bootdir_antigravity.go` own the per-provider
+  boot-dir specs.
 - `provider/pty.go` and `provider/subprocess.go` are the two transports.
 - `provider/scope_guard.go`, `provider/cost_monitor.go` and
   `provider/progress_tracker.go` are the decorator monitors.
 - `provider/projection.go` and `provider/preparation.go` produce the pure
   values `agentkit` converts into materialization requests.
-- `provider/argv.go` is the one owner of each runtime's argv: a convention
-  builder per runtime, which `ProviderProjection` resolves against launch roots
-  and each adapter's `BuildArgs` resolves from its own fields, both through
-  `LaunchConvention.ResolveTurn`.
-- `registry/` is the one list of runtimes: a `Descriptor` per runtime (binary,
-  env override, modes with per-mode capabilities, default mode, posture hook,
-  projection facts) over the agent-contracts-leaf `runtimes` vocabulary. Its layout is read from
-  `layout/`, never copied.
 - `layout/` is the one table of where each agent CLI reads files, skills and config
   (`docs/LAYOUT.md`, `docs/HARNESS-DISCOVERY.md`), keyed by runtime id and
   `layout.Shape` (a `runtimes.Mode` plus an optional variant such as Claude's
