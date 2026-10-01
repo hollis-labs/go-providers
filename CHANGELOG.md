@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.33.0 — 2026-10-01
+
+One argv owner (CW-20260930-0135, go-providers half). Each runtime's argv is
+built in one place, `provider/argv.go`; a `ProviderProjection` resolves it
+against launch roots and each adapter's `BuildArgs` resolves the same
+convention from the adapter's fields, so the adapter path and the prepared path
+produce the same argv for the same launch, turn by turn.
+
+### Added
+
+- `LaunchConvention.ResolveTurn(roots, TurnInput, extra)` and
+  `ProviderProjection.ResolveTurn`: resolve any turn, not only the first.
+  `TurnInput` carries the prompt, system prompt and resume id; extra arguments
+  go at the convention's `ArgExtra` slot. `ResolveLaunch(roots, prompt)` is
+  now the first-turn case of it.
+- Argument kinds `ArgResume` (resume flag and id, omitted on a new session),
+  `ArgPromptInline` (agy's `-p=<prompt>`), `ArgSystemPrompt` and `ArgExtra`,
+  and `ArgTemplate.WithSystem` / `FirstTurnOnly`. The projected conventions now
+  carry resume (`--resume`, `--session`, `--conversation`), system-prompt and
+  extra slots; a first turn without them resolves to the same argv as before
+  (`TestLayoutRegression_NonSkillProjectionUnchanged`'s resolved lines are
+  unchanged).
+- `ClaudeAdapter.Model` (`--model`), `ClaudeAdapter.SkillsDir` (bare
+  `--add-dir` for planted skills), `CodexAdapter.Model` (`-c model="…"`, the
+  form app-server accepts) and `CodexAdapter.ProjectDir` (exec `--cd`).
+- `registry.Descriptor.Projection` (`ProjectionFacts`: tested version, feature
+  support, per-mode notes), with `registry.Feature`, `registry.Support` and
+  `registry.Features()`. `ProviderCapabilityMatrix` reads it; the separate
+  per-runtime table in `provider` is gone.
+
+### Changed
+
+- `LaunchConvention.Executable` comes from the registry descriptor's `Binary`
+  instead of a literal per runtime (same values).
+- `ClaudeAdapter.BuildArgs`: `ProjectDir` now emits `--add-dir` in every mode,
+  as the projection does (it was bare-only; agentkit sets it only for bare, and
+  non-bare launches still get `--add-dir` from `ProjectDirArg`). In print mode
+  `--system-prompt` now comes before `--add-dir` and
+  `--dangerously-skip-permissions` instead of after them.
+- The projected agy convention matches `BuildArgs`: the prompt is inline
+  (`-p=<prompt>`, was `-p <prompt>`) and it carries the permission, model,
+  effort and agent flags. The projected opencode prompt carries the system
+  prompt as `BuildArgs` does.
+
+### Removed
+
+- **Breaking:** `provider.ProviderFeature`, `provider.CapabilitySupport` and
+  their constants (`provider.FeatureInstructions` … `provider.FeatureTrust`,
+  `provider.SupportProjected`/`SupportExplicit`/`SupportUnsupported`). The
+  vocabulary now lives with the per-runtime facts in package `registry`: use
+  `registry.Feature`, `registry.Support` and their constants (same names and
+  string values). `ProjectionOptions.RequiredFeatures` is
+  `[]registry.Feature` and `ProjectionDiagnostic.Feature` a `registry.Feature`.
+
 ## v0.32.0 — 2026-10-01
 
 ### Added

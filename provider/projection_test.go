@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 func TestProviderCapabilityMatrix_M06(t *testing.T) {
@@ -37,12 +38,12 @@ func TestProviderCapabilityMatrix_M06(t *testing.T) {
 			if row.TestedVersion == "" {
 				t.Errorf("%s/%s: TestedVersion is empty", provider, mode)
 			}
-			for _, feature := range []ProviderFeature{
-				FeatureInstructions,
-				FeatureNativeConfig,
-				FeatureMCP,
-				FeatureSkillTrees,
-				FeatureCredential,
+			for _, feature := range []registry.Feature{
+				registry.FeatureInstructions,
+				registry.FeatureNativeConfig,
+				registry.FeatureMCP,
+				registry.FeatureSkillTrees,
+				registry.FeatureCredential,
 			} {
 				if row.Features[string(feature)] == "" {
 					t.Errorf("%s/%s: missing feature %q", provider, mode, feature)
@@ -74,7 +75,7 @@ func TestProviderProjection_GoldenLayoutsWithSkillTrees(t *testing.T) {
 	opts := ProjectionOptions{
 		Version:          "fixture-version",
 		Skills:           skills,
-		RequiredFeatures: []ProviderFeature{FeatureInstructions, FeatureNativeConfig, FeatureMCP, FeatureSkillTrees},
+		RequiredFeatures: []registry.Feature{registry.FeatureInstructions, registry.FeatureNativeConfig, registry.FeatureMCP, registry.FeatureSkillTrees},
 	}
 
 	cases := []struct {
@@ -260,21 +261,21 @@ func TestProviderProjection_ResolveLaunchStructuredRootsAndEnvPrecedence(t *test
 
 func TestProviderProjection_UnsupportedFeatureDiagnostics(t *testing.T) {
 	_, err := NewCodexAdapter().ProviderProjection(PlantContext{}, ProjectionOptions{
-		RequiredFeatures: []ProviderFeature{FeatureCommands},
+		RequiredFeatures: []registry.Feature{registry.FeatureCommands},
 	})
 	var unsupported *UnsupportedFeatureError
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("want UnsupportedFeatureError, got %T %v", err, err)
 	}
-	if got := unsupported.Diagnostics[0].Feature; got != FeatureCommands {
-		t.Fatalf("diagnostic feature: want %q, got %q", FeatureCommands, got)
+	if got := unsupported.Diagnostics[0].Feature; got != registry.FeatureCommands {
+		t.Fatalf("diagnostic feature: want %q, got %q", registry.FeatureCommands, got)
 	}
 	if !strings.Contains(unsupported.Error(), "codex") || !strings.Contains(unsupported.Error(), "commands") {
 		t.Fatalf("diagnostic is not actionable: %v", unsupported)
 	}
 
 	_, err = NewClaudeAdapterBare().ProviderProjection(PlantContext{}, ProjectionOptions{
-		RequiredFeatures: []ProviderFeature{FeatureTrust},
+		RequiredFeatures: []registry.Feature{registry.FeatureTrust},
 	})
 	if !errors.As(err, &unsupported) {
 		t.Fatalf("want explicit-effect UnsupportedFeatureError, got %T %v", err, err)

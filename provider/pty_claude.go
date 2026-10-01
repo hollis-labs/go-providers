@@ -112,11 +112,22 @@ type ClaudeAdapter struct {
 	// ~/.claude/settings.json. Ignored when Bare is false.
 	SettingsPath string
 
-	// ProjectDir emits --add-dir <path> when Bare is true and the field
-	// is non-empty. Grants tool access to the project root when claude
-	// runs with cwd = bootDir. Ignored when Bare is false. (Non-bare
-	// consumers continue to add --add-dir from BootDirSpec.ProjectDirArg.)
+	// ProjectDir emits --add-dir <path> when non-empty, in every mode, as
+	// the projection does. Grants tool access to the project root when
+	// claude runs with cwd = bootDir. A consumer that sets it must not also
+	// splice BootDirSpec.ProjectDirArg into extra args.
 	ProjectDir string
+
+	// Model emits --model <name> when non-empty, in every mode. Empty keeps
+	// claude's default model.
+	Model string
+
+	// SkillsDir emits --add-dir <path> when Bare is true and the field is
+	// non-empty: bare claude discovers skills only under an added
+	// directory, so set it to the boot dir when skills are planted there
+	// (the projection adds it when ProjectionOptions.Skills is non-empty).
+	// Ignored when Bare is false.
+	SkillsDir string
 
 	// InputMode selects the claude CLI's `--input-format` flag in print
 	// mode. Defaults to "" (no flag emitted, claude defaults to "text").
@@ -236,104 +247,12 @@ func NewClaudeAdapterDevStreamingStdio() *ClaudeAdapter {
 
 func (a *ClaudeAdapter) Name() string { return "claude" }
 
+// BuildArgs resolves Claude's launch convention (see claudeConvention) from
+// the adapter's fields: the same argv a ProviderProjection resolves from the
+// boot-dir layout.
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	if a.Bare {
-		// Bare mode: print-mode shape (-p / --output-format / --verbose)
-		// plus --bare and the explicit-injection flags. The systemPrompt
-		// parameter is ignored — system context flows via the planted
-		// CLAUDE.md referenced through AppendSystemPromptFile.
-		args := []string{
-			"-p", prompt,
-			"--output-format", "stream-json",
-			"--verbose",
-			"--bare",
-		}
-		if a.MCPConfigPath != "" {
-			args = append(args, "--mcp-config", a.MCPConfigPath)
-		}
-		if a.AppendSystemPromptFile != "" {
-			args = append(args, "--append-system-prompt-file", a.AppendSystemPromptFile)
-		}
-		if a.SettingsPath != "" {
-			args = append(args, "--settings", a.SettingsPath)
-		}
-		if a.ProjectDir != "" {
-			args = append(args, "--add-dir", a.ProjectDir)
-		}
-		if a.SkipPermissions {
-			args = append(args, "--dangerously-skip-permissions")
-		}
-		if cliSessionID != "" {
-			args = append([]string{"--resume", cliSessionID}, args...)
-		}
-		return args
-	}
-
-	if a.PTY {
-		// Interactive / long-lived spawn. The claude TUI does not accept
-		// `-p` / `--print`; passing them with an empty prompt makes the
-		// process exit immediately on arg validation. The prompt and
-		// systemPrompt parameters are intentionally ignored: per-turn
-		// payloads arrive via PTY stdin, and system prompts are routed
-		// via BootPrompt at the lib layer rather than `--system-prompt`.
-		var args []string
-		if cliSessionID != "" {
-			args = append(args, "--resume", cliSessionID)
-		}
-		if a.MCPConfigPath != "" {
-			args = append(args, "--mcp-config", a.MCPConfigPath)
-		}
-		if a.SkipPermissions {
-			args = append(args, "--dangerously-skip-permissions")
-		}
-		return args
-	}
-
-	// Streaming Input Mode: per-turn payloads arrive as NDJSON
-	// `{type:"user",...}` messages on stdin. The positional prompt and
-	// --system-prompt flag are intentionally omitted — system context flows
-	// in via the first stdin message or via planted CLAUDE.md / settings,
-	// and per-turn prompts flow in via subsequent stdin messages. The
-	// go-agent-sessions streamingStdio runtime owns the stdin loop.
-	if a.InputMode == "stream-json" {
-		args := []string{
-			"-p",
-			"--input-format", "stream-json",
-			"--output-format", "stream-json",
-			"--verbose",
-		}
-		if a.MCPConfigPath != "" {
-			args = append(args, "--mcp-config", a.MCPConfigPath)
-		}
-		if a.SkipPermissions {
-			args = append(args, "--dangerously-skip-permissions")
-		}
-		if cliSessionID != "" {
-			args = append([]string{"--resume", cliSessionID}, args...)
-		}
-		return args
-	}
-
-	args := []string{
-		"-p", prompt,
-		"--output-format", "stream-json",
-		"--verbose",
-	}
-	if a.InputMode != "" {
-		args = append(args, "--input-format", a.InputMode)
-	}
-	if a.MCPConfigPath != "" {
-		args = append(args, "--mcp-config", a.MCPConfigPath)
-	}
-	if a.SkipPermissions {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if cliSessionID != "" {
-		args = append([]string{"--resume", cliSessionID}, args...)
-	} else if systemPrompt != "" {
-		args = append(args, "--system-prompt", systemPrompt)
-	}
-	return args
+	shape := claudeProjectionShape(a)
+	return resolveAdapterTurn(claudeConvention(a, shape, a.fieldPaths(shape)), prompt, systemPrompt, cliSessionID)
 }
 
 func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {

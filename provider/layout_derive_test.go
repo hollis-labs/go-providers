@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 type projectingAdapter interface {
@@ -197,16 +198,16 @@ func keys(m map[string]bool) []string {
 // ProviderCapabilityMatrix and Table() are two statements about the same
 // thing; they must agree on what each mode projects.
 func TestProviderCapabilityMatrixAgreesWithLayoutTable(t *testing.T) {
-	concerns := map[ProviderFeature]layout.Concern{
-		FeatureInstructions: layout.Instructions,
-		FeatureNativeConfig: layout.NativeConfig,
-		FeatureMCP:          layout.MCP,
-		FeatureSkillTrees:   layout.Skills,
+	concerns := map[registry.Feature]layout.Concern{
+		registry.FeatureInstructions: layout.Instructions,
+		registry.FeatureNativeConfig: layout.NativeConfig,
+		registry.FeatureMCP:          layout.MCP,
+		registry.FeatureSkillTrees:   layout.Skills,
 	}
 	for _, row := range ProviderCapabilityMatrix() {
 		for feature, concern := range concerns {
 			_, inTable := layout.Find(row.Provider, row.Shape(), concern)
-			projected := row.Features[string(feature)] == string(SupportProjected)
+			projected := row.Features[string(feature)] == string(registry.SupportProjected)
 			if projected != inTable {
 				t.Errorf("%s/%s: matrix says %s=%s, table has %s row = %v", row.Provider, row.Mode, feature, row.Features[string(feature)], concern, inTable)
 			}

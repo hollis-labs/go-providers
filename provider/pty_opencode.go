@@ -61,27 +61,12 @@ func NewOpencodeAdapterServeHTTP() *OpencodeAdapter {
 
 func (a *OpencodeAdapter) Name() string { return "opencode" }
 
+// BuildArgs resolves OpenCode's launch convention (see opencodeConvention)
+// from the adapter's fields.
 func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	if a.Mode == "serve-http" {
-		// Serve mode: one long-lived process exposing opencode's HTTP API.
-		// The prompt, systemPrompt, and cliSessionID flow through HTTP
-		// session/message endpoints owned by the runtime, not argv.
-		return []string{"serve", "--port", "0", "--hostname", "127.0.0.1"}
-	}
-	// --agent stays in the argv even when Agent is empty, so the argv shape
-	// is uniform; opencode resolves an empty name to its default agent.
-	args := []string{"run", "--format", "json", "--agent", a.Agent}
-	if a.Model != "" {
-		args = append(args, "--model", a.Model)
-	}
-	if a.Dir != "" {
-		args = append(args, "--dir", a.Dir)
-	}
-	if cliSessionID != "" {
-		args = append(args, "--session", cliSessionID)
-	}
-	args = append(args, prependOpencodeSystemPrompt(prompt, systemPrompt))
-	return args
+	shape := opencodeShape(a)
+	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.OpenCode, shape, a.Dir)}
+	return resolveAdapterTurn(opencodeConvention(a, shape, a.Agent, p), prompt, systemPrompt, cliSessionID)
 }
 
 func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -96,11 +81,4 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 
 func (a *OpencodeAdapter) Detect() (string, bool) {
 	return detect(runtimes.OpenCode)
-}
-
-func prependOpencodeSystemPrompt(prompt, systemPrompt string) string {
-	if systemPrompt == "" {
-		return prompt
-	}
-	return "System: " + systemPrompt + "\n\n" + prompt
 }

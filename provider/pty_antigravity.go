@@ -86,30 +86,11 @@ func NewAntigravityAdapter() *AntigravityAdapter { return &AntigravityAdapter{} 
 
 func (a *AntigravityAdapter) Name() string { return "antigravity" }
 
+// BuildArgs resolves agy's launch convention (see antigravityConvention)
+// from the adapter's fields.
 func (a *AntigravityAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	args := []string{"--output-format", "stream-json"}
-	switch a.Permission {
-	case "bypass":
-		args = append(args, "--dangerously-skip-permissions")
-	case "accept-edits", "plan":
-		args = append(args, "--mode", a.Permission)
-	}
-	if a.Model != "" {
-		args = append(args, "--model", a.Model)
-	}
-	if a.Effort != "" {
-		args = append(args, "--effort", a.Effort)
-	}
-	if a.Agent != "" {
-		args = append(args, "--agent", a.Agent)
-	}
-	for _, d := range a.AddDirs {
-		args = append(args, "--add-dir", d)
-	}
-	if cliSessionID != "" {
-		args = append(args, "--conversation", cliSessionID)
-	}
-	return append(args, "-p="+prependOpencodeSystemPrompt(prompt, systemPrompt))
+	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Antigravity, shapePerTurn, a.AddDirs...)}
+	return resolveAdapterTurn(antigravityConvention(a, p), prompt, systemPrompt, cliSessionID)
 }
 
 func (a *AntigravityAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {

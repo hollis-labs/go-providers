@@ -251,11 +251,11 @@ proj, err := provider.NewCodexAdapter().ProviderProjection(ctx, provider.Project
             {RelPath: "scripts/run.sh", Content: []byte("#!/bin/sh\ngo test ./...\n"), Mode: 0o755},
         },
     }},
-    RequiredFeatures: []provider.ProviderFeature{
-        provider.FeatureInstructions,
-        provider.FeatureNativeConfig,
-        provider.FeatureMCP,
-        provider.FeatureSkillTrees,
+    RequiredFeatures: []registry.Feature{
+        registry.FeatureInstructions,
+        registry.FeatureNativeConfig,
+        registry.FeatureMCP,
+        registry.FeatureSkillTrees,
     },
 })
 if err != nil {
@@ -267,6 +267,17 @@ binding, err := proj.ResolveLaunch(provider.ProjectionRoots{
     ProjectRoot: "/tmp/project root",
 }, "implement the task")
 ```
+
+`ResolveLaunch` resolves a first turn. `ResolveTurn` resolves any turn: the prompt, the system prompt where the runtime takes one, the session to resume, and caller extra arguments, which go where the runtime's convention puts them (never after Claude's variadic `--add-dir`):
+
+```go
+binding, err = proj.ResolveTurn(roots, provider.TurnInput{
+    Prompt:   "continue",
+    ResumeID: sessionID, // --resume / --session / --conversation, per runtime
+}, []string{"--model", "sonnet"})
+```
+
+Each runtime's argv is built in one place (`provider/argv.go`). An adapter's `BuildArgs` resolves the same convention from its own fields (`MCPConfigPath`, `ProjectDir`, …), so the adapter path and the prepared path produce the same argv for the same launch.
 
 The current M06 capability matrix is available from `ProviderCapabilityMatrix()`:
 

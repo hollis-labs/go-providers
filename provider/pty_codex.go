@@ -90,6 +90,17 @@ type CodexAdapter struct {
 	// no `[sandbox_workspace_write]` table is emitted and the planted
 	// config.toml is byte-identical to before this field existed.
 	WritableRoots []string
+
+	// Model emits -c model="<name>" when non-empty, in both modes: the
+	// config override is the form app-server accepts (it has no --model),
+	// and exec takes it too. Empty keeps the planted config.toml's model.
+	Model string
+
+	// ProjectDir emits --cd <path> in exec mode when non-empty, as the
+	// projection does: codex runs with cwd = bootDir and works in the
+	// project through it. Ignored in app-server mode, where the project
+	// root is the JSON-RPC thread's cwd.
+	ProjectDir string
 }
 
 func NewCodexAdapter() *CodexAdapter { return &CodexAdapter{} }
@@ -103,30 +114,13 @@ func NewCodexAdapterAppServer() *CodexAdapter { return &CodexAdapter{Mode: "app-
 
 func (a *CodexAdapter) Name() string { return "codex" }
 
+// BuildArgs resolves Codex's launch convention (see codexConvention) from the
+// adapter's fields. exec mode is one turn and ignores cliSessionID; app-server
+// mode ignores the prompt and cliSessionID, which travel over JSON-RPC.
 func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
-	if a.Mode == "app-server" {
-		// App-server mode: one long-lived process speaking JSON-RPC over
-		// stdio. The positional prompt and cliSessionID are intentionally
-		// ignored — `thread/start` / `thread/resume` are JSON-RPC methods
-		// driven by the consumer runtime, not argv flags. Defaults to
-		// --listen stdio:// (omitted; explicit-listen flags are not
-		// exposed in this sprint).
-		return []string{"app-server"}
-	}
-	// Exec mode (default): single-turn `codex exec <prompt> --json`.
-	// System prompt is file-based (AGENTS.md in sandbox dir), not a flag.
-	//
-	// --skip-git-repo-check is required: BootDirSpec always plants a fresh
-	// throwaway tempdir (never a git repo) as the codex cwd, and codex's
-	// own CLI-level trust gate refuses to run non-interactively outside a
-	// trusted/git directory ("Not inside a trusted directory and
-	// --skip-git-repo-check was not specified", confirmed against a real
-	// codex-cli 0.147.0 binary). The flag only widens "which directories
-	// codex is willing to start in" — it does not touch the sandbox
-	// (approval_policy/sandbox_mode in the planted config.toml remain the
-	// mechanism that gates what codex is allowed to *do* once running), so
-	// it's safe to pass unconditionally here.
-	return []string{"exec", prompt, "--json", "--skip-git-repo-check"}
+	shape := codexShape(a)
+	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Codex, shape, a.ProjectDir)}
+	return resolveAdapterTurn(codexConvention(a, shape, p), prompt, systemPrompt, cliSessionID)
 }
 
 func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
