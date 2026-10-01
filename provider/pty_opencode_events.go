@@ -23,8 +23,13 @@ import (
 //     continues; "error" ends it with the failure reported by the error
 //     line; any other reason ends the turn, so that step_finish also
 //     emits done. Usage is per step, not cumulative — consumers sum it.
-//     step_finish also reports a dollar cost, which has no field on either
-//     usage type and is left in the raw line.
+//     Its dollar cost, also per step, is Usage.CostUSD, and its reason,
+//     normalised (tool-calls → tool_use, stop → end_turn, length →
+//     max_tokens), is the stop reason. tokens.total is each step's context
+//     size, not a count to sum, and is not read.
+//
+// Each text and reasoning line is one whole part, so its part id is the
+// block id.
 //   - error       → error. opencode exits non-zero after writing it.
 //
 // Unknown types and lines that are not JSON (opencode prints warnings such
@@ -53,6 +58,8 @@ type opencodeLine struct {
 }
 
 type opencodePart struct {
+	ID     string              `json:"id"`
+	Cost   float64             `json:"cost"`
 	Text   string              `json:"text"`
 	Tool   string              `json:"tool"`
 	CallID string              `json:"callID"`
@@ -112,13 +119,14 @@ func decodeOpencodeLine(line []byte) (opencodeLine, bool) {
 	return ev, true
 }
 
-func (t *opencodeStepTokens) usage(reason string) llmtypes.Usage {
+func (t *opencodeStepTokens) usage(reason string, cost float64) llmtypes.Usage {
 	return llmtypes.Usage{
 		InputTokens:         t.Input,
 		OutputTokens:        t.Output + t.Reasoning,
 		CacheCreationTokens: t.Cache.Write,
 		CacheReadTokens:     t.Cache.Read,
-		StopReason:          reason,
+		StopReason:          llmtypes.NormalizeStopReason(reason),
+		CostUSD:             cost,
 	}
 }
 
@@ -137,12 +145,17 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 		if ev.Part.Text == "" {
 			return nil
 		}
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: ev.Part.Text}}
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: ev.Part.Text, BlockID: ev.Part.ID}}
 	case "reasoning":
 		if ev.Part.Text == "" {
 			return nil
 		}
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventThinking, ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: ev.Part.Text}}}
+		return []llmtypes.StreamEvent{{
+			Type:          llmtypes.EventThinking,
+			ThinkingBlock: &llmtypes.ThinkingBlock{Thinking: ev.Part.Text},
+			BlockID:       ev.Part.ID,
+			Phase:         llmtypes.PhaseThinking,
+		}}
 	case "tool_use":
 		return []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{
 			ID:    ev.Part.CallID,
@@ -152,7 +165,7 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 	case "step_finish":
 		out := make([]llmtypes.StreamEvent, 0, 2)
 		if ev.Part.Tokens != nil {
-			u := ev.Part.Tokens.usage(ev.Part.Reason)
+			u := ev.Part.Tokens.usage(ev.Part.Reason, ev.Part.Cost)
 			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &u})
 		}
 		if opencodeStepEndsTurn(ev.Part.Reason) {
@@ -168,7 +181,8 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 
 // ParseLineEvents implements EventParser for opencode run mode. It follows
 // the ParseLine mapping above and adds what the legacy surface cannot carry:
-// a tool result per tool_use line, and phase-less deltas. serve-http mode
+// a tool result per tool_use line. Deltas carry no phase: opencode does not
+// say whether a text part is narration or the final answer. serve-http mode
 // yields nothing, as ParseLine does.
 func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 	if a.Mode == "serve-http" {
@@ -188,12 +202,12 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 		if ev.Part.Text == "" {
 			return nil, nil
 		}
-		return []events.Event{events.Delta{Text: ev.Part.Text}}, nil
+		return []events.Event{events.Delta{Text: ev.Part.Text, BlockID: ev.Part.ID}}, nil
 	case "reasoning":
 		if ev.Part.Text == "" {
 			return nil, nil
 		}
-		return []events.Event{events.Thinking{Text: ev.Part.Text}}, nil
+		return []events.Event{events.Thinking{Text: ev.Part.Text, BlockID: ev.Part.ID}}, nil
 	case "tool_use":
 		st := ev.Part.State
 		preview := st.Output
@@ -207,17 +221,18 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 	case "step_finish":
 		out := make([]events.Event, 0, 2)
 		if ev.Part.Tokens != nil {
-			u := ev.Part.Tokens.usage(ev.Part.Reason)
+			u := ev.Part.Tokens.usage(ev.Part.Reason, ev.Part.Cost)
 			out = append(out, events.Usage{
 				InputTokens:         u.InputTokens,
 				OutputTokens:        u.OutputTokens,
 				CacheCreationTokens: u.CacheCreationTokens,
 				CacheReadTokens:     u.CacheReadTokens,
 				StopReason:          u.StopReason,
+				CostUSD:             u.CostUSD,
 			})
 		}
 		if opencodeStepEndsTurn(ev.Part.Reason) {
-			out = append(out, events.Done{StopReason: ev.Part.Reason})
+			out = append(out, events.Done{StopReason: llmtypes.NormalizeStopReason(ev.Part.Reason)})
 		}
 		return out, nil
 	case "error":

@@ -53,9 +53,14 @@ func TestOpencodeParseLine_Fixtures(t *testing.T) {
 		if evs[1].Content != "OK." {
 			t.Errorf("delta = %q", evs[1].Content)
 		}
-		wantUsage := llmtypes.Usage{InputTokens: 3, OutputTokens: 5, CacheCreationTokens: 30669, StopReason: "stop"}
+		// The step reason "stop" is normalised to end_turn, and the step's
+		// own cost is the usage's cost.
+		wantUsage := llmtypes.Usage{InputTokens: 3, OutputTokens: 5, CacheCreationTokens: 30669, StopReason: llmtypes.StopReasonEndTurn, CostUSD: 0.19182125}
 		if *evs[2].Usage != wantUsage {
 			t.Errorf("usage = %+v; want %+v", *evs[2].Usage, wantUsage)
+		}
+		if evs[1].BlockID != "prt_0f290925c001eiKl2rF4xK7o1G" {
+			t.Errorf("delta block id = %q; want the text part id", evs[1].BlockID)
 		}
 	})
 
@@ -86,17 +91,24 @@ func TestOpencodeParseLine_Fixtures(t *testing.T) {
 		if glob.Name != "glob" || glob.ID != "toolu_01UsKRtuKcwxHxyDn2fAsFZF" || glob.Input["pattern"] != "**/note.txt" {
 			t.Errorf("glob tool use = %+v", glob)
 		}
-		if evs[5].Usage.StopReason != "tool-calls" || evs[8].Usage.StopReason != "stop" {
-			t.Errorf("stop reasons = %q, %q", evs[5].Usage.StopReason, evs[8].Usage.StopReason)
+		if evs[5].Usage.StopReason != llmtypes.StopReasonToolUse || evs[8].Usage.StopReason != llmtypes.StopReasonEndTurn {
+			t.Errorf("stop reasons = %q, %q; want tool_use, end_turn", evs[5].Usage.StopReason, evs[8].Usage.StopReason)
 		}
 		var out int
+		var cost float64
 		for _, ev := range evs {
 			if ev.Type == llmtypes.EventUsage {
 				out += ev.Usage.OutputTokens
+				cost += ev.Usage.CostUSD
 			}
 		}
 		if out != 56+113+5 {
 			t.Errorf("summed output tokens = %d; want per-step usage that sums to 174", out)
+		}
+		// Cost is per step too (CW-20260930-0222): the three steps sum to
+		// the turn's cost.
+		if want := 0.0186545 + 0.01897925 + 0.01691975; cost < want-1e-9 || cost > want+1e-9 {
+			t.Errorf("summed cost = %v; want %v", cost, want)
 		}
 	})
 }
@@ -123,9 +135,12 @@ func TestOpencodeParseLineEvents_Fixtures(t *testing.T) {
 			}
 		case events.Usage:
 			usages++
+			if e.CostUSD == 0 {
+				t.Errorf("typed usage has no cost: %+v", e)
+			}
 		case events.Done:
 			dones++
-			if e.StopReason != "stop" {
+			if e.StopReason != llmtypes.StopReasonEndTurn {
 				t.Errorf("done stop reason = %q", e.StopReason)
 			}
 		}
@@ -135,7 +150,7 @@ func TestOpencodeParseLineEvents_Fixtures(t *testing.T) {
 	}
 	if d, ok := got[len(got)-1].(events.Done); !ok {
 		t.Errorf("last event = %#v; want Done", got[len(got)-1])
-	} else if d.StopReason != "stop" {
+	} else if d.StopReason != llmtypes.StopReasonEndTurn {
 		t.Errorf("Done.StopReason = %q", d.StopReason)
 	}
 

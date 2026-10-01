@@ -168,6 +168,7 @@ type codexItemMessage struct {
 type codexItemCompleted struct {
 	Type string `json:"type"`
 	Item struct {
+		ID   string `json:"id"`
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"item"`
@@ -214,7 +215,11 @@ func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 				text = msg.Content
 			}
 			if text != "" {
-				return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text}}, nil
+				phase := llmtypes.PhaseNarration
+				if msg.Delta == "" {
+					phase = llmtypes.PhaseFinal
+				}
+				return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text, Phase: phase}}, nil
 			}
 		}
 		return nil, nil
@@ -227,7 +232,9 @@ func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 		if item.Item.Type != "agent_message" || item.Item.Text == "" {
 			return nil, nil
 		}
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: item.Item.Text}}, nil
+		// One item.completed is one whole message; its item id is the
+		// block id.
+		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: item.Item.Text, BlockID: item.Item.ID, Phase: llmtypes.PhaseFinal}}, nil
 
 	case "turn.completed":
 		var done codexTurnCompleted
@@ -243,6 +250,9 @@ func parseCodexStreamLine(line []byte) ([]llmtypes.StreamEvent, error) {
 					OutputTokens:        done.Usage.OutputTokens,
 					CacheReadTokens:     done.Usage.CachedInputTokens,
 					CacheCreationTokens: 0,
+					// codex exec reports no stop reason; a completed turn
+					// ended normally.
+					StopReason: llmtypes.StopReasonEndTurn,
 				},
 			})
 		}
