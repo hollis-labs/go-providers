@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.38.1 — 2026-10-01
+
+### Fixed
+
+- **OpenCode errors say what failed** (CW-20261001-0122).
+  - The `opencode run` error line used to surface only `data.message`.
+    OpenCode 1.18.33 reports a model it cannot resolve as `UnknownError`
+    "Unexpected server error. Check server logs for details.", so a bad model
+    id looked like a server fault.
+  - The surfaced error, on both `StreamEvent.Error` and the typed
+    `events.Error.Message`, now keeps `data.message` and appends the error's
+    name, the model when the error carries `data.providerID`/`modelID`
+    (`ProviderModelNotFoundError`), and `data.ref`, the reference OpenCode
+    files the failure under. For example:
+    `Unexpected server error. Check server logs for details. (UnknownError, ref err_7707db6c)`.
+  - A message equal to the name, and an error with nothing in it, read as
+    before.
+  - **Behaviour change:** a consumer matching the exact old message text
+    sees the appended detail.
+- **New fixture:** `providertest/fixtures/opencode/run_error_unknown_model`,
+  a capture from opencode 1.18.33.
+
 ## v0.37.0 — 2026-10-01
 
 Permission posture mapped per runtime (CW-20260930-0138, D-72).

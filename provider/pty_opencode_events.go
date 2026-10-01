@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
@@ -88,23 +89,45 @@ type opencodeStepTokens struct {
 type opencodeErrObj struct {
 	Name string `json:"name"`
 	Data struct {
-		Message string `json:"message"`
+		Message    string `json:"message"`
+		Ref        string `json:"ref"`
+		ProviderID string `json:"providerID"`
+		ModelID    string `json:"modelID"`
 	} `json:"data"`
 }
 
-// message mirrors opencode's own stderr rendering of a session error: the
-// data.message when present, else the error name.
+// message renders an opencode session error: data.message, what opencode's
+// own stderr shows, then what identifies the cause: the error's name,
+// data.providerID/modelID when the error names a model
+// (ProviderModelNotFoundError), and data.ref, the reference opencode files
+// the underlying failure under. The ref matters because opencode 1.18.33
+// reports a model it cannot resolve as UnknownError "Unexpected server error.
+// Check server logs for details." with nothing else to tell it from a server
+// fault (providertest/fixtures/opencode/run_error_unknown_model).
 func (e *opencodeErrObj) message() string {
 	if e == nil {
 		return "opencode error"
 	}
-	if e.Data.Message != "" {
-		return e.Data.Message
+	msg := e.Data.Message
+	var detail []string
+	if e.Name != "" && e.Name != msg {
+		detail = append(detail, e.Name)
 	}
-	if e.Name != "" {
-		return e.Name
+	if model := strings.Trim(e.Data.ProviderID+"/"+e.Data.ModelID, "/"); model != "" {
+		detail = append(detail, "model "+model)
 	}
-	return "opencode error"
+	if e.Data.Ref != "" {
+		detail = append(detail, "ref "+e.Data.Ref)
+	}
+	switch {
+	case msg == "" && len(detail) == 0:
+		return "opencode error"
+	case msg == "":
+		return strings.Join(detail, ", ")
+	case len(detail) == 0:
+		return msg
+	}
+	return msg + " (" + strings.Join(detail, ", ") + ")"
 }
 
 func decodeOpencodeLine(line []byte) (opencodeLine, bool) {
