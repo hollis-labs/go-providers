@@ -359,10 +359,14 @@ func (e *UnsupportedFeatureError) Error() string {
 func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
 	shape := claudeProjectionShape(a)
 	pid := runtimes.Claude
+	mcpJSON, err := renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(renderClaudeMD(ctx)), Role: "instructions"},
 		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(mcpJSON), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
 	}
 	doc, err := a.SettingsDocument()
 	if err != nil {
@@ -402,12 +406,16 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 		return ProviderProjection{}, err
 	}
 	pid := runtimes.Codex
+	mcpMirror, err := renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
 		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
 		{RelPath: layoutRel(pid, shape, layout.NativeConfig, ""), Content: []byte(config), Mode: layoutFileMode(pid, shape, layout.NativeConfig), Role: "native-config"},
 		{RelPath: layoutRel(pid, shape, layout.Auth, ""), Mode: layoutFileMode(pid, shape, layout.Auth), Role: "credential-placeholder"},
-		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(mcpMirror), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
 	}
 	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
@@ -433,11 +441,15 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
 	const pid = runtimes.Antigravity
 	shape := shapePerTurn
+	mcpConfig, err := renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
 		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
 		{RelPath: layoutRel(pid, shape, layout.NativeConfig, ""), Content: []byte(renderAntigravityPluginJSON()), Role: "native-config"},
-		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(mcpConfig), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
 	}
 	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
@@ -470,11 +482,19 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 		agentName = "default"
 	}
 	pid := runtimes.OpenCode
+	opencodeJSON, err := renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
+	mcpMirror, err := renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
+	if err != nil {
+		return ProviderProjection{}, err
+	}
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, shape, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
-		{RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
+		{RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName), Content: []byte(opencodeJSON), Mode: layoutFileMode(pid, shape, layout.NativeConfig), Role: "native-config"},
 		{RelPath: layoutRel(pid, shape, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, shape, layout.MCP, agentName), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, agentName), Content: []byte(mcpMirror), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
 	}
 	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)

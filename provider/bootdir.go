@@ -163,13 +163,16 @@ type PlantContext struct {
 	// MCPServers carries additional MCP servers to plant beyond the
 	// per-task loopback (MCPLoopbackURL) and the mux aggregator (Mux*).
 	//
-	// Consumed by the codex config.toml renderer. codex has no .mcp.json
-	// sidecar — every MCP server it sees must be co-rendered into the
-	// single config.toml — so a consumer's own server (e.g. Nanite's
-	// `nanite mcp`) cannot be added by writing a separate file; it has to
-	// ride here so config.toml stays single-owner. claude and opencode
-	// keep their MCP servers in a dedicated .mcp.json / opencode.json a
-	// consumer can extend directly, so this field does not affect them.
+	// Every runtime that plants an MCP config renders them, in its CLI's
+	// own form, into the file its layout row names: claude's .mcp.json,
+	// codex's config.toml, opencode's opencode.json and antigravity's
+	// .agents/plugins/tether/mcp_config.json, plus the .mcp.json mirrors
+	// codex and opencode plant for operators (see mcp_servers.go). Apps
+	// supply servers here rather than rendering MCP config themselves.
+	// Copilot and Pi take MCP servers over ACP, not from a boot dir.
+	//
+	// An invalid spec (bad, reserved or duplicate name, or not exactly one
+	// transport) fails the Render and the ProviderProjection.
 	//
 	// Empty / nil → no extra entries (back-compat: planted config stays
 	// byte-identical for callers that don't populate this field).

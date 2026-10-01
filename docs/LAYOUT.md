@@ -35,7 +35,7 @@ Where each agent CLI reads its files, skills and config, relative to which launc
 | shape | concern | root | rel | form | file mode | flag | env | cwd | probe | note |
 |---|---|---|---|---|---|---|---|---|---|---|
 | all | instructions | boot | `agents/{agent}.md` |  |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project | none | Unprobed: agent prompt file is model-visible only; Step 0 does not measure it. |
-| all | native-config | boot | `opencode.json` |  |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project | CFG2 | $OPENCODE_CONFIG_DIR/opencode.json is merged with project and user config |
+| all | native-config | boot | `opencode.json` |  | 0600 |  | `OPENCODE_CONFIG_DIR=<boot>` | project | CFG2 | $OPENCODE_CONFIG_DIR/opencode.json is merged with project and user config |
 | all | boot | boot | `boot.md` |  |  |  |  |  | none | Unprobed: kick-off content read by the launcher, not discovered by the harness. |
 | all | mcp | boot | `.mcp.json` |  | 0600 |  |  |  | none | Unprobed: mirror for operators; OpenCode reads MCP servers from opencode.json. |
 | all | skills | boot | `skills` | dir |  |  | `OPENCODE_CONFIG_DIR=<boot>` | project | O2 | $OPENCODE_CONFIG_DIR/skills/&lt;name&gt;/SKILL.md (singular skill/ also read; flat .md is not) |
