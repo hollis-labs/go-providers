@@ -82,23 +82,22 @@ func init() {
 			// a lost or mismatched thread returned as a SessionLostError.
 			// The wrapper does not yet map its SessionIDPreset onto
 			// ResumeThreadID: apps drive turn.CodexAppServerCache
-			// themselves. No session-lost-classifier: the loss is
-			// classified by agentkit's turn package from the JSON-RPC
-			// error, not by CodexAdapter (it has no IsSessionLost), so
-			// declaring it here would be a claim the adapter does not
-			// back.
+			// themselves. No session-lost-classifier: the loss arrives as
+			// a JSON-RPC error, which agentkit's turn package classifies;
+			// CodexAdapter.IsSessionLost reads exec's stderr and never
+			// sees it.
 			{runtimes.ModeJSONRPCStdio, caps(resume, typedEvents, approvals)},
-			// codex exec --json: one turn, no resume, so no
-			// session-lost-classifier either: CodexAdapter builds no
-			// `exec resume` argv, and a classifier for an id it never
-			// passes would be a claim nothing exercises. exec stays
-			// single-turn on purpose (CW-20261001-0047): `codex exec
-			// resume` (0.159.2) takes neither --cd nor -s, which exec turns
-			// may carry, so the resume turn would need its own convention.
-			// Resumable Codex is app-server (D-74). The unknown-id stderr
-			// ("no rollout found for thread id") is captured in
-			// providertest/fixtures/codex/exec_resume_unknown_id.
-			{runtimes.ModeSubprocessPerTurn, caps(typedEvents)},
+			// codex exec --json. A turn given a thread id resumes it with
+			// `exec … --cd <project> resume <id> -- <prompt>`, every exec
+			// option in front of the subcommand (CW-20261001-0109).
+			// Measured live on codex-cli 0.159.2: the resumed turn keeps
+			// the thread id, runs in the --cd project, and takes -c
+			// overrides given before `resume`. Without --cd it runs in the
+			// process cwd, not the cwd it started in. Captured in
+			// providertest/fixtures/codex/exec_turn2_resume. An unknown id
+			// writes "no rollout found for thread id" to stderr and exits
+			// 1 (exec_resume_unknown_id), which IsSessionLost classifies.
+			{runtimes.ModeSubprocessPerTurn, caps(resume, typedEvents, lostClass)},
 			// Through the codex-acp bridge (go-agent-wrapper codexacp);
 			// session/request_permission has not been observed from it.
 			{runtimes.ModeACPStdio, caps(typedEvents)},

@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.41.0 — 2026-10-01
+
+Codex exec resumes a thread (CW-20261001-0109).
+
+### Added
+
+- **`CodexAdapter` exec mode resumes.** A turn given a thread id (the
+  `cliSessionID` to `BuildArgs`, or `TurnInput.ResumeID` on the prepared
+  path) runs
+  `exec [-c model="m"] [extra] --json --skip-git-repo-check [--cd project] resume <id> -- <prompt>`.
+  It is one resume slot in the existing convention, not a separate
+  convention. Every exec option stays in front of the `resume`
+  subcommand, where codex applies it to the resumed turn.
+- **`thread.started`** now reports its thread id as the session id:
+  `llmtypes.EventSessionID` from `ParseLine`, `events.SessionID` from
+  `ParseLineEvents`. That is the id a later turn resumes.
+- **`CodexAdapter.IsSessionLost`** matches `no rollout found for thread id`,
+  which `exec … resume <unknown id>` writes to stderr before exiting 1
+  with no stdout.
+- **Registry:** codex subprocess-per-turn declares `resume` and
+  `session-lost-classifier`. App-server still declares no classifier: its
+  loss is a JSON-RPC error that agentkit classifies.
+
+### Measured
+
+Live on codex-cli 0.159.2. The process cwd was the boot dir in every run,
+as in a real launch.
+
+- Turn 1 with `--cd <project>`: the shell ran in the project.
+- `exec resume <id>` with no `--cd`: the same thread id, but the shell ran
+  in the boot dir. A resumed thread takes the process cwd, not the cwd it
+  started in. Dropping `--cd` on resume turns would have moved the agent's
+  work out of the project.
+- `exec --cd <project> resume <id>`, and the full form above: the same
+  thread id, and the shell ran in the project.
+- A `-c sandbox_mode="workspace-write"` override before `resume` let a
+  `touch` succeed that the default read-only sandbox refused. So the
+  registry posture's `-c` overrides reach the resumed turn.
+- An unknown id in the same form, with the prompt
+  `--dangerously-bypass-approvals-and-sandbox` after `--`: exit 1, the
+  stderr above. The prompt was read as text.
+
+### Changed
+
+- **Fixtures:** `codex/exec_turn2_resume` and `codex/exec_resume_unknown_id`
+  were re-recorded in the adapter's argv form. Before, they used
+  `exec resume <id> <prompt> --json …`.
+- **Consumers that pass a session id to codex exec now resume.** Before,
+  exec ignored it. They also now receive a session id from codex exec turns.
+- **Caveat:** `codex exec resume --help` lists no `--cd`, `-s` or
+  `--add-dir` after the subcommand. `--cd` and `-s` before it were
+  accepted, and that is where `ExtraArgs` go.
+
 ## v0.40.1 — 2026-10-01
 
 `CodexAdapter` refuses approval policy "untrusted" (CW-20261001-0127).

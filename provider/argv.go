@@ -237,11 +237,18 @@ func codexShape(a *CodexAdapter) layout.Shape {
 // codexConvention is Codex's argv:
 //
 //	exec       exec [-c model="m"] [extra] --json --skip-git-repo-check
-//	           [--cd project] -- <prompt>
+//	           [--cd project] [resume <thread>] -- <prompt>
 //	app-server app-server [-c model="m"] [extra]
 //
-// exec is one turn and does not resume; its system prompt is the planted
-// AGENTS.md. The prompt is untrusted turn text, so it comes last, after "--"
+// exec runs one turn; a turn that resumes a thread adds the resume
+// subcommand and the thread id just before the prompt (CW-20261001-0109).
+// Every exec option stays in front of `resume`, where codex-cli 0.159.2
+// applies it to the resumed turn: `exec resume` itself takes no --cd or -s,
+// and a resumed thread without --cd runs in the process cwd (the boot dir),
+// not the cwd it started in. Measured live: with --cd before `resume` the
+// resumed turn's shell ran in the project, and a -c sandbox_mode override
+// before it took effect. exec's system prompt is the planted AGENTS.md. The
+// prompt is untrusted turn text, so it comes last, after "--"
 // (CW-20261001-0069): a turn equal to --dangerously-bypass-approvals-and-sandbox
 // is text, not a flag. Every option, the extras included, goes before "--";
 // --json ends any variadic list among the extras (exec's --image is one). --skip-git-repo-check is
@@ -265,7 +272,7 @@ func codexConvention(a *CodexAdapter, shape layout.Shape, p pathArgs) LaunchConv
 	args := append([]ArgTemplate{lit("exec")}, model...)
 	args = append(args, argExtra, lit("--json"), lit("--skip-git-repo-check"))
 	args = append(args, p.projectDirs...)
-	args = append(args, argPrompt)
+	args = append(args, ArgTemplate{Kind: ArgResume, Value: "resume"}, argPrompt)
 	return newConvention(runtimes.Codex, shape, args)
 }
 

@@ -16,7 +16,8 @@ import (
 // - item.completed (agent_message text) → events.Delta(final)
 // - turn.completed (with optional usage) → events.Usage + events.Done
 // - turn.failed / error → events.Error
-// - thread.started / turn.started → informational, no event
+// - thread.started → events.SessionID (the thread a later turn resumes)
+// - turn.started → informational, no event
 func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 	if len(line) == 0 {
 		return nil, nil
@@ -82,6 +83,16 @@ func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 			msg = errEvt.Message
 		}
 		return []events.Event{events.Error{Message: msg}}, nil
+
+	case "thread.started":
+		var started codexThreadStarted
+		if err := json.Unmarshal(line, &started); err != nil {
+			return nil, fmt.Errorf("parse codex thread.started: %w", err)
+		}
+		if started.ThreadID == "" {
+			return nil, nil
+		}
+		return []events.Event{events.SessionID{ID: started.ThreadID}}, nil
 
 	default:
 		return nil, nil

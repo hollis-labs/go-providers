@@ -75,7 +75,7 @@ file AGENTS.md mode=0000 role=instructions sha=6cc56bc4fe28
 file auth.json mode=0600 role=credential-placeholder sha=e3b0c44298fc
 file boot.md mode=0000 role=boot sha=da91b953f821
 file config.toml mode=0600 role=native-config sha=65960e2294fc
-launch {"executable":"codex","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"literal","value":"exec"},{"kind":"extra"},{"kind":"literal","value":"--json"},{"kind":"literal","value":"--skip-git-repo-check"},{"kind":"root","value":"--cd","root":"project","omit_empty":true},{"kind":"prompt"}],"env":[{"name":"CODEX_HOME","value":"boot","operation":"set","precedence":"provider-wins"}]}
+launch {"executable":"codex","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"literal","value":"exec"},{"kind":"extra"},{"kind":"literal","value":"--json"},{"kind":"literal","value":"--skip-git-repo-check"},{"kind":"root","value":"--cd","root":"project","omit_empty":true},{"kind":"resume","value":"resume"},{"kind":"prompt"}],"env":[{"name":"CODEX_HOME","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"codex-auth-json","destination":"auth.json","reason":"auth.json contains credentials and must be resolved by explicit runtime preparation"}]
 binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["exec","--json","--skip-git-repo-check","--cd","/p/project","--","PROMPT"],"env":[{"name":"CODEX_HOME","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file AGENTS.md mode=0000

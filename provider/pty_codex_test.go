@@ -3,6 +3,10 @@ package provider
 import (
 	"reflect"
 	"testing"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	"github.com/hollis-labs/go-providers/provider/events"
 )
 
 func TestParseCodexStreamLine_Empty(t *testing.T) {
@@ -111,25 +115,54 @@ func TestParseCodexStreamLine_Error(t *testing.T) {
 	}
 }
 
+// thread.started's thread id is the session id a resume turn passes back.
 func TestParseCodexStreamLine_ThreadStarted(t *testing.T) {
 	line := []byte(`{"type":"thread.started","thread_id":"xyz"}`)
-	events, err := parseCodexStreamLine(line)
+	evs, err := parseCodexStreamLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("expected 0 events for thread.started, got %d", len(events))
+	if len(evs) != 1 || evs[0].Type != llmtypes.EventSessionID || evs[0].SessionID != "xyz" {
+		t.Errorf("thread.started = %+v, want one session id event for xyz", evs)
+	}
+	typed, err := NewCodexAdapter().ParseLineEvents(line)
+	if err != nil {
+		t.Fatalf("ParseLineEvents: %v", err)
+	}
+	if len(typed) != 1 || typed[0] != (events.SessionID{ID: "xyz"}) {
+		t.Errorf("ParseLineEvents(thread.started) = %+v, want events.SessionID{xyz}", typed)
+	}
+	if evs, _ := parseCodexStreamLine([]byte(`{"type":"thread.started"}`)); len(evs) != 0 {
+		t.Errorf("thread.started without an id = %+v, want no event", evs)
 	}
 }
 
 func TestCodexAdapter_BuildArgs(t *testing.T) {
 	a := NewCodexAdapter()
 	args := a.BuildArgs("fix bug", "system prompt", "")
-	// Codex doesn't use system prompt flag or resume
+	// Codex has no system prompt flag; a first turn does not resume.
 	// The prompt is last, after "--" (CW-20261001-0069).
 	want := []string{"exec", "--json", "--skip-git-repo-check", "--", "fix bug"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %q, want %q", args, want)
+	}
+}
+
+// A resume turn adds `resume <id>` after every exec option and before the
+// prompt: --cd, -c and the extras stay in front of the subcommand, where
+// codex applies them to the resumed turn (CW-20261001-0109).
+func TestCodexAdapter_BuildArgs_Resume(t *testing.T) {
+	a := &CodexAdapter{Model: "gpt-6-luna", ProjectDir: "/work/project", ExtraArgs: []string{"-c", `sandbox_mode="read-only"`}}
+	got := a.BuildArgs("--dangerously-bypass-approvals-and-sandbox", "ignored", "thread-1")
+	want := []string{"exec", "-c", `model="gpt-6-luna"`, "-c", `sandbox_mode="read-only"`, "--json", "--skip-git-repo-check",
+		"--cd", "/work/project", "resume", "thread-1", "--", "--dangerously-bypass-approvals-and-sandbox"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("resume argv\n got %q\nwant %q", got, want)
+	}
+	for _, arg := range a.BuildArgs("hi", "", "") {
+		if arg == "resume" {
+			t.Errorf("a first turn passed resume: %q", a.BuildArgs("hi", "", ""))
+		}
 	}
 }
 
