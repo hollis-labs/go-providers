@@ -19,8 +19,14 @@ contracts, rate budgets, or any direct HTTP chat or embedding path.
   `provider/progress_tracker.go` are the decorator monitors.
 - `provider/projection.go` and `provider/preparation.go` produce the pure
   values `agentkit` converts into materialization requests.
+- `registry/` is the one list of runtimes: a `Descriptor` per runtime (binary,
+  env override, modes with per-mode capabilities, default mode, posture hook)
+  over the agent-contracts-leaf `runtimes` vocabulary. Its layout is read from
+  `layout/`, never copied.
 - `layout/` is the one table of where each agent CLI reads files, skills and config
-  (`docs/LAYOUT.md`, `docs/HARNESS-DISCOVERY.md`); the adapters derive from it.
+  (`docs/LAYOUT.md`, `docs/HARNESS-DISCOVERY.md`), keyed by runtime id and
+  `layout.Shape` (a `runtimes.Mode` plus an optional variant such as Claude's
+  `bare`); the adapters derive from it.
 - `provider/events/` and `provider/event_pipeline.go` own typed per-line events.
 - `examples/claude_bare`, `examples/codex_bootdir`, `examples/opencode_bootdir`
   are runnable.
@@ -59,6 +65,16 @@ Codex argv differs by mode on purpose: exec mode carries the project-dir
 argument and app-server mode must not
 (`TestCodexAdapter_ExecMode_BootDirSpec_HasProjectDirArg`,
 `TestCodexAdapter_AppServer_BootDirSpec_NoProjectDirArg`).
+
+The registry is a closed set compiled into `registry/descriptors.go`; there is
+no out-of-tree registration, and `RegisterForTest` is the only other way in.
+A runtime has layout rows exactly when it has a native mode — Copilot and Pi
+are ACP-only — and `register` panics at init otherwise
+(`TestValidateBuiltinRules`). A capability a descriptor declares for a native
+mode must be backed by the adapter's optional interface, and an implemented
+interface must be declared (`TestDeclaredCapabilitiesMatchAdapters`). The
+runtime vocabulary has no aliases for the old composite modes (`claude-print`
+and the rest) or for `layout.Mode`: there is no `layout.Mode`.
 
 `projection.go` and `preparation.go` return pure values. Keeping them free of
 materialization means `agentkit` owns writing to disk and this library stays

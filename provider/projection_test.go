@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/go-providers/layout"
 )
 
 func TestProviderCapabilityMatrix_M06(t *testing.T) {
@@ -19,11 +22,11 @@ func TestProviderCapabilityMatrix_M06(t *testing.T) {
 	if len(rows) != 9 {
 		t.Fatalf("matrix row count: want 9, got %d", len(rows))
 	}
-	want := map[ProviderID][]ProviderMode{
-		ProviderClaude:      {ModeClaudePrint, ModeClaudeBare, ModeClaudePTY, ModeClaudeStreamingStdio},
-		ProviderCodex:       {ModeCodexExec, ModeCodexAppServer},
-		ProviderOpencode:    {ModeOpencodeRun, ModeOpencodeServeHTTP},
-		ProviderAntigravity: {ModeAntigravityPrint},
+	want := map[runtimes.ID][]layout.Shape{
+		runtimes.Claude:      {shapePerTurn, shapeBare, shapePTY, shapeStreaming},
+		runtimes.Codex:       {shapePerTurn, shapeJSONRPC},
+		runtimes.OpenCode:    {shapePerTurn, shapeHTTPSSE},
+		runtimes.Antigravity: {shapePerTurn},
 	}
 	for provider, modes := range want {
 		for _, mode := range modes {

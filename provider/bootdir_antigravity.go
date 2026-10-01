@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -28,37 +29,38 @@ import (
 // ~/.gemini/antigravity-cli/mcp/<plugin>_<server>/, so a name must always
 // mean the same server.
 func (a *AntigravityAdapter) BootDirSpec() BootDirSpec {
-	const pid, mode = ProviderAntigravity, ModeAntigravityPrint
+	const pid = runtimes.Antigravity
+	shape := shapePerTurn
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: layoutRel(pid, mode, layout.Instructions, ""),
+				RelPath: layoutRel(pid, shape, layout.Instructions, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL), nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Boot, ""),
+				RelPath: layoutRel(pid, shape, layout.Boot, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
+				RelPath: layoutRel(pid, shape, layout.NativeConfig, ""),
 				Render: func(PlantContext) (string, error) {
 					return renderAntigravityPluginJSON(), nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.MCP, ""),
-				Mode:    layoutFileMode(pid, mode, layout.MCP),
+				RelPath: layoutRel(pid, shape, layout.MCP, ""),
+				Mode:    layoutFileMode(pid, shape, layout.MCP),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx)), nil
 				},
 			},
 		},
 		CwdPreference: CwdBootDir,
-		ProjectDirArg: layoutEntry(pid, mode, layout.ProjectDir).Flag + " {{.ProjectDir}}",
+		ProjectDirArg: layoutEntry(pid, shape, layout.ProjectDir).Flag + " {{.ProjectDir}}",
 		Notes:         "workspace-only projection: agy's global ~/.gemini/config is shared with the desktop app and never written",
 	}
 }

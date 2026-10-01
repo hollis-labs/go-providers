@@ -10,34 +10,21 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
-// ProviderID names a provider layout family without importing any runtime
-// package.
-type ProviderID string
-
-const (
-	ProviderClaude      ProviderID = "claude"
-	ProviderCodex       ProviderID = "codex"
-	ProviderOpencode    ProviderID = "opencode"
-	ProviderAntigravity ProviderID = "antigravity"
-)
-
-// ProviderMode names the provider runtime shape whose filesystem and launch
-// conventions are being projected.
-type ProviderMode string
-
-const (
-	ModeClaudePrint          ProviderMode = "claude-print"
-	ModeClaudeBare           ProviderMode = "claude-bare"
-	ModeClaudePTY            ProviderMode = "claude-pty"
-	ModeClaudeStreamingStdio ProviderMode = "claude-streaming-stdio"
-	ModeCodexExec            ProviderMode = "codex-exec"
-	ModeCodexAppServer       ProviderMode = "codex-app-server"
-	ModeOpencodeRun          ProviderMode = "opencode-run"
-	ModeOpencodeServeHTTP    ProviderMode = "opencode-serve-http"
-	ModeAntigravityPrint     ProviderMode = "antigravity-print"
+// The launch shapes the built-in adapters project. Claude print, Codex exec,
+// OpenCode run and Antigravity print are all subprocess-per-turn; Claude's
+// --bare is a launch variant of it, not a mode of its own.
+var (
+	shapePerTurn   = layout.Shape{Mode: runtimes.ModeSubprocessPerTurn}
+	shapeBare      = layout.Shape{Mode: runtimes.ModeSubprocessPerTurn, Variant: layout.VariantBare}
+	shapePTY       = layout.Shape{Mode: runtimes.ModePTY}
+	shapeStreaming = layout.Shape{Mode: runtimes.ModeStreamingStdio}
+	shapeJSONRPC   = layout.Shape{Mode: runtimes.ModeJSONRPCStdio}
+	shapeHTTPSSE   = layout.Shape{Mode: runtimes.ModeHTTPSSE}
 )
 
 // ProviderFeature is a named provider capability that callers may require
@@ -70,111 +57,149 @@ const (
 // projection. TestedVersion is the executable version used for the M06
 // contract fixtures in this worktree.
 type ProviderCapabilityRow struct {
-	Provider      ProviderID        `json:"provider"`
-	Mode          ProviderMode      `json:"mode"`
+	Provider      runtimes.ID       `json:"provider"`
+	Mode          runtimes.Mode     `json:"mode"`
+	Variant       layout.Variant    `json:"variant,omitempty"`
 	TestedVersion string            `json:"tested_version"`
 	Features      map[string]string `json:"features"`
 	Notes         string            `json:"notes,omitempty"`
 }
 
-// ProviderCapabilityMatrix returns a deterministic provider/version matrix for
-// the pure projection contracts in this package.
-func ProviderCapabilityMatrix() []ProviderCapabilityRow {
-	claudeFeatures := featureMap(map[ProviderFeature]CapabilitySupport{
-		FeatureInstructions: SupportProjected,
-		FeatureNativeConfig: SupportProjected,
-		FeatureMCP:          SupportProjected,
-		FeatureSkillTrees:   SupportProjected,
-		FeatureHooks:        SupportExplicit,
-		FeatureCommands:     SupportExplicit,
-		FeatureSubagents:    SupportExplicit,
-		FeatureCredential:   SupportExplicit,
-		FeatureTrust:        SupportExplicit,
-	})
-	codexFeatures := featureMap(map[ProviderFeature]CapabilitySupport{
-		FeatureInstructions: SupportProjected,
-		FeatureNativeConfig: SupportProjected,
-		FeatureMCP:          SupportProjected,
-		FeatureSkillTrees:   SupportProjected,
-		FeatureHooks:        SupportExplicit,
-		FeatureCommands:     SupportUnsupported,
-		FeatureSubagents:    SupportExplicit,
-		FeatureCredential:   SupportExplicit,
-		FeatureTrust:        SupportUnsupported,
-	})
-	opencodeFeatures := featureMap(map[ProviderFeature]CapabilitySupport{
-		FeatureInstructions: SupportProjected,
-		FeatureNativeConfig: SupportProjected,
-		FeatureMCP:          SupportProjected,
-		FeatureSkillTrees:   SupportProjected,
-		FeatureHooks:        SupportUnsupported,
-		FeatureCommands:     SupportExplicit,
-		FeatureSubagents:    SupportExplicit,
-		FeatureCredential:   SupportExplicit,
-		FeatureTrust:        SupportUnsupported,
-	})
-	antigravityFeatures := featureMap(map[ProviderFeature]CapabilitySupport{
-		FeatureInstructions: SupportProjected,
-		FeatureNativeConfig: SupportProjected,
-		FeatureMCP:          SupportProjected,
-		FeatureSkillTrees:   SupportProjected,
-		FeatureHooks:        SupportExplicit,
-		FeatureCommands:     SupportExplicit,
-		FeatureSubagents:    SupportExplicit,
-		FeatureCredential:   SupportExplicit,
-		FeatureTrust:        SupportUnsupported,
-	})
-	return []ProviderCapabilityRow{
-		claudeCapabilityRow(ModeClaudePrint, claudeFeatures),
-		claudeCapabilityRow(ModeClaudeBare, claudeFeatures),
-		claudeCapabilityRow(ModeClaudePTY, claudeFeatures),
-		claudeCapabilityRow(ModeClaudeStreamingStdio, claudeFeatures),
-		{
-			Provider:      ProviderCodex,
-			Mode:          ModeCodexExec,
-			TestedVersion: "0.154.0",
-			Features:      codexFeatures,
-			Notes:         "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
-		},
-		{
-			Provider:      ProviderCodex,
-			Mode:          ModeCodexAppServer,
-			TestedVersion: "0.154.0",
-			Features:      codexFeatures,
-			Notes:         "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
-		},
-		{
-			Provider:      ProviderOpencode,
-			Mode:          ModeOpencodeRun,
-			TestedVersion: "1.18.30",
-			Features:      opencodeFeatures,
-			Notes:         "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
-		},
-		{
-			Provider:      ProviderOpencode,
-			Mode:          ModeOpencodeServeHTTP,
-			TestedVersion: "1.18.30",
-			Features:      opencodeFeatures,
-			Notes:         "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
-		},
-		{
-			Provider:      ProviderAntigravity,
-			Mode:          ModeAntigravityPrint,
-			TestedVersion: "1.2.7",
-			Features:      antigravityFeatures,
-			Notes:         "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
-		},
-	}
+// Shape returns the row's Mode and Variant.
+func (r ProviderCapabilityRow) Shape() layout.Shape {
+	return layout.Shape{Mode: r.Mode, Variant: r.Variant}
 }
 
-func claudeCapabilityRow(mode ProviderMode, features map[string]string) ProviderCapabilityRow {
-	return ProviderCapabilityRow{
-		Provider:      ProviderClaude,
-		Mode:          mode,
-		TestedVersion: "2.1.285",
-		Features:      features,
-		Notes:         "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
+// projectionFacts are what the matrix says about one runtime's projection:
+// the harness version its contracts were checked against, which features it
+// projects, and a note per mode ("" = every mode).
+type projectionFacts struct {
+	testedVersion string
+	features      map[ProviderFeature]CapabilitySupport
+	notes         map[runtimes.Mode]string
+}
+
+var projectionFactsByRuntime = map[runtimes.ID]projectionFacts{
+	runtimes.Claude: {
+		testedVersion: "2.1.285",
+		features: map[ProviderFeature]CapabilitySupport{
+			FeatureInstructions: SupportProjected,
+			FeatureNativeConfig: SupportProjected,
+			FeatureMCP:          SupportProjected,
+			FeatureSkillTrees:   SupportProjected,
+			FeatureHooks:        SupportExplicit,
+			FeatureCommands:     SupportExplicit,
+			FeatureSubagents:    SupportExplicit,
+			FeatureCredential:   SupportExplicit,
+			FeatureTrust:        SupportExplicit,
+		},
+		notes: map[runtimes.Mode]string{
+			"": "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
+		},
+	},
+	runtimes.Codex: {
+		testedVersion: "0.154.0",
+		features: map[ProviderFeature]CapabilitySupport{
+			FeatureInstructions: SupportProjected,
+			FeatureNativeConfig: SupportProjected,
+			FeatureMCP:          SupportProjected,
+			FeatureSkillTrees:   SupportProjected,
+			FeatureHooks:        SupportExplicit,
+			FeatureCommands:     SupportUnsupported,
+			FeatureSubagents:    SupportExplicit,
+			FeatureCredential:   SupportExplicit,
+			FeatureTrust:        SupportUnsupported,
+		},
+		notes: map[runtimes.Mode]string{
+			runtimes.ModeSubprocessPerTurn: "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
+			runtimes.ModeJSONRPCStdio:      "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
+		},
+	},
+	runtimes.OpenCode: {
+		testedVersion: "1.18.30",
+		features: map[ProviderFeature]CapabilitySupport{
+			FeatureInstructions: SupportProjected,
+			FeatureNativeConfig: SupportProjected,
+			FeatureMCP:          SupportProjected,
+			FeatureSkillTrees:   SupportProjected,
+			FeatureHooks:        SupportUnsupported,
+			FeatureCommands:     SupportExplicit,
+			FeatureSubagents:    SupportExplicit,
+			FeatureCredential:   SupportExplicit,
+			FeatureTrust:        SupportUnsupported,
+		},
+		notes: map[runtimes.Mode]string{
+			runtimes.ModeSubprocessPerTurn: "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
+			runtimes.ModeHTTPSSE:           "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
+		},
+	},
+	runtimes.Antigravity: {
+		testedVersion: "1.2.7",
+		features: map[ProviderFeature]CapabilitySupport{
+			FeatureInstructions: SupportProjected,
+			FeatureNativeConfig: SupportProjected,
+			FeatureMCP:          SupportProjected,
+			FeatureSkillTrees:   SupportProjected,
+			FeatureHooks:        SupportExplicit,
+			FeatureCommands:     SupportExplicit,
+			FeatureSubagents:    SupportExplicit,
+			FeatureCredential:   SupportExplicit,
+			FeatureTrust:        SupportUnsupported,
+		},
+		notes: map[runtimes.Mode]string{
+			"": "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
+		},
+	},
+}
+
+// ProviderCapabilityMatrix returns a deterministic provider/version matrix for
+// the pure projection contracts in this package. Its rows come from the
+// registry: one per native mode of every runtime with a layout, each followed
+// by a row for every launch variant its layout rows name in that mode (Claude's
+// bare). ACP-only runtimes have no row: nothing is projected for them.
+func ProviderCapabilityMatrix() []ProviderCapabilityRow {
+	var rows []ProviderCapabilityRow
+	for _, d := range registry.All() {
+		if !d.HasLayout() {
+			continue
+		}
+		facts, ok := projectionFactsByRuntime[d.ID]
+		if !ok {
+			panic(fmt.Sprintf("provider: runtime %s has a layout but no projection facts", d.ID))
+		}
+		for _, shape := range projectionShapes(d) {
+			note, ok := facts.notes[shape.Mode]
+			if !ok {
+				note = facts.notes[""]
+			}
+			rows = append(rows, ProviderCapabilityRow{
+				Provider:      d.ID,
+				Mode:          shape.Mode,
+				Variant:       shape.Variant,
+				TestedVersion: facts.testedVersion,
+				Features:      featureMap(facts.features),
+				Notes:         note,
+			})
+		}
 	}
+	return rows
+}
+
+// projectionShapes lists d's native modes, each followed by the variants its
+// layout rows pin in that mode.
+func projectionShapes(d registry.Descriptor) []layout.Shape {
+	var out []layout.Shape
+	for _, m := range d.NativeModes() {
+		out = append(out, layout.Shape{Mode: m})
+		seen := map[layout.Variant]bool{}
+		for _, e := range d.Layout() {
+			if e.Mode == m && e.Variant != "" && !seen[e.Variant] {
+				seen[e.Variant] = true
+				out = append(out, e.Shape())
+			}
+		}
+	}
+	return out
 }
 
 func featureMap(in map[ProviderFeature]CapabilitySupport) map[string]string {
@@ -299,12 +324,13 @@ type EnvDelta struct {
 
 // LaunchConvention is the provider's spawn contract as values.
 type LaunchConvention struct {
-	Executable string        `json:"executable"`
-	Mode       ProviderMode  `json:"mode"`
-	CWD        RootKind      `json:"cwd"`
-	ConfigRoot RootKind      `json:"config_root,omitempty"`
-	Argv       []ArgTemplate `json:"argv"`
-	Env        []EnvDelta    `json:"env"`
+	Executable string         `json:"executable"`
+	Mode       runtimes.Mode  `json:"mode"`
+	Variant    layout.Variant `json:"variant,omitempty"`
+	CWD        RootKind       `json:"cwd"`
+	ConfigRoot RootKind       `json:"config_root,omitempty"`
+	Argv       []ArgTemplate  `json:"argv"`
+	Env        []EnvDelta     `json:"env"`
 }
 
 // LaunchBinding is a resolved spawn contract. It does not start a process.
@@ -344,8 +370,9 @@ type ProjectionDiagnostic struct {
 
 // ProviderProjection is the pure output of provider layout projection.
 type ProviderProjection struct {
-	Provider    ProviderID             `json:"provider"`
-	Mode        ProviderMode           `json:"mode"`
+	Provider    runtimes.ID            `json:"provider"`
+	Mode        runtimes.Mode          `json:"mode"`
+	Variant     layout.Variant         `json:"variant,omitempty"`
 	Version     string                 `json:"version,omitempty"`
 	Files       []ProjectedFile        `json:"files"`
 	Launch      LaunchConvention       `json:"launch"`
@@ -368,36 +395,37 @@ func (e *UnsupportedFeatureError) Error() string {
 
 // ProviderProjection renders a pure projection for a Claude adapter.
 func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	mode := claudeProjectionMode(a)
-	pid := ProviderClaude
+	shape := claudeProjectionShape(a)
+	pid := runtimes.Claude
 	files := []ProjectedFile{
-		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(renderClaudeMD(ctx)), Role: "instructions"},
-		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp"},
+		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(renderClaudeMD(ctx)), Role: "instructions"},
+		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
 	}
 	doc, err := a.SettingsDocument()
 	if err != nil {
 		return ProviderProjection{}, err
 	}
 	files = append(files, ProjectedFile{
-		RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
+		RelPath: layoutRel(pid, shape, layout.NativeConfig, ""),
 		Content: []byte(marshalClaudeSettings(doc)),
 		Role:    "native-config",
 	})
-	skillPrefix, _ := skillRootFor(pid, mode)
+	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
 	files = append(files, skillFiles...)
 	proj := ProviderProjection{
-		Provider: ProviderClaude,
-		Mode:     mode,
+		Provider: runtimes.Claude,
+		Mode:     shape.Mode,
+		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   claudeLaunchConvention(a, mode, len(opts.Skills) > 0),
+		Launch:   claudeLaunchConvention(a, shape, len(opts.Skills) > 0),
 		Effects: []ProviderEffect{
-			{Kind: EffectClaudeCredentialHelper, Destination: layoutRel(pid, mode, layout.NativeConfig, ""), Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
+			{Kind: EffectClaudeCredentialHelper, Destination: layoutRel(pid, shape, layout.NativeConfig, ""), Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
 			{Kind: EffectClaudeWorkspaceTrust, Reason: "workspace trust seeding mutates host state and is handled by explicit preparation"},
 		},
 	}
@@ -406,36 +434,37 @@ func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOpti
 
 // ProviderProjection renders a pure projection for a Codex adapter.
 func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	mode := ModeCodexExec
+	shape := shapePerTurn
 	if a.Mode == "app-server" {
-		mode = ModeCodexAppServer
+		shape = shapeJSONRPC
 	}
 	config, err := a.ConfigDocument(ctx)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
-	pid := ProviderCodex
+	pid := runtimes.Codex
 	files := []ProjectedFile{
-		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
-		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, mode, layout.NativeConfig, ""), Content: []byte(config), Mode: layoutFileMode(pid, mode, layout.NativeConfig), Role: "native-config"},
-		{RelPath: layoutRel(pid, mode, layout.Auth, ""), Mode: layoutFileMode(pid, mode, layout.Auth), Role: "credential-placeholder"},
-		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
+		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, shape, layout.NativeConfig, ""), Content: []byte(config), Mode: layoutFileMode(pid, shape, layout.NativeConfig), Role: "native-config"},
+		{RelPath: layoutRel(pid, shape, layout.Auth, ""), Mode: layoutFileMode(pid, shape, layout.Auth), Role: "credential-placeholder"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
 	}
-	skillPrefix, _ := skillRootFor(pid, mode)
+	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
 	files = append(files, skillFiles...)
 	proj := ProviderProjection{
-		Provider: ProviderCodex,
-		Mode:     mode,
+		Provider: runtimes.Codex,
+		Mode:     shape.Mode,
+		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   codexLaunchConvention(mode),
+		Launch:   codexLaunchConvention(shape),
 		Effects: []ProviderEffect{
-			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, mode, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
+			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, shape, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
 		},
 	}
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)
@@ -443,14 +472,15 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 
 // ProviderProjection renders a pure projection for an Antigravity adapter.
 func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	const pid, mode = ProviderAntigravity, ModeAntigravityPrint
+	const pid = runtimes.Antigravity
+	shape := shapePerTurn
 	files := []ProjectedFile{
-		{RelPath: layoutRel(pid, mode, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
-		{RelPath: layoutRel(pid, mode, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, mode, layout.NativeConfig, ""), Content: []byte(renderAntigravityPluginJSON()), Role: "native-config"},
-		{RelPath: layoutRel(pid, mode, layout.MCP, ""), Content: []byte(renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp"},
+		{RelPath: layoutRel(pid, shape, layout.Instructions, ""), Content: []byte(AgentsMD(AgentInfo{Name: ctx.AgentName, SystemPrompt: ctx.SystemPrompt}, ctx.MCPLoopbackURL)), Role: "instructions"},
+		{RelPath: layoutRel(pid, shape, layout.Boot, ""), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, shape, layout.NativeConfig, ""), Content: []byte(renderAntigravityPluginJSON()), Role: "native-config"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, ""), Content: []byte(renderAntigravityMCPConfig(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp"},
 	}
-	skillPrefix, _ := skillRootFor(pid, mode)
+	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
@@ -458,7 +488,8 @@ func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts Projectio
 	files = append(files, skillFiles...)
 	proj := ProviderProjection{
 		Provider: pid,
-		Mode:     mode,
+		Mode:     shape.Mode,
+		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
 		Launch:   antigravityLaunchConvention(a),
@@ -471,9 +502,9 @@ func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts Projectio
 
 // ProviderProjection renders a pure projection for an OpenCode adapter.
 func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptions) (ProviderProjection, error) {
-	mode := ModeOpencodeRun
+	shape := shapePerTurn
 	if a.Mode == "serve-http" {
-		mode = ModeOpencodeServeHTTP
+		shape = shapeHTTPSSE
 	}
 	agentName := ctx.AgentName
 	if agentName == "" {
@@ -482,25 +513,26 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 	if agentName == "" {
 		agentName = "default"
 	}
-	pid := ProviderOpencode
+	pid := runtimes.OpenCode
 	files := []ProjectedFile{
-		{RelPath: layoutRel(pid, mode, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
-		{RelPath: layoutRel(pid, mode, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
-		{RelPath: layoutRel(pid, mode, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
-		{RelPath: layoutRel(pid, mode, layout.MCP, agentName), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, mode, layout.MCP), Role: "mcp-mirror"},
+		{RelPath: layoutRel(pid, shape, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
+		{RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName), Content: []byte(renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Role: "native-config"},
+		{RelPath: layoutRel(pid, shape, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
+		{RelPath: layoutRel(pid, shape, layout.MCP, agentName), Content: []byte(renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx))), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
 	}
-	skillPrefix, _ := skillRootFor(pid, mode)
+	skillPrefix, _ := skillRootFor(pid, shape)
 	skillFiles, err := projectSkillPackages(skillPrefix, opts.Skills)
 	if err != nil {
 		return ProviderProjection{}, err
 	}
 	files = append(files, skillFiles...)
 	proj := ProviderProjection{
-		Provider: ProviderOpencode,
-		Mode:     mode,
+		Provider: runtimes.OpenCode,
+		Mode:     shape.Mode,
+		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   opencodeLaunchConvention(a, mode, agentName),
+		Launch:   opencodeLaunchConvention(a, shape, agentName),
 		Effects: []ProviderEffect{
 			{Kind: EffectOpencodeProviderAuth, Reason: "provider credentials are resolved by OpenCode or explicit runtime preparation"},
 		},
@@ -508,27 +540,27 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)
 }
 
-func claudeProjectionMode(a *ClaudeAdapter) ProviderMode {
+func claudeProjectionShape(a *ClaudeAdapter) layout.Shape {
 	switch {
 	case a.Bare:
-		return ModeClaudeBare
+		return shapeBare
 	case a.PTY:
-		return ModeClaudePTY
+		return shapePTY
 	case a.InputMode == "stream-json":
-		return ModeClaudeStreamingStdio
+		return shapeStreaming
 	default:
-		return ModeClaudePrint
+		return shapePerTurn
 	}
 }
 
-func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool) LaunchConvention {
-	const pid = ProviderClaude
-	mcpArg := layoutFileArg(pid, mode, layout.MCP)
+func claudeLaunchConvention(a *ClaudeAdapter, shape layout.Shape, withSkills bool) LaunchConvention {
+	const pid = runtimes.Claude
+	mcpArg := layoutFileArg(pid, shape, layout.MCP)
 	args := []ArgTemplate{}
-	switch mode {
-	case ModeClaudePTY:
+	switch shape {
+	case shapePTY:
 		args = append(args, mcpArg)
-	case ModeClaudeStreamingStdio:
+	case shapeStreaming:
 		args = append(args,
 			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--input-format"},
@@ -538,7 +570,7 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool
 			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
 		)
 		args = append(args, mcpArg)
-	case ModeClaudeBare:
+	case shapeBare:
 		args = append(args,
 			ArgTemplate{Kind: ArgLiteral, Value: "-p"},
 			ArgTemplate{Kind: ArgPrompt},
@@ -547,16 +579,16 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool
 			ArgTemplate{Kind: ArgLiteral, Value: "--verbose"},
 			ArgTemplate{Kind: ArgLiteral, Value: "--bare"},
 			mcpArg,
-			layoutFileArg(pid, mode, layout.Instructions),
-			layoutFileArg(pid, mode, layout.NativeConfig),
+			layoutFileArg(pid, shape, layout.Instructions),
+			layoutFileArg(pid, shape, layout.NativeConfig),
 		)
-		if dir, ok := layoutProjectDirArg(pid, mode); ok {
+		if dir, ok := layoutProjectDirArg(pid, shape); ok {
 			args = append(args, dir)
 		}
 		// --bare reads no cwd skills; the boot root must be an --add-dir for
 		// projected skills to be discovered (probe C4, C5). Only added when
 		// skills are actually projected, so argv is otherwise unchanged.
-		if _, flag := skillRootFor(pid, mode); withSkills && flag != "" {
+		if _, flag := skillRootFor(pid, shape); withSkills && flag != "" {
 			args = append(args, ArgTemplate{Kind: ArgRoot, Root: RootBoot, Value: flag, OmitEmpty: true})
 		}
 	default:
@@ -572,10 +604,11 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool
 	if a.SkipPermissions {
 		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--dangerously-skip-permissions"})
 	}
-	cwd, configRoot, env := layoutLaunchBase(pid, mode)
+	cwd, configRoot, env := layoutLaunchBase(pid, shape)
 	return LaunchConvention{
 		Executable: "claude",
-		Mode:       mode,
+		Mode:       shape.Mode,
+		Variant:    shape.Variant,
 		CWD:        cwd,
 		ConfigRoot: configRoot,
 		Argv:       args,
@@ -583,9 +616,9 @@ func claudeLaunchConvention(a *ClaudeAdapter, mode ProviderMode, withSkills bool
 	}
 }
 
-func codexLaunchConvention(mode ProviderMode) LaunchConvention {
+func codexLaunchConvention(shape layout.Shape) LaunchConvention {
 	var args []ArgTemplate
-	if mode == ModeCodexAppServer {
+	if shape == shapeJSONRPC {
 		args = []ArgTemplate{{Kind: ArgLiteral, Value: "app-server"}}
 	} else {
 		args = []ArgTemplate{
@@ -594,14 +627,15 @@ func codexLaunchConvention(mode ProviderMode) LaunchConvention {
 			{Kind: ArgLiteral, Value: "--json"},
 			{Kind: ArgLiteral, Value: "--skip-git-repo-check"},
 		}
-		if dir, ok := layoutProjectDirArg(ProviderCodex, mode); ok {
+		if dir, ok := layoutProjectDirArg(runtimes.Codex, shape); ok {
 			args = append(args, dir)
 		}
 	}
-	cwd, configRoot, env := layoutLaunchBase(ProviderCodex, mode)
+	cwd, configRoot, env := layoutLaunchBase(runtimes.Codex, shape)
 	return LaunchConvention{
 		Executable: "codex",
-		Mode:       mode,
+		Mode:       shape.Mode,
+		Variant:    shape.Variant,
 		CWD:        cwd,
 		ConfigRoot: configRoot,
 		Argv:       args,
@@ -610,7 +644,8 @@ func codexLaunchConvention(mode ProviderMode) LaunchConvention {
 }
 
 func antigravityLaunchConvention(a *AntigravityAdapter) LaunchConvention {
-	const pid, mode = ProviderAntigravity, ModeAntigravityPrint
+	const pid = runtimes.Antigravity
+	shape := shapePerTurn
 	args := []ArgTemplate{
 		{Kind: ArgLiteral, Value: "--output-format"},
 		{Kind: ArgLiteral, Value: "stream-json"},
@@ -618,17 +653,18 @@ func antigravityLaunchConvention(a *AntigravityAdapter) LaunchConvention {
 	if a.Model != "" {
 		args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
 	}
-	if dir, ok := layoutProjectDirArg(pid, mode); ok {
+	if dir, ok := layoutProjectDirArg(pid, shape); ok {
 		args = append(args, dir)
 	}
 	// The prompt is the value of -p, so it goes last: agy's -p takes the
 	// next argument whatever it is. BuildArgs uses the inline -p=<prompt>
 	// form, which a template cannot express.
 	args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "-p"}, ArgTemplate{Kind: ArgPrompt})
-	cwd, configRoot, env := layoutLaunchBase(pid, mode)
+	cwd, configRoot, env := layoutLaunchBase(pid, shape)
 	return LaunchConvention{
 		Executable: "agy",
-		Mode:       mode,
+		Mode:       shape.Mode,
+		Variant:    shape.Variant,
 		CWD:        cwd,
 		ConfigRoot: configRoot,
 		Argv:       args,
@@ -636,11 +672,11 @@ func antigravityLaunchConvention(a *AntigravityAdapter) LaunchConvention {
 	}
 }
 
-func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName string) LaunchConvention {
+func opencodeLaunchConvention(a *OpencodeAdapter, shape layout.Shape, agentName string) LaunchConvention {
 	var args []ArgTemplate
-	if mode == ModeOpencodeServeHTTP {
+	if shape == shapeHTTPSSE {
 		args = []ArgTemplate{
-			{Kind: ArgLiteral, Value: layoutEntry(ProviderOpencode, mode, layout.Runtime).Flag},
+			{Kind: ArgLiteral, Value: layoutEntry(runtimes.OpenCode, shape, layout.Runtime).Flag},
 			{Kind: ArgLiteral, Value: "--port"},
 			{Kind: ArgLiteral, Value: "0"},
 			{Kind: ArgLiteral, Value: "--hostname"},
@@ -657,15 +693,16 @@ func opencodeLaunchConvention(a *OpencodeAdapter, mode ProviderMode, agentName s
 		if a.Model != "" {
 			args = append(args, ArgTemplate{Kind: ArgLiteral, Value: "--model"}, ArgTemplate{Kind: ArgLiteral, Value: a.Model})
 		}
-		if dir, ok := layoutProjectDirArg(ProviderOpencode, mode); ok {
+		if dir, ok := layoutProjectDirArg(runtimes.OpenCode, shape); ok {
 			args = append(args, dir)
 		}
 		args = append(args, ArgTemplate{Kind: ArgPrompt})
 	}
-	cwd, configRoot, env := layoutLaunchBase(ProviderOpencode, mode)
+	cwd, configRoot, env := layoutLaunchBase(runtimes.OpenCode, shape)
 	return LaunchConvention{
 		Executable: "opencode",
-		Mode:       mode,
+		Mode:       shape.Mode,
+		Variant:    shape.Variant,
 		CWD:        cwd,
 		ConfigRoot: configRoot,
 		Argv:       args,
@@ -840,9 +877,10 @@ func requireProjectedFeatures(proj ProviderProjection, required []ProviderFeatur
 	if len(required) == 0 {
 		return proj, nil
 	}
-	row, ok := capabilityRow(proj.Provider, proj.Mode)
+	shape := layout.Shape{Mode: proj.Mode, Variant: proj.Variant}
+	row, ok := capabilityRow(proj.Provider, shape)
 	if !ok {
-		return proj, fmt.Errorf("no capability matrix row for %s/%s", proj.Provider, proj.Mode)
+		return proj, fmt.Errorf("no capability matrix row for %s/%s", proj.Provider, shape)
 	}
 	var diagnostics []ProjectionDiagnostic
 	for _, f := range required {
@@ -850,7 +888,7 @@ func requireProjectedFeatures(proj ProviderProjection, required []ProviderFeatur
 		if status == SupportProjected {
 			continue
 		}
-		msg := fmt.Sprintf("%s/%s does not project required feature %q", proj.Provider, proj.Mode, f)
+		msg := fmt.Sprintf("%s/%s does not project required feature %q", proj.Provider, shape, f)
 		if status == SupportExplicit {
 			msg += "; it requires explicit runtime preparation"
 		}
@@ -863,28 +901,10 @@ func requireProjectedFeatures(proj ProviderProjection, required []ProviderFeatur
 	return proj, &UnsupportedFeatureError{Diagnostics: diagnostics}
 }
 
-func capabilityRow(provider ProviderID, mode ProviderMode) (ProviderCapabilityRow, bool) {
+func capabilityRow(provider runtimes.ID, shape layout.Shape) (ProviderCapabilityRow, bool) {
 	for _, row := range ProviderCapabilityMatrix() {
-		if row.Provider == provider && row.Mode == mode {
+		if row.Provider == provider && row.Shape() == shape {
 			return row, true
-		}
-	}
-	// Claude non-bare modes share the same projection support as bare mode.
-	if provider == ProviderClaude {
-		for _, row := range ProviderCapabilityMatrix() {
-			if row.Provider == ProviderClaude {
-				row.Mode = mode
-				return row, true
-			}
-		}
-	}
-	// OpenCode serve-http shares filesystem projection with run mode.
-	if provider == ProviderOpencode && mode == ModeOpencodeServeHTTP {
-		for _, row := range ProviderCapabilityMatrix() {
-			if row.Provider == ProviderOpencode {
-				row.Mode = mode
-				return row, true
-			}
 		}
 	}
 	return ProviderCapabilityRow{}, false

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 func TestPrepareRuntime_CodexAuthUsesResolverAndNoAmbientFallback(t *testing.T) {
@@ -37,7 +39,7 @@ func TestPrepareRuntime_CodexAuthUsesResolverAndNoAmbientFallback(t *testing.T) 
 			AllowCleanup:     true,
 		},
 		CredentialResolver: CredentialResolverFunc(func(_ context.Context, req CredentialRequest) (Credential, error) {
-			if req.Provider != ProviderCodex || req.Effect != EffectCodexAuthJSON || req.Destination != "auth.json" {
+			if req.Provider != runtimes.Codex || req.Effect != EffectCodexAuthJSON || req.Destination != "auth.json" {
 				t.Fatalf("unexpected credential request: %#v", req)
 			}
 			return Credential{Bytes: secret, Mode: 0o600, Source: "fake-test-store"}, nil

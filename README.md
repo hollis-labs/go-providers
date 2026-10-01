@@ -135,7 +135,15 @@ the planted-file render.
 - `ChatMessage`, `ContentBlock`, `ToolDefinition`, `ToolUseBlock`, `StreamEvent`, `Usage`, `CompleteResult`, `ThinkingBlock` — message, event, and result shapes.
 - `WithCLISessionID` / `CLISessionIDFromContext`, `WithSandboxDir` / `SandboxDirFromContext`, `WithProcessCallback` / `ProcessCallbackFromContext`, `WithActivityCallback` / `ActivityCallbackFromContext`, `WithWaitDelay` / `WaitDelayFromContext` — context-value helpers used by the PTY and subprocess bridges.
 
-### Registry (`provider/registry.go`)
+### Runtime descriptors (`registry/`)
+
+The one list of agent CLI runtimes (Claude Code, Codex, OpenCode, Copilot CLI, Pi, Antigravity). Ids, modes and capability names come from [agent-contracts-leaf `runtimes`](https://github.com/hollis-labs/agent-contracts-leaf); the facts live here.
+
+- `Descriptor` — `ID`, `Aliases`, `Binary`, `EnvOverride`, `LookupDirs`, `Modes` (each a `ModeSupport{Mode, Capabilities}`: capabilities are declared per mode), `DefaultMode`, and a `Posture` hook (nil until the posture enum lands). Methods: `Supports`, `Capabilities`, `Has`, `NativeModes`, `Layout` (the runtime's rows of the `layout` table, read rather than copied), `HasLayout`, `LookPath`.
+- `Lookup(idOrAlias)` and `All()`. The set is closed and compiled in; there is no out-of-tree registration. `RegisterForTest` adds a fake for one test and removes it at cleanup.
+- Copilot and Pi are ACP-only: no native mode, no layout rows, no boot dir.
+
+### Provider registry (`provider/registry.go`)
 
 - `Registry` — map from name to `Provider`. Safe for concurrent use.
 - `NewRegistry`, `Register`, `Unregister`, `Get`, `Has`, `Names`.
@@ -367,7 +375,7 @@ The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` fields (`CodexAdap
 
 ## Architecture Notes
 
-The `provider` package is intentionally flat: one file per adapter. `layout` (with `layout/gen` and `layout/layouttest`) is a separate stdlib-only package holding the table those adapters derive their paths from; `layout` imports nothing, and `provider` imports `layout`. The shared `Provider` interface in `provider.go` is small (three methods). Cross-cutting features — circuit breaking, rate pacing, cost/scope/loop monitoring — are expressed either as adapter-implemented behavior or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
+The `provider` package is intentionally flat: one file per adapter. `layout` (with `layout/gen` and `layout/layouttest`) is a separate package holding the table those adapters derive their paths from, keyed by runtime id and launch shape (a `runtimes.Mode` plus an optional variant such as Claude's `bare`); `layout` imports only the standard library and agent-contracts-leaf. `registry` imports `layout`, and `provider` imports both. The shared `Provider` interface in `provider.go` is small (three methods). Cross-cutting features — circuit breaking, rate pacing, cost/scope/loop monitoring — are expressed either as adapter-implemented behavior or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
 
 CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defines how to build arguments and parse one line of output, and a transport wrapper (`PTYBridge` for pty-based or `SubprocessBridge` for pipes) runs the child process and feeds lines through the adapter. Context-value helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`, `WithActivityCallback`, `WithWaitDelay`) let callers pass session-resume IDs, working directories, and process-tracking hooks through to the bridge without widening the `Provider` interface. `pty.go` has a `//go:build !windows` build tag; the subprocess bridge is the portable fallback.
 

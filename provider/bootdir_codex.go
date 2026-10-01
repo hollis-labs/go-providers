@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
 )
 
@@ -77,16 +78,16 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 	// runtime layer instead. Suppress the flag here to keep the long-lived
 	// adapter spawnable; exec mode keeps the existing behavior.
 	// The suppression is data now: layout has a project-dir row for
-	// codex-exec only.
-	const pid = ProviderCodex
-	mode := ModeCodexExec
+	// subprocess-per-turn (exec) only.
+	const pid = runtimes.Codex
+	shape := shapePerTurn
 	if a.Mode == "app-server" {
-		mode = ModeCodexAppServer
+		shape = shapeJSONRPC
 	}
 	return BootDirSpec{
 		PlantedFiles: []PlantedFile{
 			{
-				RelPath: layoutRel(pid, mode, layout.Instructions, ""),
+				RelPath: layoutRel(pid, shape, layout.Instructions, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return AgentsMD(AgentInfo{
 						Name:         ctx.AgentName,
@@ -95,13 +96,13 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Boot, ""),
+				RelPath: layoutRel(pid, shape, layout.Boot, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					return ctx.BootContent, nil
 				},
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.NativeConfig, ""),
+				RelPath: layoutRel(pid, shape, layout.NativeConfig, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					// Delegated so this closure and ConfigDocument cannot
 					// drift: the planted file is the accessor's output.
@@ -112,7 +113,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				Mode: 0o600,
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.Auth, ""),
+				RelPath: layoutRel(pid, shape, layout.Auth, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					// Legacy compatibility path. New runtime preparation must
 					// call PrepareRuntime with a caller-provided resolver so
@@ -131,7 +132,7 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				Mode: 0o600,
 			},
 			{
-				RelPath: layoutRel(pid, mode, layout.MCP, ""),
+				RelPath: layoutRel(pid, shape, layout.MCP, ""),
 				Render: func(ctx PlantContext) (string, error) {
 					// Legacy claude-shape sidecar. Codex does NOT read this
 					// file (codex reads config.toml above via CODEX_HOME).
@@ -147,9 +148,9 @@ func (a *CodexAdapter) BootDirSpec() BootDirSpec {
 				Mode: 0o600,
 			},
 		},
-		EnvAmendments: layoutLegacyEnv(pid, mode),
-		CwdPreference: layoutLegacyCwd(pid, mode),
-		ProjectDirArg: layoutLegacyProjectDirArg(pid, mode),
+		EnvAmendments: layoutLegacyEnv(pid, shape),
+		CwdPreference: layoutLegacyCwd(pid, shape),
+		ProjectDirArg: layoutLegacyProjectDirArg(pid, shape),
 		Notes:         "codex MCP config lives in config.toml under [mcp_servers.<name>]; .mcp.json is legacy sidecar only. CODEX_HOME isolates per-task config + auth from ~/.codex/.",
 	}
 }

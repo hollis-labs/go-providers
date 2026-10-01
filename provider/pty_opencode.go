@@ -1,8 +1,7 @@
 package provider
 
 import (
-	"os"
-
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 )
 
@@ -96,14 +95,7 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {
-	if p := os.Getenv("OPENCODE_CLI_PATH"); p != "" {
-		return p, true
-	}
-	p, err := lookPathExpanded("opencode")
-	if err != nil {
-		return "", false
-	}
-	return p, true
+	return detect(runtimes.OpenCode)
 }
 
 func prependOpencodeSystemPrompt(prompt, systemPrompt string) string {

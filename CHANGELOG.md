@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Package `registry`: the runtime descriptor registry (CW-20260930-0132), the
+  one list of agent CLI runtimes that libraries and apps read in place of
+  their own provider lists. A `Descriptor` per runtime — Claude, Codex,
+  OpenCode, Copilot, Pi, Antigravity — carries its id and lookup aliases
+  (`claude-code`, `agy`, ...), binary, env override (`CLAUDE_CLI_PATH`, ...)
+  and extra lookup dirs, its modes with the capabilities each declares, its
+  default mode (Codex: `jsonrpc-stdio`, per D-74), a posture hook (nil until
+  CW-20260930-0138), and its layout, read from the `layout` table. `Lookup`
+  takes an id or alias; `All` enumerates. The set is closed: there is no
+  out-of-tree registration, and `RegisterForTest` exists only for test fakes.
+  Copilot and Pi are ACP-only, with no layout rows.
+- `layout.Shape` and `layout.Variant` (`VariantBare`), and `layout.Runtimes`.
+
+### Changed
+
+- **Breaking:** the runtime vocabulary is agent-contracts-leaf `runtimes`
+  (v0.3.0, D-73), with no aliases for the old spellings (D-22):
+  - `layout.Entry.Provider` is a `runtimes.ID`; `layout.Entry.Mode` is a
+    `runtimes.Mode`, and a new `Variant` field carries Claude's `bare`.
+  - `layout.For`, `Find` and `SkillRoot` take `(runtimes.ID, layout.Shape)`,
+    and the most specific applicable row wins. `layout.Providers` is now
+    `layout.Runtimes`, in canonical order.
+  - `layouttest` assertions take `(runtimes.ID, layout.Shape)`.
+  - `ProviderProjection`, `LaunchConvention`, `ProviderCapabilityRow` and
+    `CredentialRequest` carry `Provider runtimes.ID`, `Mode runtimes.Mode` and
+    `Variant layout.Variant`. The mode values change: `claude-print`,
+    `codex-exec`, `opencode-run` and `antigravity-print` are all
+    `subprocess-per-turn`; `claude-bare` is `subprocess-per-turn` with variant
+    `bare`; `claude-pty` is `pty`; `claude-streaming-stdio` is
+    `streaming-stdio`; `codex-app-server` is `jsonrpc-stdio`;
+    `opencode-serve-http` is `http-sse`.
+  - `ProviderCapabilityMatrix` derives its rows from the registry (one per
+    native mode, plus Claude's bare variant), so an ACP-only runtime has none.
+- The adapters' `Detect` resolves through the registry descriptor. The
+  `~/.opencode/bin` fallback now applies to OpenCode only.
+
+### Removed
+
+- **Breaking:** `layout.Mode` and its constants, `layout.Provider` and its
+  constants, `provider.ProviderMode` and its constants, and
+  `provider.ProviderID` and its constants. Use `runtimes.ID`, `runtimes.Mode`
+  and `layout.Shape`.
+- `layout.Entry.Aliases`. Its only use was the old `serve-http`/`http-sse`
+  spelling of OpenCode's HTTP mode, which is now the mode itself.
+
 ## v0.30.0 — 2026-09-30
 
 ### Changed
