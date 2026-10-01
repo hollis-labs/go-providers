@@ -23,6 +23,18 @@
 // boot dir. A runtime with a native mode always has layout rows, and the
 // reverse; registration refuses a descriptor that breaks either.
 //
+// # Modes and capabilities
+//
+// A descriptor lists the modes its runtime can be driven in ([ModeSupport]),
+// each with the capabilities the code driving that mode implements; a
+// capability that was not measured is not declared. [Descriptor.Supports],
+// [Descriptor.Capabilities] and [Descriptor.Has] query them,
+// [Descriptor.NativeModes] lists the modes that are not ACP (provider.NewAdapter
+// has an adapter for each built-in one), and DefaultMode is the mode a launch
+// uses when the caller names none. [Descriptor.LookPath] finds the binary:
+// the EnvOverride variable, then PATH, then common install directories and
+// the descriptor's LookupDirs.
+//
 // # Permission posture
 //
 // A permission posture is go-permission's Mode (D-72): default, accept-edits,

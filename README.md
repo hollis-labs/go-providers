@@ -1,8 +1,8 @@
 # go-providers
 
-`go-providers` is a Go library that provides a single `Provider` interface over a collection of CLI-bridge adapters (Claude Code, Codex, OpenCode, Antigravity) wrapped via PTY or plain subprocess. It also ships cross-cutting primitives for the adapter layer — a registry, cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
+`go-providers` is a Go library that drives agent CLIs (Claude Code, Codex, OpenCode, Antigravity) through CLI-bridge adapters wrapped via PTY or plain subprocess, each bridge implementing go-llm-contracts' `Provider` interface. It also ships the runtime registry and cross-cutting primitives for the adapter layer — cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
 
-As of **v0.11.0** this library is **CLI/PTY-only** and no longer owns the shared LLM contracts or rate-budget primitives. Direct HTTP chat and embedding adapters were removed in v0.10.0; the shared transport-agnostic model types now live in `github.com/hollis-labs/go-llm-types`, and the shared provider contracts/rate-budget primitives live in `github.com/hollis-labs/go-llm-contracts`.
+This library is **CLI/PTY-only**: it has no direct HTTP chat or embedding adapter and does not own the shared LLM contracts or rate-budget primitives. The shared transport-agnostic model types live in `github.com/hollis-labs/go-llm-types`, and the shared provider contracts (the `Provider` interface) and rate-budget primitives in `github.com/hollis-labs/go-llm-contracts`.
 
 ## Status
 
@@ -128,18 +128,16 @@ the planted-file render.
 
 ## API Overview
 
-### Core interface (`provider/provider.go`)
+### Core interface and context helpers
 
-- `Provider` — interface: `StreamChat`, `Complete`, `Capabilities`.
-- `ProviderCapabilities` — struct describing streaming, tool calling, caching, image input, `MaxTokens`, `ContextWindowSize`.
-- `ChatMessage`, `ContentBlock`, `ToolDefinition`, `ToolUseBlock`, `StreamEvent`, `Usage`, `CompleteResult`, `ThinkingBlock` — message, event, and result shapes.
-- `WithCLISessionID` / `CLISessionIDFromContext`, `WithSandboxDir` / `SandboxDirFromContext`, `WithProcessCallback` / `ProcessCallbackFromContext`, `WithActivityCallback` / `ActivityCallbackFromContext`, `WithWaitDelay` / `WaitDelayFromContext` — context-value helpers used by the PTY and subprocess bridges.
+- `Provider` is go-llm-contracts' interface (`StreamChat`, `Complete`, `Capabilities`); the bridges and `EventReactionPipeline` implement it. Request, message, event and result shapes (`ChatRequest`, `ChatMessage`, `StreamEvent`, `Usage`, `CompleteResult`, `ProviderCapabilities`, …) are go-llm-types'. Neither is redeclared here, and circuit breaking and rate pacing (`CircuitBreaker`, `PacingWait`) are go-llm-contracts'.
+- `WithCLISessionID` / `CLISessionIDFromContext`, `WithSandboxDir` / `SandboxDirFromContext`, `WithProcessCallback` / `ProcessCallbackFromContext`, `WithActivityCallback` / `ActivityCallbackFromContext`, `WithWaitDelay` / `WaitDelayFromContext` (`provider/provider.go`) — context-value helpers used by the PTY and subprocess bridges.
 
 ### Runtime descriptors (`registry/`)
 
 The one list of agent CLI runtimes (Claude Code, Codex, OpenCode, Copilot CLI, Pi, Antigravity). Ids, modes and capability names come from [agent-contracts-leaf `runtimes`](https://github.com/hollis-labs/agent-contracts-leaf); the facts live here.
 
-- `Descriptor` — `ID`, `Aliases`, `Binary`, `EnvOverride`, `LookupDirs`, `Modes` (each a `ModeSupport{Mode, Capabilities}`: capabilities are declared per mode), `DefaultMode`, and a `Posture` hook. Methods: `Supports`, `Capabilities`, `Has`, `NativeModes`, `Layout` (the runtime's rows of the `layout` table, read rather than copied), `HasLayout`, `LookPath`, `PostureFor`.
+- `Descriptor` — `ID`, `Aliases`, `Binary`, `EnvOverride`, `LookupDirs`, `Modes` (each a `ModeSupport{Mode, Capabilities}`: capabilities are declared per mode), `DefaultMode`, `Projection` (`*ProjectionFacts`: tested CLI version, per-`Feature` support and per-mode notes; set exactly when the runtime has a layout), and a `Posture` hook. Methods: `Supports`, `Capabilities`, `Has`, `NativeModes`, `Layout` (the runtime's rows of the `layout` table, read rather than copied), `HasLayout`, `LookPath`, `PostureFor`.
 - `Lookup(idOrAlias)` and `All()`. The set is closed and compiled in; there is no out-of-tree registration. `RegisterForTest` adds a fake for one test and removes it at cleanup.
 - Copilot and Pi are ACP-only: no native mode, no layout rows, no boot dir.
 - Permission posture is [go-permission](https://github.com/hollis-labs/go-permission)'s `Mode` (`default`, `accept-edits`, `plan`, `yolo`; D-72). `Descriptor.PostureFor(mode, runtimeMode)` returns a `PostureLaunch{Args, Env}`: flags for the launch convention's extra-argument slot (always before `--`) and environment variables. Apps pass only the Mode.
@@ -151,11 +149,11 @@ The one list of agent CLI runtimes (Claude Code, Codex, OpenCode, Copilot CLI, P
   | plan | `--permission-mode plan` | `read-only`, `never` | `{"edit":"deny","bash":"ask"}` | `--mode plan` |
   | yolo | `--permission-mode bypassPermissions` | `danger-full-access`, `never` | every permission `allow` | `--dangerously-skip-permissions` |
 
-  Headless, an action that needs approval is denied (claude `-p`, codex exec, opencode run, agy) or, on codex app-server, sent to the host as an approval request for agentkit's `CodexApprovalResponder` to answer from the same Mode. ACP modes have no launch mapping (`ErrNoPostureMapping`): an ACP agent's permission requests are the ACP client's to answer, best effort. The registry package doc has the measurements.
+  Headless, an action that needs approval is denied (claude `-p`, codex exec, opencode run, agy) or, on codex app-server, sent to the host as an approval request for agentkit's `CodexApprovalResponder` to answer from the same Mode. ACP modes have no launch mapping (`ErrNoPostureMapping`): an ACP agent's permission requests are the ACP client's to answer, best effort. An empty posture is the zero `PostureLaunch` (the runtime keeps its own default); anything other than the four Modes is `ErrInvalidPosture`. The registry package doc has the measurements.
 
 ### Provider registry (`provider/registry.go`)
 
-- `Registry` — map from name to `Provider`. Safe for concurrent use.
+- `Registry` — map from name to `Provider` instances (not the runtime registry). Safe for concurrent use.
 - `NewRegistry`, `Register`, `Unregister`, `Get`, `Has`, `Names`.
 
 ### CLI bridges and adapters
@@ -164,10 +162,12 @@ The one list of agent CLI runtimes (Claude Code, Codex, OpenCode, Copilot CLI, P
 - `PTYBridge` / `NewPTYBridge` / `NewPTYBridgeWithAdapter` (`pty.go`, non-Windows build tag) — wraps a CLI in a pseudo-terminal.
 - `SubprocessBridge` / `NewSubprocessBridge` (`subprocess.go`) — wraps a CLI using plain stdin/stdout pipes (all platforms).
 - Adapters (one file each): `ClaudeAdapter`, `CodexAdapter`, `OpencodeAdapter`, `AntigravityAdapter`. Each ships `New…Adapter()` plus PTY/Dev/Bare variants where applicable. `ClaudeAdapter` additionally ships `NewClaudeAdapterStreamingStdio()` / `NewClaudeAdapterDevStreamingStdio()` for vendor-documented long-lived NDJSON-over-stdin sessions; `CodexAdapter` ships `NewCodexAdapterAppServer()` for long-lived JSON-RPC-over-stdio sessions; `OpencodeAdapter` ships `NewOpencodeAdapterServeHTTP()` for long-lived HTTP/SSE sessions. See [Long-lived headless modes](#long-lived-headless-modes).
+- `NewAdapter(id, mode)` (`new_adapter.go`) — the one table of native adapters: a fresh adapter in that registry mode's shape, or `ErrNoAdapter` for an ACP mode, an unknown runtime or a mode the runtime lacks. Hosts then set the adapter's fields (`Binary` pins the executable `Detect` returns; `ExtraArgs` go at the convention's extra slot) rather than wrapping it, which would hide its optional interfaces.
+- Optional adapter interfaces: `EventParser` (all four), `BootDirProvider` and `ProjectionProvider` (all four), `SessionLostClassifier` (`IsSessionLost` on a stderr tail: claude, opencode, agy), `SessionResumeVerifier` (agy, whose unknown conversation id silently starts a new one), `AuthFailureClassifier` (agy), `Preflighter` (no built-in adapter has one), `TurnInterrupter` (claude streaming stdio: a `control_request` interrupt) and `RPCTurnInterrupter` (codex app-server: `turn/interrupt`). Session layers wrap `ErrProviderSessionLost`, `ErrProviderNotAuthenticated` and `ErrInterruptRefused`.
 
 ### Per-line typed events (`provider/events/`)
 
-In addition to the legacy `<-chan StreamEvent` returned by `Provider.StreamChat`, CLI/PTY bridges can fire a richer typed-event taxonomy when a callback is wired into the spawn context. The two surfaces are parallel: typed events do not replace `StreamEvent`; they augment it with information the legacy union struct can't carry (per-tool `ToolResult`, sub-agent spawn detection, `SubprocessStderr` lines, `Heartbeat` ticks, signed `Thinking` blocks, `Usage` blocks).
+In addition to the `<-chan llmtypes.StreamEvent` a bridge's `StreamChat` returns, CLI/PTY bridges can fire a richer typed-event taxonomy when a callback is wired into the spawn context. The two surfaces are parallel: typed events do not replace `StreamEvent`; they augment it with information the legacy union struct can't carry (per-tool `ToolResult`, sub-agent spawn detection, `SubprocessStderr` lines, `Heartbeat` ticks, `PermissionDenied` refusals).
 
 ```go
 import "github.com/hollis-labs/go-providers/provider/events"
@@ -175,7 +175,8 @@ import "github.com/hollis-labs/go-providers/provider/events"
 ctx := provider.WithEvents(ctx, func(ev events.Event) {
     switch e := ev.(type) {
     case events.Delta:
-        // streaming text fragment; e.Phase is "narration", "final", or "thinking"
+        // streaming text fragment; e.Phase is "narration", "final" or "thought";
+        // e.BlockID is the same for every fragment of one content block
     case events.ToolUse:
         // e.Name + e.Args (or sha256-digested keys when WithToolArgFingerprint is on)
     case events.ToolResult:
@@ -187,9 +188,18 @@ ctx := provider.WithEvents(ctx, func(ev events.Event) {
     case events.Heartbeat:
         // synthesized when no other event has fired for the configured interval
     case events.Usage:
-        // token accounting carried per-turn for adapters that report it (claude)
+        // token accounting (all four adapters); e.StopReason is normalized with
+        // llmtypes.NormalizeStopReason; e.CostUSD is a per-event delta to sum
+        // (claude, opencode), zero when no cost was reported
     case events.Thinking:
-        // signed thinking block (claude interleaved thinking)
+        // completed thinking block (opencode reasoning parts), with BlockID
+    case events.SessionID:
+        // the CLI's session id (all four adapters); informational
+    case events.PermissionDenied:
+        // a tool action refused because headless mode cannot ask (agy); non-terminal
+    case events.SessionLost, events.AuthFailed:
+        // emitted by the session layer that owns the stored id and runs the
+        // classifiers, not by the adapters
     case events.Done:
         // turn-terminal success
     case events.Error:
@@ -204,7 +214,7 @@ for ev := range stream { /* ... */ }
 
 `WithHeartbeatInterval(ctx, d)` adjusts the heartbeat cadence (`DefaultHeartbeatInterval` is 5s; non-positive disables).
 
-Adapters can implement the optional `EventParser` interface (`ParseLineEvents(line []byte) ([]events.Event, error)`) to produce typed events natively from the wire format. `ClaudeAdapter` and `CodexAdapter` do; the claude path additionally surfaces user-role `tool_result` blocks and `Task` sub-agent spawns. Adapters without `EventParser` get a best-effort `StreamEvent` → typed translation.
+Adapters can implement the optional `EventParser` interface (`ParseLineEvents(line []byte) ([]events.Event, error)`) to produce typed events natively from the wire format. All four built-in adapters do; the claude path additionally surfaces user-role `tool_result` blocks and `Task` sub-agent spawns. Adapters without `EventParser` get a best-effort `StreamEvent` → typed translation.
 
 ### Boot dir specs (`BootDirProvider` / `BootDirSpec`)
 
@@ -240,7 +250,9 @@ if bp, ok := adapter.(provider.BootDirProvider); ok {
 | opencode | concrete | `agents/<name>.md` (markdown agent with frontmatter) + `opencode.json` + `boot.md` + `.mcp.json`, `OPENCODE_CONFIG_DIR={{.BootDir}}`, cwd = projectDir, `--dir {{.ProjectDir}}` |
 | antigravity | concrete | `AGENTS.md` + `boot.md` + `.agents/plugins/tether/{plugin.json,mcp_config.json}` + `.agents/skills/<name>/SKILL.md` (workspace root; agy has no config-dir variable), cwd = bootDir, `--add-dir {{.ProjectDir}}` |
 
-`AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex spec; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
+`AgentsMD(AgentInfo, mcpLoopbackURL, extras...)` renders the default AGENTS.md document used by the codex and antigravity specs; apps that want a custom layout can ignore it and render directly from their `PlantedFile.Render` closure.
+
+Files that carry an MCP endpoint or a credential (claude `.mcp.json`, codex `config.toml`, `auth.json` and `.mcp.json`, opencode `opencode.json` and `.mcp.json`, agy `mcp_config.json`) declare `PlantedFile.Mode` 0600, taken from the layout row's `FileMode` where the table records one; honor it.
 
 ### Pure provider projections
 
@@ -278,7 +290,7 @@ binding, err := proj.ResolveLaunch(provider.ProjectionRoots{
 }, "implement the task")
 ```
 
-`ResolveLaunch` resolves a first turn. `ResolveTurn` resolves any turn: the prompt, the system prompt where the runtime takes one, the session to resume, and caller extra arguments, which go where the runtime's convention puts them (never after Claude's variadic `--add-dir`):
+`ResolveLaunch` resolves a first turn. `ResolveTurn` resolves any turn: the prompt, the system prompt where the runtime takes one, the session to resume, and caller extra arguments, which go where the runtime's convention puts them (never after Claude's variadic `--add-dir`). Turn text is untrusted, so claude `-p`, codex exec and opencode run take the prompt last, after `--`, where a turn starting with `-` is text, not a flag; agy takes it inline as `-p=<prompt>`. Extra arguments and posture flags always go before `--`:
 
 ```go
 binding, err = proj.ResolveTurn(roots, provider.TurnInput{
@@ -289,7 +301,7 @@ binding, err = proj.ResolveTurn(roots, provider.TurnInput{
 
 Each runtime's argv is built in one place (`provider/argv.go`). An adapter's `BuildArgs` resolves the same convention from its own fields (`MCPConfigPath`, `ProjectDir`, …), so the adapter path and the prepared path produce the same argv for the same launch.
 
-The current M06 capability matrix is available from `ProviderCapabilityMatrix()`:
+`ProviderCapabilityMatrix()` returns the capability matrix: one row per native mode (and launch variant, such as Claude's `bare`) of each runtime with a layout, built from the registry's `ProjectionFacts`:
 
 | Provider / mode | Fixture version | Projected here | Explicit later |
 |---|---:|---|---|
@@ -298,7 +310,7 @@ The current M06 capability matrix is available from `ProviderCapabilityMatrix()`
 | OpenCode run/serve-http | 1.18.30 | `agents/<name>.md`, `opencode.json`, `.mcp.json` mirror, `skills/<name>/...` (under `OPENCODE_CONFIG_DIR`), structured `OPENCODE_CONFIG_DIR`/argv roots | provider auth, commands, subagents |
 | Antigravity print (`agy`) | 1.2.7 | `AGENTS.md`, `.agents/plugins/tether/` (plugin MCP), `.agents/skills/<name>/...`, `--add-dir` project | agy login (Keychain; never projected), hooks, commands, subagents |
 
-The versions above are the ones `hack/probe-harness-layout.sh` measured on 2026-09-29; see [docs/HARNESS-DISCOVERY.md](docs/HARNESS-DISCOVERY.md). Every path, flag and environment variable in these projections comes from one table, package `layout` ([docs/LAYOUT.md](docs/LAYOUT.md), [layout/layout.json](layout/layout.json) for non-Go readers). Skills are always emitted in the directory form `<name>/SKILL.md`; no harness reads flat `<name>.md`. `SkillPackage.Hash` optionally pins a package's content (`sha256:<hex>`, the same tree hash go-agentdef uses; compute it with `SkillPackage.TreeHash`). Other modules can pin their own path tables with `layout/layouttest` ([docs/CONSUMERS.md](docs/CONSUMERS.md)).
+The Claude, Codex and OpenCode versions above are the ones `hack/probe-harness-layout.sh` measured on 2026-09-29 (see [docs/HARNESS-DISCOVERY.md](docs/HARNESS-DISCOVERY.md)); agy 1.2.7 was verified live, outside the probe, as its layout rows say. Every path, flag and environment variable in these projections comes from one table, package `layout` ([docs/LAYOUT.md](docs/LAYOUT.md), [layout/layout.json](layout/layout.json) for non-Go readers). Skills are always emitted in the directory form `<name>/SKILL.md`; no harness reads flat `<name>.md`. `SkillPackage.Hash` optionally pins a package's content (`sha256:<hex>`, the same tree hash go-agentdef uses; compute it with `SkillPackage.TreeHash`). Other modules can pin their own path tables with `layout/layouttest` ([docs/CONSUMERS.md](docs/CONSUMERS.md)).
 
 `ProviderProjection` keeps `ProjectRoot`, `BootRoot`, `ConfigRoot`, `StateRoot`, `ScratchRoot`, and process cwd distinct. `LaunchConvention.Argv` is a list of typed arguments, and `EnvDelta` carries set/prepend/append/unset plus precedence, so paths with spaces or non-ASCII characters are never split through a shell string.
 
@@ -338,9 +350,9 @@ Claude workspace trust uses the same preparation surface with `EffectClaudeWorks
 
 `BootDirSpec` remains available for older apps. Its render functions are pure by default; setting `PlantContext.LegacyAllowHostEffects` opts into the pre-M07 compatibility behavior where Claude may seed `~/.claude.json` and Codex may read ambient auth during render. New callers should prefer `ProviderProjection` plus `PrepareRuntime`.
 
-The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` header, controlled by `CodexAdapter.ApprovalPolicy` / `CodexAdapter.SandboxMode` (the codex analogue of `ClaudeAdapter.PermissionMode`). The defaults are `never` / `workspace-write` — NOT codex's interactive defaults — because a `BootDirSpec` is a headless boot with no TTY: a codex that prompts for approval under a headless runtime (codex `app-server` emits a JSON-RPC approval request) blocks forever.
+The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` header, controlled by `CodexAdapter.ApprovalPolicy` / `CodexAdapter.SandboxMode` (the codex analogue of `ClaudeAdapter.PermissionMode`). The defaults are `never` / `workspace-write` — NOT codex's interactive defaults — because a `BootDirSpec` is a headless boot with no TTY: a codex that prompts for approval under a headless runtime (codex `app-server` emits a JSON-RPC approval request) blocks forever. An unrecognized value fails the render, and so does `untrusted`, which codex-cli 0.159.2 refuses to load.
 
-codex reads its MCP servers from `config.toml [mcp_servers.*]` — it has no `.mcp.json` sidecar — so every MCP server it sees has to be co-rendered into that one file. Beyond the per-task loopback (`PlantContext.MCPLoopbackURL`) and the mux aggregator (`PlantContext.Mux*`), a consumer adds its own servers via `PlantContext.MCPServers` (`[]MCPServerSpec` — name + an HTTP-URL or stdio command). The codex `config.toml` renderer emits a `[mcp_servers.<name>]` block for each, so `config.toml` stays single-owner and no consumer post-processes the planted file. The names `loopback` and `mux` are reserved.
+Beyond the per-task loopback (`PlantContext.MCPLoopbackURL`) and the mux aggregator (`PlantContext.Mux*`), a consumer adds its own MCP servers via `PlantContext.MCPServers` (`[]MCPServerSpec` — name + an HTTP-URL or stdio command). Every runtime with a boot dir renders them, in its CLI's own form, into the file its layout names (`provider/mcp_servers.go`): claude `.mcp.json`, codex `config.toml [mcp_servers.<name>]` (codex reads no `.mcp.json`), opencode `opencode.json` `"mcp"`, agy `.agents/plugins/tether/mcp_config.json`, plus the `.mcp.json` mirrors codex and opencode plant for operators. So each config file stays single-owner and no consumer post-processes it. The names `loopback` and `mux` are reserved; an invalid, reserved or duplicate name, or a spec without exactly one transport, fails the render and the projection.
 
 ### Long-lived headless modes
 
@@ -378,11 +390,6 @@ One long-lived `opencode serve` process exposes opencode's HTTP API and server-s
 
 The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` fields (`CodexAdapter`, `OpencodeAdapter`) are public for callers that want to compose these flags onto custom adapter configurations. Default zero values preserve the existing print-mode / exec-mode / run-mode behavior byte-for-byte.
 
-### Reliability primitives
-
-- `CircuitBreaker`, `CircuitState` (`CircuitClosed`/`CircuitOpen`/`CircuitHalfOpen`), `NewCircuitBreaker`, `DefaultCooldown` (`circuit.go`).
-- `PacingWait`, `ErrRequestExceedsRateBudget` (`ratelimit.go`) — generic time-based pacing with periodic status callbacks.
-
 ### Monitoring + event-reaction pipeline
 
 - `EventReactionPipeline` / `NewEventReactionPipeline` / `EventReactionConfig` / `DefaultEventReactionConfig` (`event_pipeline.go`) — decorator that wraps any `Provider` and runs each streamed event through the monitors below.
@@ -396,7 +403,7 @@ The underlying `InputMode` field (`ClaudeAdapter`) and `Mode` fields (`CodexAdap
 
 ## Architecture Notes
 
-The `provider` package is intentionally flat: one file per adapter. `layout` (with `layout/gen` and `layout/layouttest`) is a separate package holding the table those adapters derive their paths from, keyed by runtime id and launch shape (a `runtimes.Mode` plus an optional variant such as Claude's `bare`); `layout` imports only the standard library and agent-contracts-leaf. `registry` imports `layout`, and `provider` imports both. The shared `Provider` interface in `provider.go` is small (three methods). Cross-cutting features — circuit breaking, rate pacing, cost/scope/loop monitoring — are expressed either as adapter-implemented behavior or as a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
+The `provider` package is intentionally flat: one file per adapter. `layout` (with `layout/gen` and `layout/layouttest`) is a separate package holding the table those adapters derive their paths from, keyed by runtime id and launch shape (a `runtimes.Mode` plus an optional variant such as Claude's `bare`); `layout` imports only the standard library and agent-contracts-leaf. `registry` imports `layout`, and `provider` imports both. The shared `Provider` interface (go-llm-contracts) is small (three methods). Cost, scope and loop monitoring are a decorator (`EventReactionPipeline`) that can wrap any `Provider` without the adapter needing to know.
 
 CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defines how to build arguments and parse one line of output, and a transport wrapper (`PTYBridge` for pty-based or `SubprocessBridge` for pipes) runs the child process and feeds lines through the adapter. Context-value helpers (`WithCLISessionID`, `WithSandboxDir`, `WithProcessCallback`, `WithActivityCallback`, `WithWaitDelay`) let callers pass session-resume IDs, working directories, and process-tracking hooks through to the bridge without widening the `Provider` interface. `pty.go` has a `//go:build !windows` build tag; the subprocess bridge is the portable fallback.
 
@@ -404,7 +411,10 @@ CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defin
 
 ### Framework-internal
 
-- None.
+- `github.com/hollis-labs/agent-contracts-leaf` — the `runtimes` vocabulary (runtime ids, modes, capabilities).
+- `github.com/hollis-labs/go-llm-contracts` — the `Provider` interface.
+- `github.com/hollis-labs/go-llm-types` — request, message, event and usage types.
+- `github.com/hollis-labs/go-permission` — the permission posture `Mode`.
 
 ### External (direct)
 
@@ -412,20 +422,19 @@ CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defin
 
 ### External (indirect)
 
-- None.
+- `gopkg.in/yaml.v3`. Versions are pinned in `go.mod`.
 
 ## Compatibility
 
 - Go 1.26.6 or newer (`go` directive).
-- Behaviour change for callers that pass `ProjectionOptions.Skills`: skill trees now land where each harness reads them under this package's own launch convention, which the Step 0 probe measured. Codex skills move from `.agents/skills/<name>/` to `skills/<name>/` (under `CODEX_HOME`); OpenCode skills move from `.opencode/skills/<name>/` to `skills/<name>/` (under `OPENCODE_CONFIG_DIR`); Claude `--bare` launches gain `--add-dir <boot>` when skills are projected. Claude skills stay at `.claude/skills/<name>/`. Without `Skills`, the projected files, launch conventions and legacy `BootDirSpec` are unchanged. See `CHANGELOG.md`.
 - The tested harness versions are listed under "Pure provider projections". Harness behaviour moves between releases; `go test -tags harnessprobe ./layout` re-checks it against the installed binaries.
 
 ## Out of scope
 
-- Launching agent CLIs or writing files: projections are pure values; `agentkit` owns materialization.
+- Materializing boot dirs: projections are pure values; `agentkit` owns writing them. The bridges spawn a CLI but plant nothing.
 - Credentials, workspace trust and provider auth (explicit `PrepareRuntime` effects only).
 - Direct HTTP chat or embedding adapters, shared LLM contracts and rate budgets (`go-llm-types`, `go-llm-contracts`).
-- Runtime-token vocabulary (`serve-http` vs `http-sse`), provider-by-runtime support matrices, and any provider-neutral launch type or planter.
+- The runtime vocabulary itself (ids, modes, capability names: agent-contracts-leaf `runtimes`), and any provider-neutral launch type or planter.
 - Cross-repo drift checks: `layout/layouttest` provides assertions; adopting them is each consumer's decision.
 
 ## Testing
@@ -434,7 +443,7 @@ CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defin
 go test ./...
 ```
 
-Tests are pure-Go unit tests. PTY/subprocess tests do not spawn real CLI binaries by default: they run a fake CLI from `providertest` that replays captured output. Real-spawn smoke tests (`TestClaudeAdapter_BareSpawn_Smoke`, `TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke`, `TestClaudeAdapter_PTYSmoke`, `TestClaudeAdapter_BootDirSmoke`) are env-gated (`CLAUDE_BARE_SMOKE=1`, `CLAUDE_PTY_SMOKE=1`, etc.); skipped when the relevant CLI binary or auth env var is absent.
+Tests are pure-Go unit tests. PTY/subprocess tests do not spawn real CLI binaries by default: they run a fake CLI from `providertest` that replays captured output. Real-spawn smoke tests (`TestClaudeAdapter_BareSpawn_Smoke`, `TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke`, `TestClaudeAdapter_PTYSpawn_Smoke`, `TestClaudeBootDirSpec_TrustPreAccept_Smoke`) are env-gated (`CLAUDE_BARE_SMOKE=1`, `CLAUDE_PTY_SMOKE=1`); skipped when the relevant CLI binary or auth env var is absent.
 
 ### Fake CLIs for consumers (`providertest`)
 
@@ -452,7 +461,7 @@ bridge := provider.NewSubprocessBridge(provider.NewClaudeAdapter(), fake.Path)
 id, _ := fake.Call(1).ArgAfter("--resume")
 ```
 
-`Replay` covers turns, resume, unknown resume ids, tool use and errors for claude, codex, opencode and antigravity (captured) and copilot and pi (synthetic ACP); `Script` and `Lines` build a run by hand. `providertest/fixtures/README.md` lists every fixture and how it was captured and scrubbed.
+`Replay` covers turns, resume, unknown resume ids, tool use, interrupts (claude, codex) and errors for claude, codex, opencode and antigravity (captured) and copilot and pi (synthetic ACP); `Script` and `Lines` build a run by hand. `Fake.Install` (or `Fake.Env`, for code that takes an explicit environment) points the runtime's CLI-path variable and `PATH` at the fake. `providertest/fixtures/README.md` lists every fixture and how it was captured and scrubbed.
 
 ## License
 

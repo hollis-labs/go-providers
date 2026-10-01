@@ -2,8 +2,10 @@ package provider
 
 import llmtypes "github.com/hollis-labs/go-llm-types"
 
-// CLIAdapter abstracts the differences between CLI tools (Claude, Codex, Opencode)
-// so the PTY bridge and subprocess bridge can spawn and parse any of them generically.
+// CLIAdapter abstracts the differences between CLI tools (Claude, Codex,
+// OpenCode, Antigravity) so the PTY bridge and subprocess bridge can spawn and
+// parse any of them generically. NewAdapter returns the one for a native
+// runtime and mode.
 type CLIAdapter interface {
 	// Name returns the adapter identifier (e.g. "claude", "codex", "opencode").
 	Name() string
@@ -20,8 +22,8 @@ type CLIAdapter interface {
 	Detect() (path string, ok bool)
 }
 
-// CLIConfig describes how to invoke a CLI tool. Used for future
-// user-configurable adapters beyond the built-in three.
+// CLIConfig describes how to invoke a CLI tool. Reserved for future
+// user-configurable adapters beyond the built-in ones; nothing reads it yet.
 type CLIConfig struct {
 	Command    string   `json:"command"`     // binary name or path
 	Args       []string `json:"args"`        // default args (prepended)

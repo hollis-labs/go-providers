@@ -1,17 +1,19 @@
 // Package events defines the normalized in-loop event taxonomy emitted by
 // CLI/PTY adapters when an Events callback is wired into the spawn context.
 //
-// This is a parallel observation surface to the existing
-// provider.StreamEvent channel returned by Provider.StreamChat. The legacy
-// channel remains the canonical turn driver; the typed events here are
-// intended for richer in-loop tooling activity (per-tool result tracking,
-// thinking blocks with signatures, sub-agent spawn detection, stderr lines,
-// heartbeats, optional arg-fingerprinting).
+// This is a parallel observation surface to the llmtypes.StreamEvent
+// channel a bridge's StreamChat returns. That channel remains the canonical
+// turn driver; the typed events here are intended for richer in-loop tooling
+// activity (per-tool result tracking, thinking blocks, sub-agent spawn
+// detection, stderr lines, heartbeats, permission denials, optional
+// arg-fingerprinting).
 //
-// Each adapter's ParseLineEvents (when implemented) translates the wire
-// format (claude stream-json, opencode JSON, codex JSON, etc.) into these
-// types. Adapters that don't implement ParseLineEvents get their typed
-// events translated from the existing StreamEvent output by the bridge.
+// Each adapter's ParseLineEvents (all four built-in adapters implement it)
+// translates the wire format (claude stream-json, codex and opencode JSON,
+// agy stream-json) into these types. Adapters that don't implement
+// ParseLineEvents get their typed events translated from the existing
+// StreamEvent output by the bridge. SessionLost and AuthFailed come from the
+// session layer, not from an adapter.
 package events
 
 import "time"

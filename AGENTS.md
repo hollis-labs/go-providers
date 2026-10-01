@@ -26,8 +26,17 @@ rate budgets, or any direct HTTP chat or embedding path.
   and each adapter's `BuildArgs` resolves from its own fields, both through
   `LaunchConvention.ResolveTurn`.
 - `README.md` states the CLI/PTY-only scope and the minimum viable call shape.
-- `provider/provider.go` declares the interface; `provider/registry.go` is a
-  name-keyed registry of `Provider` instances (not the runtime registry).
+- The `Provider` interface is go-llm-contracts'; the bridges implement it.
+  `provider/provider.go` holds the context-value helpers the bridges read;
+  `provider/registry.go` is a name-keyed registry of `Provider` instances
+  (not the runtime registry).
+- `provider/session_lost.go` and `provider/turn_interrupt.go` declare the
+  optional adapter interfaces a session layer uses: session-lost, resume-id
+  and auth-failure classifiers, `Preflighter`, and the stdin and JSON-RPC
+  turn interrupters.
+- `provider/mcp_servers.go` validates `PlantContext.MCPServers` and maps each
+  runtime with a boot dir to the MCP config file and entry form it renders
+  them into.
 - `provider/bootdir.go` plus `bootdir_claude.go`, `bootdir_codex.go`,
   `bootdir_opencode.go` and `bootdir_antigravity.go` own the per-provider
   boot-dir specs.
@@ -93,7 +102,14 @@ A runtime's argv is authored once, in `provider/argv.go`. Do not add a flag to
 an adapter's `BuildArgs` or to a projection separately:
 `TestBuildArgsMatchesProjectionResolveTurn` fails when the adapter path and the
 prepared path disagree for any runtime, mode or turn, and
-`TestNoPositionalAfterAddDir` guards the variadic `--add-dir`.
+`TestNoPositionalAfterAddDir` guards the variadic `--add-dir`. Turn text is
+untrusted: the prompt is the last argument, after `--` (agy: inline `-p=`),
+with extra and posture flags before it (`TestUntrustedPromptIsNeverAFlag`,
+`TestResolveTurnRefusesArgumentsAfterThePrompt`,
+`TestPostureFlagsPrecedeThePrompt`).
+
+Every file that can carry an MCP server's env is 0600, in the boot-dir spec
+and the projection alike (`TestMCPBearingFilesAreOwnerOnly`).
 
 Codex argv differs by mode on purpose: exec mode carries the project-dir
 argument and app-server mode must not
@@ -106,9 +122,12 @@ A runtime has layout rows exactly when it has a native mode — Copilot and Pi
 are ACP-only — and `register` panics at init otherwise
 (`TestValidateBuiltinRules`). A capability a descriptor declares for a native
 mode must be backed by the adapter's optional interface, and an implemented
-interface must be declared (`TestDeclaredCapabilitiesMatchAdapters`). The
-runtime vocabulary has no aliases for the old composite modes (`claude-print`
-and the rest) or for `layout.Mode`: there is no `layout.Mode`.
+interface must be declared (`TestDeclaredCapabilitiesMatchAdapters`).
+`NewAdapter` covers exactly the registry's native modes
+(`TestNewAdapterCoversTheRegistry`). Modes are agent-contracts-leaf
+`runtimes.Mode` values and layout rows are keyed by `layout.Shape`; there
+are no composite mode names (`claude-print` and the like) and no aliases
+for them.
 
 `projection.go` and `preparation.go` return pure values. Keeping them free of
 materialization means `agentkit` owns writing to disk and this library stays

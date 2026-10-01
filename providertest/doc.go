@@ -21,8 +21,9 @@
 //
 // Pass Path to the code under test, or call [Fake.Install] to point the
 // runtime's CLI-path variable (CLAUDE_CLI_PATH, CODEX_CLI_PATH, …) and PATH
-// at it. Pass the path as given: resolving the symlink first runs the test
-// binary itself instead of the fake.
+// at it ([Fake.Env] returns the same entries for code that takes an explicit
+// child environment). Pass the path as given: resolving the symlink first
+// runs the test binary itself instead of the fake.
 //
 // # Runs and steps
 //
@@ -30,7 +31,8 @@
 // [Run.When] arguments all appear in argv. [Replay] builds a run from a
 // captured fixture; [Script] and [Lines] build one by hand. A run is a list
 // of [Step] values: write a stdout or stderr line, send a JSON frame, wait
-// for a stdin frame, wait for stdin to close, sleep, hang, or exit.
+// for a stdin frame or any stdin line, echo stdin lines until it closes, wait
+// for stdin to close, sleep, hang, or exit.
 //
 // Duplex transcripts (claude streaming stdio, codex app-server, ACP) pair
 // each "recv" step with the frames the CLI sent in answer. A JSON-RPC
@@ -51,7 +53,9 @@
 //
 // [Fixtures] holds the corpus, one directory per runtime id (claude, codex,
 // opencode, antigravity, copilot, pi); see fixtures/README.md for what each
-// file is, how it was captured and which ones are synthetic.
+// file is, how it was captured and which ones are synthetic. [ReadFixture],
+// [FixtureLines] and [FixtureSteps] read it directly, for a test that parses
+// captured output without running a fake.
 //
 // Runtimes come from the go-providers registry. A test that needs a runtime
 // of its own registers it with registry.RegisterForTest and passes its id
