@@ -5,9 +5,11 @@ import "github.com/hollis-labs/agent-contracts-leaf/runtimes"
 // The capabilities each mode declares are what the code that drives it does
 // today, not what the runtime could do: go-providers' adapters for the native
 // modes (EventParser, SessionLostClassifier, AuthFailureClassifier,
-// SessionResumeVerifier, Preflighter), and go-agent-wrapper's ACP clients for
-// the ACP modes. TestDeclaredCapabilitiesMatchAdapters in package provider
-// checks the native side.
+// SessionResumeVerifier, Preflighter), and what go-agent-wrapper's ACP
+// adapters record as measured live for the ACP modes. An unmeasured
+// capability is not declared: over-claiming is the unsafe direction.
+// TestDeclaredCapabilitiesMatchAdapters in package provider checks the native
+// side.
 func init() {
 	const (
 		resume        = runtimes.CapResume
@@ -31,8 +33,10 @@ func init() {
 			// terminal stream, not typed events.
 			{runtimes.ModePTY, caps(resume)},
 			// Through the claude-agent-acp bridge (go-agent-wrapper
-			// claudeacp), which brings its own binary.
-			{runtimes.ModeACPStdio, caps(typedEvents, approvals)},
+			// claudeacp), which brings its own binary. No approvals: live
+			// runs executed shell tools without ever sending
+			// session/request_permission.
+			{runtimes.ModeACPStdio, caps(typedEvents)},
 		},
 		DefaultMode: runtimes.ModeStreamingStdio,
 	})
@@ -67,29 +71,34 @@ func init() {
 			// opencode serve: deferred as a default until its SSE and
 			// permission behaviour is probed.
 			{runtimes.ModeHTTPSSE, caps(typedEvents)},
-			// opencode acp (go-agent-wrapper opencodeacp).
-			{runtimes.ModeACPStdio, caps(typedEvents, approvals)},
+			// opencode acp (go-agent-wrapper opencodeacp): session/load
+			// resume confirmed live. No approvals: a live shell tool ran
+			// without a session/request_permission.
+			{runtimes.ModeACPStdio, caps(resume, typedEvents)},
 		},
 		DefaultMode: runtimes.ModeSubprocessPerTurn,
 	})
 
 	// Copilot CLI is ACP-only: copilot --acp, over stdio or with --port N
-	// over TCP (go-agent-wrapper copilotacp).
+	// over TCP (go-agent-wrapper copilotacp). Approvals were measured live
+	// (a shell command produced a session/request_permission); resume has
+	// not been, so it is not declared.
 	register(Descriptor{
 		ID:          runtimes.Copilot,
 		Aliases:     []string{"copilot-cli"},
 		Binary:      "copilot",
 		EnvOverride: "COPILOT_CLI_PATH",
 		Modes: []ModeSupport{
-			{runtimes.ModeACPStdio, caps(resume, typedEvents, approvals)},
-			{runtimes.ModeACPTCP, caps(resume, typedEvents, approvals)},
+			{runtimes.ModeACPStdio, caps(typedEvents, approvals)},
+			{runtimes.ModeACPTCP, caps(typedEvents, approvals)},
 		},
 		DefaultMode: runtimes.ModeACPStdio,
 	})
 
 	// Pi is ACP-only, through the pi-acp bridge (go-agent-wrapper piacp). The
 	// binary is the bridge; when it is not installed the wrapper falls back to
-	// npx -y pi-acp.
+	// npx -y pi-acp. session/load resume was confirmed live; pi-acp sent no
+	// session/request_permission.
 	register(Descriptor{
 		ID:          runtimes.Pi,
 		Aliases:     []string{"pi-acp"},

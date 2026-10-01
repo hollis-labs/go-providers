@@ -7,22 +7,26 @@ import (
 	"strings"
 )
 
-// commonLookupDirs are install directories searched after PATH for every
-// runtime, because a process supervisor often starts a service with a minimal
-// PATH. "~/" is the user's home directory.
-var commonLookupDirs = []string{
-	"~/.local/bin",
-	"/opt/homebrew/bin",
-	"/opt/homebrew/sbin",
-	"~/bin",
-	"~/go/bin",
-	"/usr/local/bin",
-}
+// userLookupDirs and systemLookupDirs are install directories searched after
+// PATH for every runtime, because a process supervisor often starts a service
+// with a minimal PATH. A runtime's own LookupDirs go between them, so its
+// installer's directory wins over /usr/local/bin. "~/" is the user's home
+// directory.
+var (
+	userLookupDirs = []string{
+		"~/.local/bin",
+		"/opt/homebrew/bin",
+		"/opt/homebrew/sbin",
+		"~/bin",
+		"~/go/bin",
+	}
+	systemLookupDirs = []string{"/usr/local/bin"}
+)
 
 // LookPath resolves d's executable: the EnvOverride variable's value when it
 // is set (used as-is, not checked), else Binary on PATH, else the first
-// non-directory named Binary in the common install directories and then d's
-// LookupDirs.
+// non-directory named Binary in the user install directories, then d's
+// LookupDirs, then /usr/local/bin.
 func (d Descriptor) LookPath() (string, error) {
 	if p := os.Getenv(d.EnvOverride); p != "" {
 		return p, nil
@@ -31,7 +35,8 @@ func (d Descriptor) LookPath() (string, error) {
 		return p, nil
 	}
 	home, _ := os.UserHomeDir()
-	for _, dir := range append(append([]string(nil), commonLookupDirs...), d.LookupDirs...) {
+	dirs := append(append(append([]string(nil), userLookupDirs...), d.LookupDirs...), systemLookupDirs...)
+	for _, dir := range dirs {
 		if rest, ok := strings.CutPrefix(dir, "~/"); ok {
 			if home == "" {
 				continue

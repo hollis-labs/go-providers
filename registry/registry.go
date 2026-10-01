@@ -26,9 +26,9 @@ type Descriptor struct {
 	// binary's path, used as-is without a PATH search (CLAUDE_CLI_PATH,
 	// AGY_CLI_PATH, ...).
 	EnvOverride string `json:"env_override"`
-	// LookupDirs are directories searched after PATH and the common install
-	// directories, for a runtime whose installer uses its own. A leading
-	// "~/" is the user's home directory.
+	// LookupDirs are directories searched after PATH and the user install
+	// directories but before /usr/local/bin, for a runtime whose installer
+	// uses its own. A leading "~/" is the user's home directory.
 	LookupDirs []string `json:"lookup_dirs,omitempty"`
 
 	// Modes are the modes the runtime can be driven in, each with the

@@ -117,6 +117,20 @@ func TestCapabilitiesPerMode(t *testing.T) {
 	if claude.Capabilities(runtimes.ModeHTTPSSE) != nil || claude.Supports(runtimes.ModeHTTPSSE) {
 		t.Error("an unsupported mode has no capabilities")
 	}
+	// ACP claims are what go-agent-wrapper measured live: Claude's and
+	// OpenCode's bridges ran shell tools without asking, so they declare no
+	// approvals; OpenCode's session/load resume and Copilot's permission
+	// request were observed.
+	if claude.Has(runtimes.ModeACPStdio, runtimes.CapApprovals) {
+		t.Error("claude acp-stdio must not claim approvals")
+	}
+	opencode := mustLookup(t, "opencode")
+	if opencode.Has(runtimes.ModeACPStdio, runtimes.CapApprovals) || !opencode.Has(runtimes.ModeACPStdio, runtimes.CapResume) {
+		t.Error("opencode acp-stdio: resume yes, approvals no")
+	}
+	if copilot := mustLookup(t, "copilot"); !copilot.Has(runtimes.ModeACPStdio, runtimes.CapApprovals) || copilot.Has(runtimes.ModeACPStdio, runtimes.CapResume) {
+		t.Error("copilot acp-stdio: approvals measured, resume not")
+	}
 	agy := mustLookup(t, "agy")
 	if !agy.Has(runtimes.ModeSubprocessPerTurn, runtimes.CapResumeKeepsID) {
 		t.Error("antigravity resume keeps the session id")

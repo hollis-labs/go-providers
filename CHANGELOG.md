@@ -23,6 +23,8 @@
 
 ### Changed
 
+- New module dependency: `github.com/hollis-labs/agent-contracts-leaf` v0.3.0
+  (standard library only), for the `runtimes` vocabulary.
 - **Breaking:** the runtime vocabulary is agent-contracts-leaf `runtimes`
   (v0.3.0, D-73), with no aliases for the old spellings (D-22):
   - `layout.Entry.Provider` is a `runtimes.ID`; `layout.Entry.Mode` is a
@@ -41,8 +43,19 @@
     `opencode-serve-http` is `http-sse`.
   - `ProviderCapabilityMatrix` derives its rows from the registry (one per
     native mode, plus Claude's bare variant), so an ACP-only runtime has none.
+    The row order follows each descriptor's modes: Claude is now
+    streaming-stdio, subprocess-per-turn, subprocess-per-turn+bare, pty
+    (was print, bare, pty, streaming), and Codex jsonrpc-stdio then
+    subprocess-per-turn (was exec, app-server). Look rows up by runtime and
+    shape, not by index.
+  - Known downstream break: Torque's
+    `internal/runtime/agent/codex_auth.go:47` uses `provider.ProviderCodex`;
+    it becomes `runtimes.Codex` at Torque's next bump. agentkit's
+    `agentlaunch/provider_projection_bridge.go` (CW-20260930-0133) is the
+    other consumer of the removed names.
 - The adapters' `Detect` resolves through the registry descriptor. The
-  `~/.opencode/bin` fallback now applies to OpenCode only.
+  `~/.opencode/bin` fallback now applies to OpenCode only, still searched
+  before `/usr/local/bin` as it was.
 - Claude's projected launch convention passes the layout's project-dir
   argument (`--add-dir <project>`) in every mode, not only under bare, so the
   projection's argv is complete. agentkit no longer has to append it.
