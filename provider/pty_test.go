@@ -4,8 +4,10 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/go-providers/providertest"
@@ -181,5 +183,31 @@ func TestCLISessionIDContext(t *testing.T) {
 	_, ok = CLISessionIDFromContext(ctx)
 	if ok {
 		t.Error("expected empty string to return ok=false")
+	}
+}
+
+// CompleteWithUsage names the adapter that failed: a PTYBridge built with a
+// non-Claude adapter must not report "claude cli error" (CW-20260930-0048).
+func TestPTYBridge_CompleteErrorNamesTheAdapter(t *testing.T) {
+	for _, tc := range []struct {
+		adapter CLIAdapter
+		fixture string
+		want    string
+	}{
+		{NewCodexAdapter(), "codex/exec_error_unknown_model", "codex cli error: "},
+		{NewClaudeAdapter(), "claude/print_error_unknown_model", "claude cli error: "},
+	} {
+		t.Run(tc.adapter.Name(), func(t *testing.T) {
+			fake := providertest.New(t, runtimes.ID(tc.adapter.Name()), providertest.Replay(tc.fixture))
+			_, err := NewPTYBridgeWithAdapter(tc.adapter, fake.Path).CompleteWithUsage(context.Background(), llmtypes.ChatRequest{
+				Messages: []llmtypes.ChatMessage{{Role: "user", Content: "say hi"}},
+			})
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want prefix %q", err, tc.want)
+			}
+			if tc.adapter.Name() != "claude" && strings.Contains(err.Error(), "claude") {
+				t.Errorf("a %s failure mentions claude: %v", tc.adapter.Name(), err)
+			}
+		})
 	}
 }
