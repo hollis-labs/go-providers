@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+Hardening the extras API after the adversarial review of #53
+(CW-20261001-0219). Tests and docs only; no behavior change.
+
+### Documented
+
+- **`ExtraArgsBuilder` states what extras may contain.** Both limits are
+  documented, not checked in code, because `BuildArgsWithExtras` returns only
+  an argv, so a check could do no more than panic or silently drop an extra.
+  Extras come from a trusted caller, and the adapters' `ExtraArgs` fields have
+  the same limits.
+  - **No `--`.** A tail that carries its own `--` belongs appended to
+    `BuildArgs`' output. Passed to the slot anyway, the convention's flags
+    behind it become positional text: `exec -- tail --json … --cd /p -- hi`
+    for codex exec, and agy loses its inline `-p=`.
+  - **The last extra must not be a flag that takes a value.** It swallows the
+    next argument the convention emits. On a Claude print resume turn with no
+    ProjectDir, extras ending in `--model` give
+    `… --mcp-config f --model -- <prompt>`, where the CLI may read `--` as the
+    model and then a prompt starting with `-` as a flag (the
+    CW-20261001-0069 class; not checked against the binary). A leading
+    non-flag extra joins Claude's variadic `--mcp-config`. A validator for
+    value-taking flags was considered and left out: it would need a table of
+    each CLI's flags, which drifts.
+
+### Tests
+
+- **`TestBuildArgsWithExtrasLeavesSpareCapacityAlone`:** for all four
+  adapters, an adapter whose `ExtraArgs` has spare capacity keeps it
+  untouched, and the argv does not alias `ExtraArgs`. Unlike the concurrent
+  test, it fails without `-race` if the extras are appended into that slice.
+- **`TestBuildArgsWithExtrasPutsOwnExtraArgsFirst`:** the adapter's own
+  `ExtraArgs` come before the caller's extras, for every runtime and mode,
+  matching `ResolveTurn`. Before, only Codex had a case that set them.
+- **`TestBuildArgsWithExtrasDoesNotRejectDoubleDash`:** a `--` tail is placed
+  at the slot as given, as `ResolveTurn` places it, never rejected or dropped.
+
 ## v0.42.0 — 2026-10-01
 
 A caller's extra arguments go where the convention takes them

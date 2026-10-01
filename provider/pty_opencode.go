@@ -42,7 +42,9 @@ type OpencodeAdapter struct {
 	// ExtraArgs are a caller's extra arguments. BuildArgs places them at
 	// the convention's extra slot (ArgExtra), never blindly at the end:
 	// for Claude and agy that is before the variadic --add-dir <project>,
-	// for codex exec and opencode run before the prompt.
+	// for codex exec and opencode run before the prompt. They are flags with
+	// their values, with no "--", and the last must not be a flag that takes
+	// a value (see ExtraArgsBuilder).
 	ExtraArgs []string
 
 	// Mode selects the argv shape. "" or "run" → `opencode run`
