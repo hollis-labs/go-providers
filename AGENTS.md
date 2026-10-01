@@ -24,6 +24,8 @@ contracts, rate budgets, or any direct HTTP chat or embedding path.
 - `provider/events/` and `provider/event_pipeline.go` own typed per-line events.
 - `examples/claude_bare`, `examples/codex_bootdir`, `examples/opencode_bootdir`
   are runnable.
+- `providertest/` is the fake CLI other repos test against;
+  `providertest/fixtures/` holds the captured wire output it replays.
 
 ## Commands
 
@@ -50,6 +52,12 @@ opt-in (`TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWhenBootDirEmpty`,
 `TestClaudeBootDirSpec_SettingsJSON_NoSideEffectWithoutLegacyOptIn`,
 `TestClaudeBootDirSpec_SettingsJSON_SeedsTrustWithLegacyOptIn`). Pre-accepting
 trust on a user's behalf without that opt-in is the failure these guard.
+
+`providertest` imports only the standard library, because the `provider`
+package's own tests import it; a dependency on `provider` would be an import
+cycle. Fixtures ship in a public module: re-capture through
+`hack/capturefixtures` and run the scrub grep in
+`providertest/fixtures/README.md` before committing one.
 
 Every adapter must implement the boot-dir provider surface —
 `TestBootDirProvider_AssertedOnAllAdapters` fails when a new adapter is added

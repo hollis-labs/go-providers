@@ -2,13 +2,14 @@ package provider
 
 import (
 	"context"
-	"os"
+	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 // textPassthroughAdapter is a minimal CLIAdapter whose ParseLine returns each
@@ -66,15 +67,9 @@ func TestSubprocessBridge_StreamChat_SystemOnly(t *testing.T) {
 }
 
 func TestSubprocessBridge_Complete_MockCLI(t *testing.T) {
-	// Create a mock CLI script that outputs stream-json events.
-	dir := t.TempDir()
-	script := filepath.Join(dir, "mock-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello from subprocess!"}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"Hello from subprocess!","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	// A captured claude -p turn, replayed by a fake claude.
+	script := providertest.New(t, "claude", providertest.Replay("claude/print_turn1")).Path
+	want := claudeFixtureResult(t, "claude/print_turn1.jsonl")
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 	result, err := bridge.Complete(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -83,22 +78,35 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Hello from
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Hello from subprocess!") {
-		t.Errorf("expected 'Hello from subprocess!' in result, got: %s", result)
+	if result != want {
+		t.Errorf("result = %q, want the captured reply %q", result, want)
 	}
 }
 
-func TestSubprocessBridge_StreamChat_MockCLI(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "mock-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-abc"}'
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"delta one"}]}}'
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"delta two"}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}'
-`), 0755); err != nil {
-		t.Fatal(err)
+// claudeFixtureResult returns the result text of a captured claude
+// stream-json turn.
+func claudeFixtureResult(t *testing.T, name string) string {
+	t.Helper()
+	for _, l := range providertest.FixtureLines(t, name) {
+		var ev struct {
+			Type   string `json:"type"`
+			Result string `json:"result"`
+		}
+		if json.Unmarshal(l, &ev) == nil && ev.Type == "result" {
+			return ev.Result
+		}
 	}
+	t.Fatalf("%s: no result event", name)
+	return ""
+}
+
+func TestSubprocessBridge_StreamChat_MockCLI(t *testing.T) {
+	script := providertest.New(t, "claude", providertest.Lines(
+		`{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-abc"}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"delta one"}]}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"delta two"}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`,
+	)).Path
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -140,28 +148,21 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 }
 
 func TestSubprocessBridge_SandboxDir(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "mock-cli.sh")
-	// Script outputs the working directory as a delta so we can verify sandbox dir was set.
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"$(pwd)\"}]}}"
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	fake := providertest.New(t, "claude", providertest.Replay("claude/print_turn1"))
 
 	sandboxDir := t.TempDir()
 	ctx := WithSandboxDir(context.Background(), sandboxDir)
 
-	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
-	result, err := bridge.Complete(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), fake.Path)
+	if _, err := bridge.Complete(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
-	}})
-	if err != nil {
+	}}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, sandboxDir) {
-		t.Errorf("expected sandbox dir %s in result, got: %s", sandboxDir, result)
+	got, _ := filepath.EvalSymlinks(fake.Call(0).Dir)
+	want, _ := filepath.EvalSymlinks(sandboxDir)
+	if got != want {
+		t.Errorf("CLI ran in %s, want the sandbox dir %s", got, want)
 	}
 }
 
@@ -173,14 +174,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 // llmtypes.EventError and llmtypes.EventDone are mutually exclusive — the bridge must NOT
 // forward the adapter's llmtypes.EventDone after the guard fires.
 func TestSubprocessBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "tool-only-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`,
+	)).Path
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -224,14 +221,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 // guard does NOT fire when the CLI mixed tool_use with at least one text
 // delta — that's a normal stream and consumers can use the deltas.
 func TestSubprocessBridge_NoSilentDrop_NotFiredWhenDeltaPresent(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "mixed-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}},{"type":"text","text":"hello"}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}},{"type":"text","text":"hello"}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}`,
+	)).Path
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -260,31 +253,19 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","sto
 //     immediately after SIGTERM. This is the assertion Copilot flagged on the
 //     first revision; the upper bound alone permitted a regression where
 //     WaitDelay went un-wired.
-//  3. SIGTERM-delivery: trap-marker file exists — proves SIGTERM, not SIGKILL,
-//     was the first signal (SIGKILL is uncatchable so the trap couldn't run if
-//     SIGKILL came first).
+//  3. SIGTERM-delivery: the fake recorded SIGTERM — proves SIGTERM, not
+//     SIGKILL, was the first signal (SIGKILL is uncatchable, so nothing could
+//     be recorded if SIGKILL came first).
 func TestSubprocessBridge_GracePeriodOrdering(t *testing.T) {
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "sigterm.marker")
-	script := filepath.Join(dir, "stubborn-cli.sh")
-	// The script must not let any child process inherit the stdout pipe;
-	// otherwise the inherited fd keeps the pipe open after the parent shell
-	// is SIGKILL'd, and cmd.Wait blocks until the child dies naturally.
-	// Each `sleep` is redirected to /dev/null for stdin/stdout/stderr.
-	scriptBody := `#!/bin/sh
-trap 'touch "` + marker + `"' TERM
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"start"}]}}'
-while true; do
-    sleep 0.1 </dev/null >/dev/null 2>/dev/null
-done
-`
-	if err := os.WriteFile(script, []byte(scriptBody), 0755); err != nil {
-		t.Fatal(err)
-	}
+	// A CLI that records SIGTERM and keeps running, so only SIGKILL ends it.
+	fake := providertest.New(t, "claude", providertest.Script(
+		providertest.Stdout(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"start"}]}}`),
+		providertest.Hang(),
+	).IgnoringSIGTERM())
 
 	const waitDelay = 200 * time.Millisecond
 	ctx, cancel := context.WithCancel(WithWaitDelay(context.Background(), waitDelay))
-	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
+	bridge := NewSubprocessBridge(NewClaudeAdapter(), fake.Path)
 	ch, err := bridge.StreamChat(ctx, llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
 		{Role: "user", Content: "test"},
 	}})
@@ -292,7 +273,7 @@ done
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Read the first event so we know the script is running and has installed its trap.
+	// Read the first event so we know the fake is running and handles SIGTERM.
 	first := <-ch
 	if first.Type != llmtypes.EventDelta {
 		t.Fatalf("expected first event to be delta, got %s", first.Type)
@@ -307,14 +288,13 @@ done
 	}
 	elapsed := time.Since(start)
 
-	// SIGTERM must have been delivered: the trap ran.
-	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("SIGTERM marker file missing: %v (process was likely SIGKILL'd immediately)", err)
+	// SIGTERM must have been delivered and recorded.
+	if c := fake.Call(0); len(c.Signals) == 0 || c.Signals[0] != "SIGTERM" {
+		t.Errorf("fake recorded signals %v, want SIGTERM first (process was likely SIGKILL'd immediately)", c.Signals)
 	}
 	// Lower bound: bridge must have waited at least WaitDelay (minus a small
-	// tolerance for measurement jitter) before SIGKILL. The script loops on a
-	// 100ms sleep that never naturally exits, so elapsed is gated by WaitDelay
-	// alone — if WaitDelay were 0 or unwired, SIGKILL would fire immediately
+	// tolerance for measurement jitter) before SIGKILL. The fake never
+	// exits on its own, so elapsed is gated by WaitDelay alone — if WaitDelay were 0 or unwired, SIGKILL would fire immediately
 	// and elapsed would be ~0.
 	const tolerance = 50 * time.Millisecond
 	if elapsed < waitDelay-tolerance {
@@ -333,14 +313,7 @@ done
 // output), the bridge synthesizes one on clean process exit so consumers always
 // see an explicit boundary before the channel closes.
 func TestSubprocessBridge_SyntheticDoneOnCleanExit(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "text-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo "this is plain text"
-echo "another line"
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines("this is plain text", "another line")).Path
 
 	bridge := NewSubprocessBridge(textPassthroughAdapter{}, script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -368,15 +341,11 @@ echo "another line"
 }
 
 func TestSubprocessBridge_ContextCancellation(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "slow-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"start"}]}}'
-sleep 30
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Script(
+		providertest.Stdout(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"start"}]}}`),
+		providertest.Sleep(30*time.Second),
+		providertest.Stdout(`{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn"}`),
+	)).Path
 
 	ctx, cancel := context.WithCancel(context.Background())
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)

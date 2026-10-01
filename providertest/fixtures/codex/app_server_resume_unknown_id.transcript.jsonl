@@ -1,0 +1,9 @@
+{"recv":{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"providertest-capture","version":"0"}}}}
+{"send":{"id":1,"result":{"userAgent":"providertest-capture/0.159.2 (Ubuntu 26.4.0; x86_64) tmux-256color (providertest-capture; 0)","codexHome":"/home/user/.codex","platformFamily":"unix","platformOs":"linux"}}}
+{"recv":{"jsonrpc":"2.0","method":"initialized"}}
+{"recv":{"id":2,"jsonrpc":"2.0","method":"thread/resume","params":{"threadId":"00000000-0000-4000-8000-0000000000ff"}}}
+{"send":{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"fixture-host","installationId":"00000000-0000-4000-8000-000000000004","environmentId":null},"emittedAtMs":1790823887627}}
+{"send":{"error":{"code":-32600,"message":"no rollout found for thread id 00000000-0000-4000-8000-0000000000ff"},"id":2}}
+{"send":{"method":"account/updated","params":{"authMode":"chatgpt","planType":"pro"},"emittedAtMs":1790823887908}}
+{"eof":true}
+{"exit":0}

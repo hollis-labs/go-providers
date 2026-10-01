@@ -1,53 +1,21 @@
 package provider
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
-// testdata/antigravity/print_*.jsonl is verbatim `agy -p=<prompt>
-// --output-format stream-json` stdout from agy 1.2.7 (paths and names
-// scrubbed):
-//
-//   - print_turn1.jsonl            — first turn, text reply
-//   - print_turn2_resume.jsonl     — --conversation <turn 1 id>, recalled turn 1
-//   - print_tool_run.jsonl         — run_command under --dangerously-skip-permissions
-//   - print_tool_denied.jsonl      — the same command under request-review: auto-denied
-//   - print_mcp_tool.jsonl         — a workspace-plugin MCP call (call_mcp_tool)
-//   - print_resume_unknown_id.jsonl/.stderr — --conversation with an unknown id:
-//     a new conversation, a stderr warning, exit 0
+// The antigravity fixtures are verbatim `agy -p=<prompt> --output-format
+// stream-json` stdout; providertest/fixtures/README.md describes each one.
 
 func agyFixture(t *testing.T, name string) [][]byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "antigravity", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var lines [][]byte
-	for _, l := range splitLines(data) {
-		if len(l) > 0 {
-			lines = append(lines, l)
-		}
-	}
-	return lines
-}
-
-func splitLines(b []byte) [][]byte {
-	var out [][]byte
-	start := 0
-	for i, c := range b {
-		if c == '\n' {
-			out = append(out, b[start:i])
-			start = i + 1
-		}
-	}
-	return append(out, b[start:])
+	return providertest.FixtureLines(t, "antigravity/"+name)
 }
 
 func parseAgyFixture(t *testing.T, name string) []llmtypes.StreamEvent {
@@ -106,7 +74,7 @@ func TestAntigravityParseLine_Fixtures(t *testing.T) {
 		if got := agyTypes(evs); !reflect.DeepEqual(got, want) {
 			t.Fatalf("types = %v; want %v", got, want)
 		}
-		if evs[0].SessionID != "a62adc17-9c92-4d24-8b97-65226dfa2967" || evs[1].Content+evs[2].Content != "OK\n" {
+		if evs[0].SessionID != "00000000-0000-4000-8000-000000000001" || evs[1].Content+evs[2].Content != "OK\n" {
 			t.Errorf("session %q, text %q", evs[0].SessionID, evs[1].Content+evs[2].Content)
 		}
 		// output_tokens already include thinking tokens.
@@ -123,7 +91,7 @@ func TestAntigravityParseLine_Fixtures(t *testing.T) {
 				text += e.Content
 			}
 		}
-		if evs[0].SessionID != "a62adc17-9c92-4d24-8b97-65226dfa2967" || text != "TANGERINE-58\n" {
+		if evs[0].SessionID != "00000000-0000-4000-8000-000000000001" || text != "TANGERINE-58\n" {
 			t.Errorf("session %q, text %q", evs[0].SessionID, text)
 		}
 	})
@@ -151,7 +119,7 @@ func TestAntigravityParseLine_Fixtures(t *testing.T) {
 
 	t.Run("unknown resume id starts a new conversation", func(t *testing.T) {
 		evs := parseAgyFixture(t, "print_resume_unknown_id.jsonl")
-		if evs[0].SessionID == "00000000-0000-0000-0000-000000000000" || evs[len(evs)-1].Type != llmtypes.EventDone {
+		if evs[0].SessionID == "00000000-0000-4000-8000-0000000000ff" || evs[len(evs)-1].Type != llmtypes.EventDone {
 			t.Errorf("events = %+v", evs)
 		}
 	})
@@ -222,10 +190,7 @@ func TestAntigravityClassifiers(t *testing.T) {
 	var _ AuthFailureClassifier = a
 	var _ EventParser = a
 
-	stderr, err := os.ReadFile(filepath.Join("testdata", "antigravity", "print_resume_unknown_id.stderr"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	stderr := providertest.ReadFixture(t, "antigravity/print_resume_unknown_id.stderr")
 	if !a.ResumeKeepsSessionID() || !a.IsSessionLost(stderr) || a.IsSessionLost([]byte("warning: something else")) {
 		t.Error("session-lost classification")
 	}

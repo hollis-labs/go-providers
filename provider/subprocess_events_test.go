@@ -2,14 +2,13 @@ package provider
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 // TestSubprocessBridge_StderrOrderingBeforeTerminal verifies that no
@@ -22,18 +21,13 @@ import (
 // bridge waits for stderr drain before emitting the typed terminal,
 // so the callback sees stderr lines first and Done last.
 func TestSubprocessBridge_StderrOrderingBeforeTerminal(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-stderr-cli.sh")
-	body := `#!/bin/sh
-echo "stderr line 1" >&2
-echo "stderr line 2" >&2
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}'
-echo "stderr line 3" >&2
-echo '{"type":"result","subtype":"success","is_error":false,"result":"hi","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}'
-`
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Script(
+		providertest.Stderr("stderr line 1"),
+		providertest.Stderr("stderr line 2"),
+		providertest.Stdout(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`),
+		providertest.Stderr("stderr line 3"),
+		providertest.Stdout(`{"type":"result","subtype":"success","is_error":false,"result":"hi","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`),
+	)).Path
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 
@@ -114,15 +108,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"hi","stop_
 // without WithEvents, stderr stays at exec.Cmd's default destination
 // — preserving v0.7.0 behavior bit-for-bit.
 func TestSubprocessBridge_StderrNotWiredWithoutCallback(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "stderr-only.sh")
-	body := `#!/bin/sh
-echo "this would be stderr if we captured" >&2
-echo '{"type":"result","subtype":"success","is_error":false,"result":"","stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}'
-`
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Script(
+		providertest.Stderr("this would be stderr if we captured"),
+		providertest.Stdout(`{"type":"result","subtype":"success","is_error":false,"result":"","stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}`),
+	)).Path
 
 	bridge := NewSubprocessBridge(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{

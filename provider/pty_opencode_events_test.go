@@ -1,42 +1,21 @@
 package provider
 
 import (
-	"bufio"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
-// testdata/opencode/*.jsonl is verbatim `opencode run --format json` stdout
-// from opencode 1.18.30 (local paths rewritten to /work/fixture):
-//
-//   - run_turn1.jsonl        — first turn, one step, text reply
-//   - run_turn2_resume.jsonl — second turn with --session <turn 1 id>,
-//     which recalled turn 1's content
-//   - run_tool_use.jsonl     — one turn of three steps: glob, read, reply
+// The opencode fixtures are verbatim `opencode run --format json` stdout;
+// providertest/fixtures/README.md describes each one.
 
 func opencodeFixtureLines(t *testing.T, name string) [][]byte {
 	t.Helper()
-	f, err := os.Open(filepath.Join("testdata", "opencode", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = f.Close() }()
-	var lines [][]byte
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		lines = append(lines, append([]byte(nil), sc.Bytes()...))
-	}
-	if err := sc.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return lines
+	return providertest.FixtureLines(t, "opencode/"+name)
 }
 
 func parseOpencodeFixture(t *testing.T, name string) []llmtypes.StreamEvent {
