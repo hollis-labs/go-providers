@@ -17,6 +17,14 @@
   Hosts set these fields instead of wrapping the adapter, which hid its
   optional interfaces (`EventParser`, the classifiers, `Preflighter`,
   `SessionResumeVerifier`, `BootDirProvider`).
+- `provider.NewAdapter(id, mode)` and `ErrNoAdapter`: the one constructor
+  table for native runtimes. It returns a fresh adapter in the shape the mode
+  needs, for example Claude's streaming adapter for `streaming-stdio`, which
+  agentkit's `DefaultResolver` got wrong by always building print mode.
+  agentkit's `DefaultResolver` and go-agent-wrapper's `launch` factories build
+  from it instead of keeping their own per-runtime switches. ACP modes are
+  `ErrNoAdapter`. `TestNewAdapterCoversTheRegistry` holds the table to the
+  registry's native modes.
 
 ### Changed
 
