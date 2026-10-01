@@ -85,7 +85,10 @@ bridge do.
 ## opencode — captured, opencode 1.18.30
 
 Verbatim `opencode run --format json` stdout, local paths rewritten to
-`/work/fixture`.
+`/work/fixture`, and session, message and part ids replaced with
+placeholders (`ses_fixture…`, `msg_fixture…`, `prt_fixture…`), one per real
+id, so the cross-references hold: `run_turn2_resume` resumes `run_turn1`'s
+session.
 
 | Fixture | What it is |
 |---|---|
