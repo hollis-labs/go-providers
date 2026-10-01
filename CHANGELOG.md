@@ -18,6 +18,15 @@
   optional interfaces (`EventParser`, the classifiers, `Preflighter`,
   `SessionResumeVerifier`, `BootDirProvider`).
 
+### Changed
+
+- Codex's app-server mode (`jsonrpc-stdio`) declares `resume`
+  (CW-20261001-0052). `thread/resume` was measured live, in the codex-cli
+  0.159.2 capture `providertest/fixtures/codex/app_server_resume`, and
+  agentkit's `turn.CodexAppServerSession` implements it (agentkit v0.11.0).
+  It still declares no `session-lost-classifier`: agentkit's `turn` package
+  classifies a lost thread from the JSON-RPC error, not `CodexAdapter`.
+
 ## v0.33.0 — 2026-10-01
 
 One argv owner (CW-20260930-0135, go-providers half). Each runtime's argv is

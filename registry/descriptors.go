@@ -69,9 +69,19 @@ func init() {
 		EnvOverride: "CODEX_CLI_PATH",
 		Modes: []ModeSupport{
 			// app-server. The default per D-74. It asks the host to
-			// approve; thread/resume is not implemented yet
-			// (CW-20260930-0139), so it declares no resume.
-			{runtimes.ModeJSONRPCStdio, caps(typedEvents, approvals)},
+			// approve, and it resumes: thread/resume was measured live
+			// (providertest/fixtures/codex/app_server_resume, a codex-cli
+			// 0.159.2 capture), and agentkit's turn.CodexAppServerSession
+			// sends it when ResumeThreadID is set (agentkit v0.11.0), with
+			// a lost or mismatched thread returned as a SessionLostError.
+			// The wrapper does not yet map its SessionIDPreset onto
+			// ResumeThreadID: apps drive turn.CodexAppServerCache
+			// themselves. No session-lost-classifier: the loss is
+			// classified by agentkit's turn package from the JSON-RPC
+			// error, not by CodexAdapter (it has no IsSessionLost), so
+			// declaring it here would be a claim the adapter does not
+			// back.
+			{runtimes.ModeJSONRPCStdio, caps(resume, typedEvents, approvals)},
 			// codex exec --json: one turn, no resume.
 			{runtimes.ModeSubprocessPerTurn, caps(typedEvents)},
 			// Through the codex-acp bridge (go-agent-wrapper codexacp);
