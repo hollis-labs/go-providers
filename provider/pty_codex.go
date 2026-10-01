@@ -139,9 +139,16 @@ func (a *CodexAdapter) Name() string { return "codex" }
 // (`resume <id>` before the prompt); app-server mode ignores the prompt and
 // cliSessionID, which travel over JSON-RPC.
 func (a *CodexAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	return a.BuildArgsWithExtras(prompt, systemPrompt, cliSessionID, nil)
+}
+
+// BuildArgsWithExtras implements ExtraArgsBuilder. In exec mode the extras
+// land in front of a resume turn's `resume <id>`, where codex takes exec
+// options.
+func (a *CodexAdapter) BuildArgsWithExtras(prompt, systemPrompt, cliSessionID string, extras []string) []string {
 	shape := codexShape(a)
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Codex, shape, a.ProjectDir)}
-	return resolveAdapterTurn(codexConvention(a, shape, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
+	return resolveAdapterTurn(codexConvention(a, shape, p), prompt, systemPrompt, cliSessionID, adapterExtras(a.ExtraArgs, extras))
 }
 
 func (a *CodexAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {

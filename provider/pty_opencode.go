@@ -77,9 +77,14 @@ func (a *OpencodeAdapter) Name() string { return "opencode" }
 // BuildArgs resolves OpenCode's launch convention (see opencodeConvention)
 // from the adapter's fields.
 func (a *OpencodeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	return a.BuildArgsWithExtras(prompt, systemPrompt, cliSessionID, nil)
+}
+
+// BuildArgsWithExtras implements ExtraArgsBuilder.
+func (a *OpencodeAdapter) BuildArgsWithExtras(prompt, systemPrompt, cliSessionID string, extras []string) []string {
 	shape := opencodeShape(a)
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.OpenCode, shape, a.Dir)}
-	return resolveAdapterTurn(opencodeConvention(a, shape, a.Agent, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
+	return resolveAdapterTurn(opencodeConvention(a, shape, a.Agent, p), prompt, systemPrompt, cliSessionID, adapterExtras(a.ExtraArgs, extras))
 }
 
 func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {

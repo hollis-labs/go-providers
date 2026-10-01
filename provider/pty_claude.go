@@ -264,8 +264,13 @@ func (a *ClaudeAdapter) Name() string { return "claude" }
 // the adapter's fields: the same argv a ProviderProjection resolves from the
 // boot-dir layout.
 func (a *ClaudeAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	return a.BuildArgsWithExtras(prompt, systemPrompt, cliSessionID, nil)
+}
+
+// BuildArgsWithExtras implements ExtraArgsBuilder.
+func (a *ClaudeAdapter) BuildArgsWithExtras(prompt, systemPrompt, cliSessionID string, extras []string) []string {
 	shape := claudeProjectionShape(a)
-	return resolveAdapterTurn(claudeConvention(a, shape, a.fieldPaths(shape)), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
+	return resolveAdapterTurn(claudeConvention(a, shape, a.fieldPaths(shape)), prompt, systemPrompt, cliSessionID, adapterExtras(a.ExtraArgs, extras))
 }
 
 func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {

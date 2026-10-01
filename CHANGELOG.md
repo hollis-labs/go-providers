@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.42.0 — 2026-10-01
+
+A caller's extra arguments go where the convention takes them
+(CW-20261001-0197).
+
+### Added
+
+- **`provider.ExtraArgsBuilder`**, an optional CLIAdapter extension:
+  `BuildArgsWithExtras(prompt, systemPrompt, cliSessionID, extras)` is
+  `BuildArgs` with `extras` at the launch convention's extra-argument slot.
+  They come after the adapter's own `ExtraArgs`, exactly where
+  `LaunchConvention.ResolveTurn` puts them on the prepared path.
+  - All four adapters implement it. `BuildArgs` is now
+    `BuildArgsWithExtras(…, nil)`, so its output is unchanged.
+  - **Why:** a session runtime that splices its own flags into
+    `BuildArgs`' output cannot know where a convention takes them. For a
+    codex exec resume turn (`exec … resume <id> -- <prompt>`), a splice
+    before "--" is after the subcommand, where codex-cli 0.159.2 refuses
+    `-s`, `--cd` and `--add-dir`. The slot is in front of `resume`.
+  - An extra that carries its own "--" is a whole argv tail and does not
+    belong at the slot; its caller keeps appending it.
+  - **Tested:**
+    - For every runtime, mode and turn, `BuildArgsWithExtras` equals the
+      projection's `ResolveTurn` with the same extras.
+    - Every native mode's adapter implements the interface.
+    - Codex extras land before `resume`, and the adapter's `ExtraArgs`
+      slice is not written through.
+
+### Fixed
+
+- **README:** codex exec is listed among the `SessionLostClassifier`
+  adapters (since v0.41.0).
+
 ## v0.41.0 — 2026-10-01
 
 Codex exec resumes a thread (CW-20261001-0109).
