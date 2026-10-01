@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
@@ -160,18 +161,21 @@ func (a *ClaudeAdapter) fieldPaths(shape layout.Shape) pathArgs {
 //
 //	print     [--resume id] -p --output-format stream-json --verbose
 //	          [--input-format m] [--model m] [--mcp-config f]
-//	          [--system-prompt=s] [extra] [--add-dir project]
-//	          [--dangerously-skip-permissions] -- <prompt>
+//	          [--strict-mcp-config] [--system-prompt=s] [extra]
+//	          [--add-dir project] [--dangerously-skip-permissions]
+//	          -- <prompt>
 //	bare      [--resume id] -p --output-format stream-json --verbose
-//	          --bare [--model m] [--mcp-config f]
+//	          --bare [--model m] [--mcp-config f] [--strict-mcp-config]
 //	          [--append-system-prompt-file f] [--settings f] [extra]
 //	          [--add-dir project] [--add-dir skills]
 //	          [--dangerously-skip-permissions] -- <prompt>
 //	streaming [--resume id] -p --input-format stream-json --output-format
-//	          stream-json --verbose [--model m] [--mcp-config f] [extra]
-//	          [--add-dir project] [--dangerously-skip-permissions]
-//	pty       [--resume id] [--model m] [--mcp-config f] [extra]
-//	          [--add-dir project] [--dangerously-skip-permissions]
+//	          stream-json --verbose [--model m] [--mcp-config f]
+//	          [--strict-mcp-config] [extra] [--add-dir project]
+//	          [--dangerously-skip-permissions]
+//	pty       [--resume id] [--model m] [--mcp-config f]
+//	          [--strict-mcp-config] [extra] [--add-dir project]
+//	          [--dangerously-skip-permissions]
 //
 // -p is the boolean --print and the prompt is claude's positional argument.
 // Turn text is untrusted, so the prompt comes last, after "--": a turn
@@ -180,8 +184,10 @@ func (a *ClaudeAdapter) fieldPaths(shape layout.Shape) pathArgs {
 // whose values otherwise run until the next option; extra arguments go
 // before the directories so they cannot join that list. The system prompt
 // uses the inline --system-prompt=s form so a value starting with '-' stays
-// its value. The system prompt is passed on a
-// first turn only: a resumed session already has it. Streaming and PTY take
+// its value. --strict-mcp-config (MCPExclusive) comes right after
+// --mcp-config, so it ends that variadic list too: an extra that starts with
+// a non-flag token cannot join it as another config file. The system prompt
+// is passed on a first turn only: a resumed session already has it. Streaming and PTY take
 // no prompt or system prompt in argv; turns arrive on stdin.
 func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchConvention {
 	args := []ArgTemplate{{Kind: ArgResume, Value: "--resume"}}
@@ -189,19 +195,26 @@ func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchCo
 	if a.Model != "" {
 		model = lits("--model", a.Model)
 	}
+	// mcp is the MCP config argument and, for an exclusive launch, the flag
+	// that makes it the only MCP config claude reads. The flag is added with
+	// nothing planted too: claude then loads no MCP servers.
+	mcp := p.mcp
+	if a.MCPExclusive {
+		mcp = append(slices.Clone(p.mcp), lit(claudeStrictMCPConfigFlag))
+	}
 	switch shape {
 	case shapePTY:
 		// The TUI rejects the print-mode flags.
 		args = append(args, model...)
-		args = append(args, p.mcp...)
+		args = append(args, mcp...)
 	case shapeStreaming:
 		args = append(args, lits("-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose")...)
 		args = append(args, model...)
-		args = append(args, p.mcp...)
+		args = append(args, mcp...)
 	case shapeBare:
 		args = append(args, lits("-p", "--output-format", "stream-json", "--verbose", "--bare")...)
 		args = append(args, model...)
-		args = append(args, p.mcp...)
+		args = append(args, mcp...)
 		args = append(args, p.instructions...)
 		args = append(args, p.settings...)
 	default:
@@ -210,7 +223,7 @@ func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchCo
 			args = append(args, lits("--input-format", a.InputMode)...)
 		}
 		args = append(args, model...)
-		args = append(args, p.mcp...)
+		args = append(args, mcp...)
 		args = append(args, ArgTemplate{Kind: ArgSystemPrompt, Value: "--system-prompt=", FirstTurnOnly: true})
 	}
 	args = append(args, argExtra)

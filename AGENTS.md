@@ -25,6 +25,10 @@ rate budgets, or any direct HTTP chat or embedding path.
   builder per runtime, which `ProviderProjection` resolves against launch roots
   and each adapter's `BuildArgs` resolves from its own fields, both through
   `LaunchConvention.ResolveTurn`.
+- `registry.MCPExclusivity` and `ClaudeAdapter.MCPExclusive` keep a launch to
+  the MCP servers it plants. The registry declares it per mode only where
+  `hack/probe-mcp-exclusive.sh` measured it, and
+  `provider/testdata/mcp-exclusive` holds the recorded results.
 - `README.md` states the CLI/PTY-only scope and the minimum viable call shape.
 - The `Provider` interface is go-llm-contracts'; the bridges implement it.
   `provider/provider.go` holds the context-value helpers the bridges read;
@@ -79,6 +83,18 @@ Smoke tests that spawn a real CLI are env-gated (`CLAUDE_PTY_SMOKE`,
 The shared model types live in `go-llm-types` and the provider contracts and
 rate-budget primitives in `go-llm-contracts`. Reintroducing an HTTP chat or
 embedding adapter here reverses a deliberate split — this library bridges CLIs.
+
+An MCP-exclusivity claim is a security statement, so it needs evidence: a
+mode gets a `registry.MCPExclusivity` mechanism (`flag`, `projected-layout`) only
+when the probe's golden shows the user's server absent with it, and `absent` only
+for what the probe measured to have no MCP-only switch
+(`TestMCPExclusivityClaimsAreMeasured`), and the claim must match the code
+(`TestMCPExclusivityMatchesTheAdapters`). The flag is spelled in
+`claudeConvention` only, with a literal argv test per shape
+(`TestClaudeMCPExclusiveArgv`). Off, the argv is unchanged. A projection asked
+for exclusivity (`ProjectionOptions.MCPExclusive`) applies the mechanism or
+fails with `ErrMCPExclusiveUnsupported`, never launches non-exclusive
+(`TestProjectionMCPExclusive`).
 
 Boot-dir specs write real files into a real directory for a real CLI, so the
 "no side effect" cases are load-bearing: an empty boot dir must produce no

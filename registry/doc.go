@@ -35,6 +35,23 @@
 // the EnvOverride variable, then PATH, then common install directories and
 // the descriptor's LookupDirs.
 //
+// # MCP exclusivity
+//
+// A CLI normally loads the user's own MCP servers next to the ones a launch
+// plants. [Descriptor.MCPExclusivity] says, per native mode, what was measured
+// about keeping a launch to its own: [MCPExclusivityFlag] (a CLI flag the
+// launch adds: Claude's --strict-mcp-config), [MCPExclusivityProjectedLayout]
+// (the runtime reads its MCP servers only from the config root the projection
+// sets: Codex, CODEX_HOME=<boot>; it does not hold for BuildArgs run in a
+// host's own environment), [MCPExclusivityAbsent] (measured, no MCP-only
+// switch: OpenCode), or [MCPExclusivityNone], where nothing was measured
+// (Antigravity could not be, and an ACP mode has none) and a host that needs
+// exclusivity must refuse the mode. [MCPExclusivity.Exclusive] is true for the
+// first two. Like a capability it is declared only where
+// hack/probe-mcp-exclusive.sh measured it, and only for what it measured:
+// user-level and working-directory MCP config. Account connectors, managed
+// servers and plugins were not measured.
+//
 // # Permission posture
 //
 // A permission posture is go-permission's Mode (D-72): default, accept-edits,
