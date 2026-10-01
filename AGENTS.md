@@ -90,7 +90,10 @@ the user's server absent with it
 (`TestMCPExclusivityClaimsAreMeasured`), and the claim must match the code
 (`TestMCPExclusivityMatchesTheAdapters`). The flag is spelled in
 `claudeConvention` only, with a literal argv test per shape
-(`TestClaudeMCPExclusiveArgv`). Off, the argv is unchanged.
+(`TestClaudeMCPExclusiveArgv`). Off, the argv is unchanged. A projection asked
+for exclusivity (`ProjectionOptions.MCPExclusive`) applies the mechanism or
+fails with `ErrMCPExclusiveUnsupported`, never launches non-exclusive
+(`TestProjectionMCPExclusive`).
 
 Boot-dir specs write real files into a real directory for a real CLI, so the
 "no side effect" cases are load-bearing: an empty boot dir must produce no

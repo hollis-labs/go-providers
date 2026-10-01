@@ -200,7 +200,7 @@ func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchCo
 	// nothing planted too: claude then loads no MCP servers.
 	mcp := p.mcp
 	if a.MCPExclusive {
-		mcp = append(slices.Clone(p.mcp), lit("--strict-mcp-config"))
+		mcp = append(slices.Clone(p.mcp), lit(claudeStrictMCPConfigFlag))
 	}
 	switch shape {
 	case shapePTY:

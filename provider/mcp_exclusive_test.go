@@ -2,8 +2,10 @@ package provider
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -264,4 +266,111 @@ func TestMCPExclusivityClaimsAreMeasured(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ProjectionOptions.MCPExclusive is the plan-level request: every native
+// shape either gets its mechanism or is refused, so a host never launches
+// non-exclusive without knowing. Claude's convention gains the flag, a layout
+// mode needs nothing added, and a mode with no measured mechanism fails.
+func TestProjectionMCPExclusive(t *testing.T) {
+	roots := ProjectionRoots{ProjectRoot: "/p/project", BootRoot: "/p/boot"}
+	ctx := PlantContext{AgentName: "agent"}
+	for _, c := range builtinModes {
+		t.Run(string(c.provider)+"/"+c.mode.String(), func(t *testing.T) {
+			d, ok := registry.Lookup(string(c.provider))
+			if !ok {
+				t.Fatalf("no registry descriptor for %s", c.provider)
+			}
+			how := d.MCPExclusivity(c.mode.Mode)
+			plain, err := c.adapter().ProviderProjection(ctx, ProjectionOptions{})
+			if err != nil {
+				t.Fatalf("plain projection: %v", err)
+			}
+			plainLaunch, err := plain.ResolveLaunch(roots, "x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(plainLaunch.Argv, strictMCPFlag) {
+				t.Fatalf("a launch that did not ask for exclusivity carries %s: %q", strictMCPFlag, plainLaunch.Argv)
+			}
+			adapter := c.adapter()
+			proj, err := adapter.ProviderProjection(ctx, ProjectionOptions{MCPExclusive: true})
+			switch how {
+			case registry.MCPExclusivityNone:
+				if !errors.Is(err, ErrMCPExclusiveUnsupported) {
+					t.Fatalf("a mode with no measured mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
+				}
+			case registry.MCPExclusivityFlag:
+				if err != nil {
+					t.Fatalf("projection: %v", err)
+				}
+				got, resolveErr := proj.ResolveLaunch(roots, "x")
+				if resolveErr != nil {
+					t.Fatal(resolveErr)
+				}
+				if n := countOf(got.Argv, strictMCPFlag); n != 1 {
+					t.Fatalf("%s %d times in %q, want once", strictMCPFlag, n, got.Argv)
+				}
+				// Exactly the flag is added: without it the argv is the plain one.
+				if without := slices.DeleteFunc(slices.Clone(got.Argv), func(a string) bool { return a == strictMCPFlag }); !slices.Equal(without, plainLaunch.Argv) {
+					t.Errorf("the option changed more than the flag:\n  without the flag %q\n  plain            %q", without, plainLaunch.Argv)
+				}
+				// The same request through the adapter's own field gives the
+				// same convention.
+				if ca, ok := c.adapter().(*ClaudeAdapter); ok {
+					ca.MCPExclusive = true
+					byField, fieldErr := ca.ProviderProjection(ctx, ProjectionOptions{})
+					if fieldErr != nil {
+						t.Fatal(fieldErr)
+					}
+					if !reflect.DeepEqual(byField.Launch, proj.Launch) {
+						t.Errorf("option and field give different conventions:\n  option %+v\n  field  %+v", proj.Launch, byField.Launch)
+					}
+					// Both at once is still one flag.
+					both, bothErr := ca.ProviderProjection(ctx, ProjectionOptions{MCPExclusive: true})
+					if bothErr != nil {
+						t.Fatal(bothErr)
+					}
+					b, _ := both.ResolveLaunch(roots, "x")
+					if n := countOf(b.Argv, strictMCPFlag); n != 1 {
+						t.Errorf("field and option together: %s %d times, want once", strictMCPFlag, n)
+					}
+				}
+				// The caller's adapter is not changed to satisfy the request.
+				if ca, ok := adapter.(*ClaudeAdapter); ok && ca.MCPExclusive {
+					t.Error("ProviderProjection set MCPExclusive on the caller's adapter")
+				}
+			case registry.MCPExclusivityLayout:
+				if err != nil {
+					t.Fatalf("projection: %v", err)
+				}
+				got, resolveErr := proj.ResolveLaunch(roots, "x")
+				if resolveErr != nil {
+					t.Fatal(resolveErr)
+				}
+				if !slices.Equal(got.Argv, plainLaunch.Argv) {
+					t.Errorf("a layout mode adds nothing to argv: got %q, plain %q", got.Argv, plainLaunch.Argv)
+				}
+				if !envIs(got, "CODEX_HOME", roots.BootRoot) {
+					t.Errorf("the launch does not set the config root: %v", got.Env)
+				}
+			}
+		})
+	}
+}
+
+// The projection refuses, not the caller's luck: with the registry's claim
+// removed the flag and the layout checks fail on their own.
+func TestRequireMCPExclusiveChecksTheConvention(t *testing.T) {
+	flagless := ProviderProjection{Provider: runtimes.Claude, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Argv: lits("-p")}}
+	if err := requireMCPExclusive(flagless, ProjectionOptions{MCPExclusive: true}); !errors.Is(err, ErrMCPExclusiveUnsupported) {
+		t.Errorf("a claude convention without the flag: err = %v, want ErrMCPExclusiveUnsupported", err)
+	}
+	rootless := ProviderProjection{Provider: runtimes.Codex, Mode: runtimes.ModeSubprocessPerTurn}
+	if err := requireMCPExclusive(rootless, ProjectionOptions{MCPExclusive: true}); !errors.Is(err, ErrMCPExclusiveUnsupported) {
+		t.Errorf("a codex convention that sets no CODEX_HOME: err = %v, want ErrMCPExclusiveUnsupported", err)
+	}
+	if err := requireMCPExclusive(flagless, ProjectionOptions{}); err != nil {
+		t.Errorf("no request, no check: %v", err)
+	}
 }

@@ -20,6 +20,16 @@ extras API's limits are documented and tested (CW-20261001-0219).
   - It ends the variadic `--mcp-config` list, so an extra that starts with a
     non-flag token can no longer join it as another config file.
   - Off by default, and then the argv is byte-for-byte what it was.
+- **`ProjectionOptions.MCPExclusive`**: the same request on the prepared path,
+  which a plan-level option (agentkit's `ProviderSpec`) passes straight
+  through. The projection applies the mode's mechanism itself, so it works for
+  an adapter the host pinned or a custom resolver built, and it never changes
+  the caller's adapter (Claude's convention gets the flag on a copy). A mode
+  with no measured mechanism makes `ProviderProjection` fail with
+  **`ErrMCPExclusiveUnsupported`**: the request is refused, never ignored, so a
+  host cannot launch non-exclusive without knowing. It trusts neither side
+  alone: the registry must declare a mechanism, and the projection's own launch
+  convention must carry it (the flag, or the `CODEX_HOME` config root).
 - **`registry.MCPExclusivity`**, so a host can ask whether a runtime and mode
   can be made exclusive: `Descriptor.MCPExclusivity(mode)` and
   `ProjectionFacts.MCPExclusive`, which holds a value only for a measured mode.
@@ -61,7 +71,10 @@ extras API's limits are documented and tested (CW-20261001-0219).
   cases, so the adapter path equals `ResolveTurn` for each; the registry's
   claims against the adapters (a flag mode's adapter adds the flag when asked,
   a layout mode's launch sets `CODEX_HOME`, and nothing else claims anything);
-  and each claim against the recorded golden.
+  each claim against the recorded golden; and the projection path for all nine
+  shapes (Claude's bare variant included): the flag where declared, nothing
+  added for a layout mode, a refusal for the rest, the option and the field
+  never doubling the flag, and the caller's adapter left alone.
 
 ### Documented
 

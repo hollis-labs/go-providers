@@ -102,6 +102,15 @@ type ProjectionOptions struct {
 	Version          string
 	Skills           []SkillPackage
 	RequiredFeatures []registry.Feature
+	// MCPExclusive requires the launch to load only the MCP servers it
+	// plants, not also the user's own (CW-20261001-0225). The projection
+	// applies the mode's mechanism, as registry.MCPExclusivity declares it:
+	// Claude's launch convention gains --strict-mcp-config, and a layout mode
+	// (Codex) is already exclusive. A mode with no measured mechanism makes
+	// ProviderProjection fail with ErrMCPExclusiveUnsupported rather than
+	// launch non-exclusive. An adapter's own MCPExclusive field is the same
+	// request for the adapter path.
+	MCPExclusive bool
 }
 
 // ProjectionProvider is implemented by adapters that can render provider-owned
@@ -383,19 +392,23 @@ func (a *ClaudeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOpti
 		return ProviderProjection{}, err
 	}
 	files = append(files, skillFiles...)
+	// The convention reads the adapter's fields; a projection asked to be
+	// exclusive gets that on a copy, so the caller's adapter is not changed.
+	launchAdapter := *a
+	launchAdapter.MCPExclusive = a.MCPExclusive || opts.MCPExclusive
 	proj := ProviderProjection{
 		Provider: runtimes.Claude,
 		Mode:     shape.Mode,
 		Variant:  shape.Variant,
 		Version:  opts.Version,
 		Files:    sortProjectedFiles(files),
-		Launch:   claudeConvention(a, shape, claudeLayoutPaths(shape, len(opts.Skills) > 0)),
+		Launch:   claudeConvention(&launchAdapter, shape, claudeLayoutPaths(shape, len(opts.Skills) > 0)),
 		Effects: []ProviderEffect{
 			{Kind: EffectClaudeCredentialHelper, Destination: layoutRel(pid, shape, layout.NativeConfig, ""), Reason: "apiKeyHelper may execute at runtime; projection only serializes the configured path"},
 			{Kind: EffectClaudeWorkspaceTrust, Reason: "workspace trust seeding mutates host state and is handled by explicit preparation"},
 		},
 	}
-	return requireProjectedFeatures(proj, opts.RequiredFeatures)
+	return requireProjected(proj, opts)
 }
 
 // ProviderProjection renders a pure projection for a Codex adapter.
@@ -434,7 +447,7 @@ func (a *CodexAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOptio
 			{Kind: EffectCodexAuthJSON, Destination: layoutRel(pid, shape, layout.Auth, ""), Reason: "auth.json contains credentials and must be resolved by explicit runtime preparation"},
 		},
 	}
-	return requireProjectedFeatures(proj, opts.RequiredFeatures)
+	return requireProjected(proj, opts)
 }
 
 // ProviderProjection renders a pure projection for an Antigravity adapter.
@@ -468,7 +481,7 @@ func (a *AntigravityAdapter) ProviderProjection(ctx PlantContext, opts Projectio
 			{Kind: EffectAntigravityAuth, Reason: "agy authenticates from OAuth credentials under ~/.gemini, shared with the desktop app; they are never projected or relocated"},
 		},
 	}
-	return requireProjectedFeatures(proj, opts.RequiredFeatures)
+	return requireProjected(proj, opts)
 }
 
 // ProviderProjection renders a pure projection for an OpenCode adapter.
@@ -513,7 +526,7 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 			{Kind: EffectOpencodeProviderAuth, Reason: "provider credentials are resolved by OpenCode or explicit runtime preparation"},
 		},
 	}
-	return requireProjectedFeatures(proj, opts.RequiredFeatures)
+	return requireProjected(proj, opts)
 }
 
 func firstNonEmpty(v, fallback string) string {

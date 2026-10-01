@@ -43,6 +43,7 @@ type ClaudeAdapter struct {
 	// it loads no MCP servers at all. Off by default, which leaves the argv
 	// as it was. Measured in every shape (registry.MCPExclusivityFlag);
 	// --bare already skips the user's servers, and the flag is harmless there.
+	// ProjectionOptions.MCPExclusive is the same request on the prepared path.
 	MCPExclusive bool
 
 	// PermissionMode sets `permissions.defaultMode` in the planted
