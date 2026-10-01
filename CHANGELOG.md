@@ -2,6 +2,7 @@
 
 ## v0.38.0 — 2026-10-01
 
+<<<<<<< HEAD
 A cooperative turn interrupt for Claude's streaming stdin (CW-20261001-0103).
 
 ### Added
@@ -28,6 +29,34 @@ A cooperative turn interrupt for Claude's streaming stdin (CW-20261001-0103).
 - **`hack/capturefixtures -only <stems>`** re-records named fixtures and
   merges them into `captured.json`. It refuses when the CLI version differs
   from the manifest's.
+=======
+### Added
+
+- **`ClaudeAdapter` implements `SessionLostClassifier`** (CW-20261001-0047).
+  - `claude --resume <id>` with an id claude no longer has writes "No
+    conversation found with session ID: <id>" to stderr and exits 1. Its
+    result line carries no reason.
+  - `IsSessionLost` recognizes that line, so a session layer can map an
+    unknown resume id to `ErrProviderSessionLost`.
+  - Claude's streaming-stdio and subprocess-per-turn modes now declare
+    `session-lost-classifier`. Both are measured: the replay tests drive
+    `claude/print_resume_unknown_id` and `claude/stream_resume_unknown_id`
+    through providertest. PTY mode is not measured and does not declare it.
+
+### Decided
+
+- **Codex exec stays single-turn, with no session-lost classifier.**
+  - `CodexAdapter` builds no `exec resume` argv, so a classifier for an id
+    it never passes would be a claim nothing exercises, and
+    `TestDeclaredCapabilitiesMatchAdapters` would require declaring it.
+  - `codex exec resume` (0.159.2) accepts neither `--cd` nor `-s`, both of
+    which exec turns may carry, so resumable exec would need its own
+    convention.
+  - Resumable Codex is app-server (D-74), where agentkit classifies a lost
+    thread from the JSON-RPC error.
+  - The unknown-id capture stays in
+    `providertest/fixtures/codex/exec_resume_unknown_id`.
+>>>>>>> origin/main
 
 ## v0.37.0 — 2026-10-01
 
