@@ -38,7 +38,8 @@ the CLI's side:
 
 Replay waits at each `recv` for a matching frame (same JSON-RPC method,
 same response id, or same `type`), answers JSON-RPC requests with the
-live request's id, and otherwise follows the lines in order. The step
+live request's id (and a Claude `control_response` with the live
+`control_request`'s `request_id`), and otherwise follows the lines in order. The step
 reference is `providertest.Step`.
 
 `captured.json` in a captured directory records the CLI version, the
@@ -61,6 +62,7 @@ stay out of `system/init`.
 | `stream_two_turns` | `-p --input-format stream-json --output-format stream-json --verbose`: two user frames on stdin, a result for each, stdin closed, exit 0 |
 | `stream_resume` | the same, with `--resume <stream session>` |
 | `stream_resume_unknown_id` | streaming with an unknown `--resume` id: claude waits for the first user frame, then writes the error result and exits 1 without waiting for stdin to close |
+| `stream_interrupt` | streaming, `--allowedTools 'Bash(ping:*)'`: a turn whose `ping -c 30` is interrupted by a `control_request` (`subtype: interrupt`) once the tool_use is out. Claude answers with a `control_response`, rejects the tool ("[Request interrupted by user for tool use]") and ends the turn with an `error_during_execution` result, `terminal_reason: aborted_tools`; a second user frame then completes on the same process. Captured with `-only stream_interrupt` |
 
 ## codex — captured, codex-cli 0.159.2, model gpt-6-luna (reasoning effort low)
 

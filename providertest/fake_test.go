@@ -295,6 +295,41 @@ func TestStreamingStdioTranscript(t *testing.T) {
 	}
 }
 
+// The interrupt capture used request_id req_interrupt_1; a live client picks
+// its own, and the replayed control_response must answer that one, as a
+// JSON-RPC response answers the live id. The turn then ends and the next one
+// runs on the same process (CW-20261001-0103).
+func TestStreamingInterruptRemapsTheControlRequestID(t *testing.T) {
+	f := providertest.New(t, "claude", providertest.Replay("claude/stream_interrupt"))
+	p := start(t, exec.Command(f.Path, "-p", "--input-format", "stream-json", "--output-format", "stream-json"))
+	p.send(`{"type":"user","message":{"role":"user","content":"run something slow"}}`)
+	p.readUntil(func(l string) bool { return strings.Contains(l, `"type":"tool_use"`) })
+	p.send(`{"type":"control_request","request_id":"live-7","request":{"subtype":"interrupt"}}`)
+	lines := p.readUntil(func(l string) bool { return field(l, "type") == "result" })
+	var ack string
+	for _, l := range lines {
+		if field(l, "type") == "control_response" {
+			ack = l
+		}
+	}
+	if !strings.Contains(ack, `"request_id":"live-7"`) || !strings.Contains(ack, `"subtype":"success"`) {
+		t.Errorf("control_response = %s, want success for live-7", ack)
+	}
+	if res := lines[len(lines)-1]; field(res, "subtype") != "error_during_execution" || field(res, "terminal_reason") != "aborted_tools" {
+		t.Errorf("interrupted turn's result = %s", res)
+	}
+	p.send(`{"type":"user","message":{"role":"user","content":"next"}}`)
+	if next := p.readUntil(func(l string) bool { return field(l, "type") == "result" }); field(next[len(next)-1], "subtype") != "success" {
+		t.Errorf("the turn after the interrupt = %s", next[len(next)-1])
+	}
+	if code := p.wait(); code != 0 {
+		t.Fatalf("exit = %d, stderr %s", code, p.stderr)
+	}
+	if errs := f.Errors(); len(errs) != 0 {
+		t.Errorf("fake errors: %q", errs)
+	}
+}
+
 func TestStreamingLostSessionExitsWithoutEOF(t *testing.T) {
 	f := providertest.New(t, "claude", providertest.Replay("claude/stream_resume_unknown_id"))
 	p := start(t, exec.Command(f.Path, "--resume", "00000000-0000-4000-8000-0000000000ff"))

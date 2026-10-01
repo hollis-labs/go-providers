@@ -90,6 +90,23 @@
       "--strict-mcp-config",
       "--disable-slash-commands"
     ],
+    "stream_interrupt": [
+      "claude",
+      "--allowedTools",
+      "Bash(ping:*)",
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--model",
+      "haiku",
+      "--setting-sources",
+      "local",
+      "--strict-mcp-config",
+      "--disable-slash-commands"
+    ],
     "stream_resume": [
       "claude",
       "--resume",
