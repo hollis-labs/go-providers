@@ -101,8 +101,13 @@ func (a *AntigravityAdapter) Name() string { return "antigravity" }
 // BuildArgs resolves agy's launch convention (see antigravityConvention)
 // from the adapter's fields.
 func (a *AntigravityAdapter) BuildArgs(prompt, systemPrompt, cliSessionID string) []string {
+	return a.BuildArgsWithExtras(prompt, systemPrompt, cliSessionID, nil)
+}
+
+// BuildArgsWithExtras implements ExtraArgsBuilder.
+func (a *AntigravityAdapter) BuildArgsWithExtras(prompt, systemPrompt, cliSessionID string, extras []string) []string {
 	p := pathArgs{projectDirs: fieldProjectDirs(runtimes.Antigravity, shapePerTurn, a.AddDirs...)}
-	return resolveAdapterTurn(antigravityConvention(a, p), prompt, systemPrompt, cliSessionID, a.ExtraArgs)
+	return resolveAdapterTurn(antigravityConvention(a, p), prompt, systemPrompt, cliSessionID, adapterExtras(a.ExtraArgs, extras))
 }
 
 func (a *AntigravityAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
