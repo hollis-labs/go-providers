@@ -300,6 +300,7 @@ func TestProjectionMCPExclusive(t *testing.T) {
 				if !errors.Is(err, ErrMCPExclusiveUnsupported) {
 					t.Fatalf("a mode with no measured mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
 				}
+				wantNamed(t, err, string(c.provider), string(c.mode.Mode))
 			case registry.MCPExclusivityFlag:
 				if err != nil {
 					t.Fatalf("projection: %v", err)
@@ -362,15 +363,48 @@ func TestProjectionMCPExclusive(t *testing.T) {
 // The projection refuses, not the caller's luck: with the registry's claim
 // removed the flag and the layout checks fail on their own.
 func TestRequireMCPExclusiveChecksTheConvention(t *testing.T) {
+	// Fail closed when the registry's claim and the projected convention
+	// disagree, and say which provider and mode, so a host can tell which
+	// launch it asked for and did not get.
 	flagless := ProviderProjection{Provider: runtimes.Claude, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Argv: lits("-p")}}
-	if err := requireMCPExclusive(flagless, ProjectionOptions{MCPExclusive: true}); !errors.Is(err, ErrMCPExclusiveUnsupported) {
+	err := requireMCPExclusive(flagless, ProjectionOptions{MCPExclusive: true})
+	if !errors.Is(err, ErrMCPExclusiveUnsupported) {
 		t.Errorf("a claude convention without the flag: err = %v, want ErrMCPExclusiveUnsupported", err)
 	}
+	wantNamed(t, err, "claude", string(runtimes.ModeSubprocessPerTurn))
 	rootless := ProviderProjection{Provider: runtimes.Codex, Mode: runtimes.ModeSubprocessPerTurn}
-	if err := requireMCPExclusive(rootless, ProjectionOptions{MCPExclusive: true}); !errors.Is(err, ErrMCPExclusiveUnsupported) {
+	err = requireMCPExclusive(rootless, ProjectionOptions{MCPExclusive: true})
+	if !errors.Is(err, ErrMCPExclusiveUnsupported) {
 		t.Errorf("a codex convention that sets no CODEX_HOME: err = %v, want ErrMCPExclusiveUnsupported", err)
 	}
-	if err := requireMCPExclusive(flagless, ProjectionOptions{}); err != nil {
+	wantNamed(t, err, "codex", string(runtimes.ModeSubprocessPerTurn))
+	// A codex convention that unsets the root, or only prepends to it, does not
+	// hold the claim either: the root must be set.
+	prepends := ProviderProjection{Provider: runtimes.Codex, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Env: []EnvDelta{{Name: "CODEX_HOME", Operation: EnvPrepend, Value: "/x"}}}}
+	err = requireMCPExclusive(prepends, ProjectionOptions{MCPExclusive: true})
+	if !errors.Is(err, ErrMCPExclusiveUnsupported) {
+		t.Errorf("a codex convention that only prepends to CODEX_HOME: err = %v, want ErrMCPExclusiveUnsupported", err)
+	}
+	// A mode with no mechanism at all is refused whatever the convention holds.
+	none := ProviderProjection{Provider: runtimes.OpenCode, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Argv: lits(claudeStrictMCPConfigFlag)}}
+	err = requireMCPExclusive(none, ProjectionOptions{MCPExclusive: true})
+	if !errors.Is(err, ErrMCPExclusiveUnsupported) {
+		t.Errorf("a mode with no mechanism: err = %v, want ErrMCPExclusiveUnsupported", err)
+	}
+	wantNamed(t, err, "opencode", string(runtimes.ModeSubprocessPerTurn))
+	if err = requireMCPExclusive(flagless, ProjectionOptions{}); err != nil {
 		t.Errorf("no request, no check: %v", err)
+	}
+}
+
+// wantNamed fails unless err names the provider and the mode it refused.
+func wantNamed(t *testing.T, err error, provider, mode string) {
+	t.Helper()
+	if err == nil {
+		t.Error("no error to name the provider and mode")
+		return
+	}
+	if want := provider + "/" + mode; !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name %q", err, want)
 	}
 }
