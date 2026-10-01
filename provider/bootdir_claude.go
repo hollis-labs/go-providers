@@ -70,6 +70,7 @@ func (a *ClaudeAdapter) BootDirSpec() BootDirSpec {
 			},
 			{
 				RelPath: layoutRel(pid, shape, layout.MCP, ""),
+				Mode:    layoutFileMode(pid, shape, layout.MCP),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderMCPJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},

@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.36.0 — 2026-10-01
+
+MCP servers reach every runtime's boot dir (CW-20260930-0136, W4b and item 3).
+
+### Changed
+
+- **`PlantContext.MCPServers` is planted for every runtime with a boot-dir MCP
+  config**, stdio and http alike. Only codex read it before; claude and
+  opencode apps had to render MCP config themselves. Each server is written in
+  the CLI's own form into the file its layout row names:
+
+  | runtime | file | stdio | http |
+  |---|---|---|---|
+  | claude | `.mcp.json` | `{type: stdio, command, args, env}` | `{type: http, url}` |
+  | codex | `config.toml` `[mcp_servers.<name>]` | `command`, `args`, `[.env]` | `url` |
+  | opencode | `opencode.json` `mcp` | `{type: local, command: [cmd, args...], environment}` | `{type: remote, url, enabled}` |
+  | antigravity | `.agents/plugins/tether/mcp_config.json` | `{command, args, env}` | `{serverUrl}` |
+
+  The `.mcp.json` mirrors codex and opencode plant for operators carry the
+  same servers in claude's form. Copilot and Pi take MCP servers over ACP, not
+  from a boot dir.
+- One validation for every renderer (`validateMCPServers`): a bad, reserved
+  (`loopback`, `mux`) or duplicate name, or anything other than exactly one
+  transport, fails the Render and the `ProviderProjection`, where claude,
+  opencode and antigravity used to ignore the field.
+- With no `MCPServers`, every planted config is byte-identical to before.
+
+### Security
+
+- **Every file that can carry MCP server env is planted owner-only (0600).**
+  OpenCode's `opencode.json` now carries MCP servers and their `environment`,
+  but its layout row had no `FileMode`, so it was written with the default
+  mode. The row is now 0600. Claude's `.mcp.json` was 0600 in the projection
+  but had no mode on the `BootDirSpec` path; it now takes the layout's mode
+  there too. `TestMCPBearingFilesAreOwnerOnly` renders with a secret in a
+  server's env and requires every planted and projected file containing it
+  to be 0600, so a future row cannot regress this. `MCPServerSpec` has no
+  headers, so no HTTP auth header is written anywhere.
+
 ## v0.35.0 — 2026-10-01
 
 Event vocabulary (CW-20260930-0137; closes the provider half of CW-20260930-0228

@@ -71,7 +71,10 @@ func (a *OpencodeAdapter) BootDirSpec() BootDirSpec {
 				},
 			},
 			{
+				// opencode.json carries MCP servers and their env, so it is
+				// owner-only like every other MCP-bearing file.
 				RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName),
+				Mode:    layoutFileMode(pid, shape, layout.NativeConfig),
 				Render: func(ctx PlantContext) (string, error) {
 					return renderOpencodeJSON(ctx.MCPLoopbackURL, muxEntryFromContext(ctx), ctx.MCPServers)
 				},

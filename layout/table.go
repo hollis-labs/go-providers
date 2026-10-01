@@ -63,7 +63,7 @@ var table = []Entry{
 	{Provider: runtimes.OpenCode, Concern: Instructions, Root: RootBoot, Rel: "agents/" + AgentPlaceholder + ".md",
 		Env: map[string]string{"OPENCODE_CONFIG_DIR": "boot"}, CWD: RootProject,
 		Unprobed: "agent prompt file is model-visible only; Step 0 does not measure it"},
-	{Provider: runtimes.OpenCode, Concern: NativeConfig, Root: RootBoot, Rel: "opencode.json",
+	{Provider: runtimes.OpenCode, Concern: NativeConfig, Root: RootBoot, Rel: "opencode.json", FileMode: 0o600,
 		Env: map[string]string{"OPENCODE_CONFIG_DIR": "boot"}, CWD: RootProject,
 		Probe: []string{"CFG2"},
 		Note:  "$OPENCODE_CONFIG_DIR/opencode.json is merged with project and user config"},

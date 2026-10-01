@@ -492,7 +492,7 @@ func (a *OpencodeAdapter) ProviderProjection(ctx PlantContext, opts ProjectionOp
 	}
 	files := []ProjectedFile{
 		{RelPath: layoutRel(pid, shape, layout.Instructions, agentName), Content: []byte(renderOpencodeAgentMD(agentName, ctx)), Role: "instructions"},
-		{RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName), Content: []byte(opencodeJSON), Role: "native-config"},
+		{RelPath: layoutRel(pid, shape, layout.NativeConfig, agentName), Content: []byte(opencodeJSON), Mode: layoutFileMode(pid, shape, layout.NativeConfig), Role: "native-config"},
 		{RelPath: layoutRel(pid, shape, layout.Boot, agentName), Content: []byte(ctx.BootContent), Role: "boot"},
 		{RelPath: layoutRel(pid, shape, layout.MCP, agentName), Content: []byte(mcpMirror), Mode: layoutFileMode(pid, shape, layout.MCP), Role: "mcp-mirror"},
 	}

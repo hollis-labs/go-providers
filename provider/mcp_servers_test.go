@@ -209,3 +209,55 @@ func TestNoMCPServersLeavesConfigsUnchanged(t *testing.T) {
 		t.Errorf("opencode.json without MCP = %q", o)
 	}
 }
+
+// Every planted or projected file that can carry an MCP server's env must be
+// owner-only. Rendering with a secret in a server's env finds each file that
+// carries it, so a new row or renderer that plants MCP env without 0600 fails
+// here.
+func TestMCPBearingFilesAreOwnerOnly(t *testing.T) {
+	const secret = "s3cr3t-mcp-env"
+	ctx := PlantContext{
+		AgentName:      "worker",
+		MCPLoopbackURL: "http://127.0.0.1:65535/mcp",
+		MuxCommand:     "/bin/mux",
+		MuxEnv:         []string{"MUX_TOKEN=" + secret},
+		MCPServers:     []MCPServerSpec{{Name: "nanite", Command: "/bin/nanite", Env: []string{"TOKEN=" + secret}}},
+	}
+	type planter interface {
+		BootDirSpec() BootDirSpec
+		ProviderProjection(PlantContext, ProjectionOptions) (ProviderProjection, error)
+	}
+	adapters := map[string]planter{
+		"claude":      &ClaudeAdapter{},
+		"codex":       &CodexAdapter{},
+		"opencode":    &OpencodeAdapter{},
+		"antigravity": &AntigravityAdapter{},
+	}
+	for name, a := range adapters {
+		var carriers int
+		for _, f := range a.BootDirSpec().PlantedFiles {
+			out, err := f.Render(ctx)
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, f.RelPath, err)
+			}
+			if strings.Contains(out, secret) {
+				carriers++
+				if f.Mode != 0o600 {
+					t.Errorf("%s BootDirSpec %s carries MCP env with mode %v; want 0600", name, f.RelPath, f.Mode)
+				}
+			}
+		}
+		proj, err := a.ProviderProjection(ctx, ProjectionOptions{})
+		if err != nil {
+			t.Fatalf("%s projection: %v", name, err)
+		}
+		for _, f := range proj.Files {
+			if strings.Contains(string(f.Content), secret) && f.Mode != 0o600 {
+				t.Errorf("%s projection %s carries MCP env with mode %v; want 0600", name, f.RelPath, f.Mode)
+			}
+		}
+		if carriers == 0 {
+			t.Errorf("%s planted no file carrying the MCP env; the test would prove nothing", name)
+		}
+	}
+}

@@ -206,6 +206,7 @@
       "concern": "native-config",
       "root": "boot",
       "rel": "opencode.json",
+      "file_mode": 384,
       "env": {
         "OPENCODE_CONFIG_DIR": "boot"
       },
