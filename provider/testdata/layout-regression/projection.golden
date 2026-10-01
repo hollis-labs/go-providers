@@ -4,9 +4,9 @@ file .claude/settings.json mode=0000 role=native-config sha=ca3d163bab05
 file .mcp.json mode=0600 role=mcp sha=47d93eee06b4
 file CLAUDE.md mode=0000 role=instructions sha=0d94bbadf34b
 file boot.md mode=0000 role=boot sha=da91b953f821
-launch {"executable":"claude","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"prompt"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"system-prompt","value":"--system-prompt","first_turn_only":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true}],"env":null}
+launch {"executable":"claude","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"system-prompt","value":"--system-prompt=","first_turn_only":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true},{"kind":"prompt"}],"env":null}
 effects [{"kind":"claude-credential-helper","destination":".claude/settings.json","reason":"apiKeyHelper may execute at runtime; projection only serializes the configured path"},{"kind":"claude-workspace-trust","reason":"workspace trust seeding mutates host state and is handled by explicit preparation"}]
-binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","PROMPT","--output-format","stream-json","--verbose","--mcp-config","/p/boot/.mcp.json","--add-dir","/p/project"],"env":[]}
+binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","stream-json","--verbose","--mcp-config","/p/boot/.mcp.json","--add-dir","/p/project","--","PROMPT"],"env":[]}
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
@@ -18,9 +18,9 @@ file .claude/settings.json mode=0000 role=native-config sha=6d083d404f61
 file .mcp.json mode=0600 role=mcp sha=47d93eee06b4
 file CLAUDE.md mode=0000 role=instructions sha=0d94bbadf34b
 file boot.md mode=0000 role=boot sha=da91b953f821
-launch {"executable":"claude","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"prompt"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"system-prompt","value":"--system-prompt","first_turn_only":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true},{"kind":"literal","value":"--dangerously-skip-permissions"}],"env":null}
+launch {"executable":"claude","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"system-prompt","value":"--system-prompt=","first_turn_only":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true},{"kind":"literal","value":"--dangerously-skip-permissions"},{"kind":"prompt"}],"env":null}
 effects [{"kind":"claude-credential-helper","destination":".claude/settings.json","reason":"apiKeyHelper may execute at runtime; projection only serializes the configured path"},{"kind":"claude-workspace-trust","reason":"workspace trust seeding mutates host state and is handled by explicit preparation"}]
-binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","PROMPT","--output-format","stream-json","--verbose","--mcp-config","/p/boot/.mcp.json","--add-dir","/p/project","--dangerously-skip-permissions"],"env":[]}
+binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","stream-json","--verbose","--mcp-config","/p/boot/.mcp.json","--add-dir","/p/project","--dangerously-skip-permissions","--","PROMPT"],"env":[]}
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
@@ -32,9 +32,9 @@ file .claude/settings.json mode=0000 role=native-config sha=ca3d163bab05
 file .mcp.json mode=0600 role=mcp sha=47d93eee06b4
 file CLAUDE.md mode=0000 role=instructions sha=0d94bbadf34b
 file boot.md mode=0000 role=boot sha=da91b953f821
-launch {"executable":"claude","mode":"subprocess-per-turn","variant":"bare","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"prompt"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"literal","value":"--bare"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"file","value":"--append-system-prompt-file","root":"boot","rel_path":"CLAUDE.md","omit_empty":true},{"kind":"file","value":"--settings","root":"boot","rel_path":".claude/settings.json","omit_empty":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true}],"env":null}
+launch {"executable":"claude","mode":"subprocess-per-turn","variant":"bare","cwd":"boot","config_root":"boot","argv":[{"kind":"resume","value":"--resume"},{"kind":"literal","value":"-p"},{"kind":"literal","value":"--output-format"},{"kind":"literal","value":"stream-json"},{"kind":"literal","value":"--verbose"},{"kind":"literal","value":"--bare"},{"kind":"file","value":"--mcp-config","root":"boot","rel_path":".mcp.json","omit_empty":true},{"kind":"file","value":"--append-system-prompt-file","root":"boot","rel_path":"CLAUDE.md","omit_empty":true},{"kind":"file","value":"--settings","root":"boot","rel_path":".claude/settings.json","omit_empty":true},{"kind":"extra"},{"kind":"root","value":"--add-dir","root":"project","omit_empty":true},{"kind":"prompt"}],"env":null}
 effects [{"kind":"claude-credential-helper","destination":".claude/settings.json","reason":"apiKeyHelper may execute at runtime; projection only serializes the configured path"},{"kind":"claude-workspace-trust","reason":"workspace trust seeding mutates host state and is handled by explicit preparation"}]
-binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","PROMPT","--output-format","stream-json","--verbose","--bare","--mcp-config","/p/boot/.mcp.json","--append-system-prompt-file","/p/boot/CLAUDE.md","--settings","/p/boot/.claude/settings.json","--add-dir","/p/project"],"env":[]}
+binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","stream-json","--verbose","--bare","--mcp-config","/p/boot/.mcp.json","--append-system-prompt-file","/p/boot/CLAUDE.md","--settings","/p/boot/.claude/settings.json","--add-dir","/p/project","--","PROMPT"],"env":[]}
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
@@ -75,9 +75,9 @@ file AGENTS.md mode=0000 role=instructions sha=6cc56bc4fe28
 file auth.json mode=0600 role=credential-placeholder sha=e3b0c44298fc
 file boot.md mode=0000 role=boot sha=da91b953f821
 file config.toml mode=0600 role=native-config sha=65960e2294fc
-launch {"executable":"codex","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"literal","value":"exec"},{"kind":"prompt"},{"kind":"extra"},{"kind":"literal","value":"--json"},{"kind":"literal","value":"--skip-git-repo-check"},{"kind":"root","value":"--cd","root":"project","omit_empty":true}],"env":[{"name":"CODEX_HOME","value":"boot","operation":"set","precedence":"provider-wins"}]}
+launch {"executable":"codex","mode":"subprocess-per-turn","cwd":"boot","config_root":"boot","argv":[{"kind":"literal","value":"exec"},{"kind":"extra"},{"kind":"literal","value":"--json"},{"kind":"literal","value":"--skip-git-repo-check"},{"kind":"root","value":"--cd","root":"project","omit_empty":true},{"kind":"prompt"}],"env":[{"name":"CODEX_HOME","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"codex-auth-json","destination":"auth.json","reason":"auth.json contains credentials and must be resolved by explicit runtime preparation"}]
-binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["exec","PROMPT","--json","--skip-git-repo-check","--cd","/p/project"],"env":[{"name":"CODEX_HOME","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
+binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["exec","--json","--skip-git-repo-check","--cd","/p/project","--","PROMPT"],"env":[{"name":"CODEX_HOME","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file AGENTS.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file config.toml mode=0600
@@ -108,7 +108,7 @@ file boot.md mode=0000 role=boot sha=da91b953f821
 file opencode.json mode=0000 role=native-config sha=5d8770d5cb53
 launch {"executable":"opencode","mode":"subprocess-per-turn","cwd":"project","config_root":"boot","argv":[{"kind":"literal","value":"run"},{"kind":"literal","value":"--format"},{"kind":"literal","value":"json"},{"kind":"literal","value":"--agent"},{"kind":"literal","value":"fixture-agent"},{"kind":"literal","value":"--model"},{"kind":"literal","value":"fixture/model"},{"kind":"root","value":"--dir","root":"project","omit_empty":true},{"kind":"resume","value":"--session"},{"kind":"extra"},{"kind":"prompt","with_system":true}],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"opencode-provider-auth","reason":"provider credentials are resolved by OpenCode or explicit runtime preparation"}]
-binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--model","fixture/model","--dir","/p/project","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
+binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--model","fixture/model","--dir","/p/project","--","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file agents/fixture-agent.md mode=0000
 legacy-file opencode.json mode=0000
 legacy-file boot.md mode=0000
@@ -122,7 +122,7 @@ file boot.md mode=0000 role=boot sha=da91b953f821
 file opencode.json mode=0000 role=native-config sha=5d8770d5cb53
 launch {"executable":"opencode","mode":"subprocess-per-turn","cwd":"project","config_root":"boot","argv":[{"kind":"literal","value":"run"},{"kind":"literal","value":"--format"},{"kind":"literal","value":"json"},{"kind":"literal","value":"--agent"},{"kind":"literal","value":"fixture-agent"},{"kind":"root","value":"--dir","root":"project","omit_empty":true},{"kind":"resume","value":"--session"},{"kind":"extra"},{"kind":"prompt","with_system":true}],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"opencode-provider-auth","reason":"provider credentials are resolved by OpenCode or explicit runtime preparation"}]
-binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--dir","/p/project","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
+binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--dir","/p/project","--","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file agents/default.md mode=0000
 legacy-file opencode.json mode=0000
 legacy-file boot.md mode=0000

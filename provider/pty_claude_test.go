@@ -104,7 +104,7 @@ func TestClaudeBuildArgs_PTY_IgnoresPromptAndSystemPrompt(t *testing.T) {
 func TestClaudeBuildArgs_PrintMode_NoSystemPromptNoResume(t *testing.T) {
 	a := &ClaudeAdapter{}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -113,7 +113,7 @@ func TestClaudeBuildArgs_PrintMode_NoSystemPromptNoResume(t *testing.T) {
 func TestClaudeBuildArgs_PrintMode_WithSystemPrompt(t *testing.T) {
 	a := &ClaudeAdapter{}
 	args := a.BuildArgs("hello", "sys", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--system-prompt", "sys"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--system-prompt=sys", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -124,7 +124,7 @@ func TestClaudeBuildArgs_PrintMode_WithResumeIgnoresSystemPrompt(t *testing.T) {
 	// Pin this so the PTY refactor doesn't accidentally change it.
 	a := &ClaudeAdapter{}
 	args := a.BuildArgs("hello", "sys", "sess-x")
-	want := []string{"--resume", "sess-x", "-p", "hello", "--output-format", "stream-json", "--verbose"}
+	want := []string{"--resume", "sess-x", "-p", "--output-format", "stream-json", "--verbose", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -133,7 +133,7 @@ func TestClaudeBuildArgs_PrintMode_WithResumeIgnoresSystemPrompt(t *testing.T) {
 func TestClaudeBuildArgs_PrintMode_DevSkipPermissions(t *testing.T) {
 	a := &ClaudeAdapter{SkipPermissions: true}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -183,20 +183,20 @@ func TestClaudeBuildArgs_NonBare_ByteForByteIdentical(t *testing.T) {
 			name:    "Dev print, no system, no resume",
 			adapter: NewClaudeAdapterDev(),
 			prompt:  "hello",
-			want:    []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"},
+			want:    []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--", "hello"},
 		},
 		{
 			name:     "Print with system prompt",
 			adapter:  NewClaudeAdapter(),
 			prompt:   "hello",
 			sysPrmpt: "sys",
-			want:     []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--system-prompt", "sys"},
+			want:     []string{"-p", "--output-format", "stream-json", "--verbose", "--system-prompt=sys", "--", "hello"},
 		},
 		{
 			name:    "Print with resume ignores system",
 			adapter: NewClaudeAdapter(),
 			prompt:  "hello", sysPrmpt: "sys", session: "sess-x",
-			want: []string{"--resume", "sess-x", "-p", "hello", "--output-format", "stream-json", "--verbose"},
+			want: []string{"--resume", "sess-x", "-p", "--output-format", "stream-json", "--verbose", "--", "hello"},
 		},
 		{
 			name:    "PTY empty",
@@ -236,7 +236,7 @@ func slicesEqual(a, b []string) bool {
 func TestClaudeBuildArgs_Bare_NoPaths(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -245,7 +245,7 @@ func TestClaudeBuildArgs_Bare_NoPaths(t *testing.T) {
 func TestClaudeBuildArgs_Bare_MCPConfig(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true, MCPConfigPath: "/boot/.mcp.json"}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--mcp-config", "/boot/.mcp.json"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--mcp-config", "/boot/.mcp.json", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -254,7 +254,7 @@ func TestClaudeBuildArgs_Bare_MCPConfig(t *testing.T) {
 func TestClaudeBuildArgs_Bare_AppendSystemPromptFile(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true, AppendSystemPromptFile: "/boot/CLAUDE.md"}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--append-system-prompt-file", "/boot/CLAUDE.md"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--append-system-prompt-file", "/boot/CLAUDE.md", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -263,7 +263,7 @@ func TestClaudeBuildArgs_Bare_AppendSystemPromptFile(t *testing.T) {
 func TestClaudeBuildArgs_Bare_Settings(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true, SettingsPath: "/boot/.claude/settings.json"}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--settings", "/boot/.claude/settings.json"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--settings", "/boot/.claude/settings.json", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -272,7 +272,7 @@ func TestClaudeBuildArgs_Bare_Settings(t *testing.T) {
 func TestClaudeBuildArgs_Bare_ProjectDir(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true, ProjectDir: "/work/project"}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--add-dir", "/work/project"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--add-dir", "/work/project", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -288,7 +288,7 @@ func TestClaudeBuildArgs_Bare_AllPaths(t *testing.T) {
 	}
 	args := a.BuildArgs("hello", "", "")
 	want := []string{
-		"-p", "hello",
+		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--bare",
@@ -296,6 +296,7 @@ func TestClaudeBuildArgs_Bare_AllPaths(t *testing.T) {
 		"--append-system-prompt-file", "/boot/CLAUDE.md",
 		"--settings", "/boot/.claude/settings.json",
 		"--add-dir", "/work/project",
+		"--", "hello",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
@@ -305,7 +306,7 @@ func TestClaudeBuildArgs_Bare_AllPaths(t *testing.T) {
 func TestClaudeBuildArgs_Bare_SkipPermissions(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true, SkipPermissions: true}
 	args := a.BuildArgs("hello", "", "")
-	want := []string{"-p", "hello", "--output-format", "stream-json", "--verbose", "--bare", "--dangerously-skip-permissions"}
+	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--bare", "--dangerously-skip-permissions", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -314,7 +315,7 @@ func TestClaudeBuildArgs_Bare_SkipPermissions(t *testing.T) {
 func TestClaudeBuildArgs_Bare_Resume(t *testing.T) {
 	a := &ClaudeAdapter{Bare: true}
 	args := a.BuildArgs("hello", "", "sess-abc")
-	want := []string{"--resume", "sess-abc", "-p", "hello", "--output-format", "stream-json", "--verbose", "--bare"}
+	want := []string{"--resume", "sess-abc", "-p", "--output-format", "stream-json", "--verbose", "--bare", "--", "hello"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)
 	}
@@ -332,7 +333,7 @@ func TestClaudeBuildArgs_Bare_ResumeWithAllPaths(t *testing.T) {
 	args := a.BuildArgs("hello", "", "sess-x")
 	want := []string{
 		"--resume", "sess-x",
-		"-p", "hello",
+		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--bare",
@@ -341,6 +342,7 @@ func TestClaudeBuildArgs_Bare_ResumeWithAllPaths(t *testing.T) {
 		"--settings", "/boot/.claude/settings.json",
 		"--add-dir", "/work/project",
 		"--dangerously-skip-permissions",
+		"--", "hello",
 	}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("expected %v, got %v", want, args)

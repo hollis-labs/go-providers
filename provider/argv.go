@@ -158,25 +158,29 @@ func (a *ClaudeAdapter) fieldPaths(shape layout.Shape) pathArgs {
 
 // claudeConvention is Claude's argv in every shape:
 //
-//	print     [--resume id] -p <prompt> --output-format stream-json --verbose
+//	print     [--resume id] -p --output-format stream-json --verbose
 //	          [--input-format m] [--model m] [--mcp-config f]
-//	          [--system-prompt s] [extra] [--add-dir project]
-//	          [--dangerously-skip-permissions]
-//	bare      [--resume id] -p <prompt> --output-format stream-json --verbose
+//	          [--system-prompt=s] [extra] [--add-dir project]
+//	          [--dangerously-skip-permissions] -- <prompt>
+//	bare      [--resume id] -p --output-format stream-json --verbose
 //	          --bare [--model m] [--mcp-config f]
 //	          [--append-system-prompt-file f] [--settings f] [extra]
 //	          [--add-dir project] [--add-dir skills]
-//	          [--dangerously-skip-permissions]
+//	          [--dangerously-skip-permissions] -- <prompt>
 //	streaming [--resume id] -p --input-format stream-json --output-format
 //	          stream-json --verbose [--model m] [--mcp-config f] [extra]
 //	          [--add-dir project] [--dangerously-skip-permissions]
 //	pty       [--resume id] [--model m] [--mcp-config f] [extra]
 //	          [--add-dir project] [--dangerously-skip-permissions]
 //
-// The prompt is claude's positional argument, so it follows -p directly.
-// --add-dir is variadic: anything positional after it is read as another
-// directory, so extra arguments go before it and the directories come last
-// but for the flag that ends the list. The system prompt is passed on a
+// -p is the boolean --print and the prompt is claude's positional argument.
+// Turn text is untrusted, so the prompt comes last, after "--": a turn
+// starting with '-', or equal to --dangerously-skip-permissions, is text,
+// not a flag (CW-20261001-0069). "--" also ends the variadic --add-dir list,
+// whose values otherwise run until the next option; extra arguments go
+// before the directories so they cannot join that list. The system prompt
+// uses the inline --system-prompt=s form so a value starting with '-' stays
+// its value. The system prompt is passed on a
 // first turn only: a resumed session already has it. Streaming and PTY take
 // no prompt or system prompt in argv; turns arrive on stdin.
 func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchConvention {
@@ -195,27 +199,28 @@ func claudeConvention(a *ClaudeAdapter, shape layout.Shape, p pathArgs) LaunchCo
 		args = append(args, model...)
 		args = append(args, p.mcp...)
 	case shapeBare:
-		args = append(args, lit("-p"), argPrompt)
-		args = append(args, lits("--output-format", "stream-json", "--verbose", "--bare")...)
+		args = append(args, lits("-p", "--output-format", "stream-json", "--verbose", "--bare")...)
 		args = append(args, model...)
 		args = append(args, p.mcp...)
 		args = append(args, p.instructions...)
 		args = append(args, p.settings...)
 	default:
-		args = append(args, lit("-p"), argPrompt)
-		args = append(args, lits("--output-format", "stream-json", "--verbose")...)
+		args = append(args, lits("-p", "--output-format", "stream-json", "--verbose")...)
 		if a.InputMode != "" {
 			args = append(args, lits("--input-format", a.InputMode)...)
 		}
 		args = append(args, model...)
 		args = append(args, p.mcp...)
-		args = append(args, ArgTemplate{Kind: ArgSystemPrompt, Value: "--system-prompt", FirstTurnOnly: true})
+		args = append(args, ArgTemplate{Kind: ArgSystemPrompt, Value: "--system-prompt=", FirstTurnOnly: true})
 	}
 	args = append(args, argExtra)
 	args = append(args, p.projectDirs...)
 	args = append(args, p.skillsDir...)
 	if a.SkipPermissions {
 		args = append(args, lit("--dangerously-skip-permissions"))
+	}
+	if shape == shapePerTurn || shape == shapeBare {
+		args = append(args, argPrompt)
 	}
 	return newConvention(runtimes.Claude, shape, args)
 }
@@ -231,13 +236,15 @@ func codexShape(a *CodexAdapter) layout.Shape {
 
 // codexConvention is Codex's argv:
 //
-//	exec       exec <prompt> [-c model="m"] [extra] --json --skip-git-repo-check
-//	           [--cd project]
+//	exec       exec [-c model="m"] [extra] --json --skip-git-repo-check
+//	           [--cd project] -- <prompt>
 //	app-server app-server [-c model="m"] [extra]
 //
 // exec is one turn and does not resume; its system prompt is the planted
-// AGENTS.md. Extra arguments follow the positional prompt, and --json ends any
-// variadic list among them (exec's --image is one). --skip-git-repo-check is
+// AGENTS.md. The prompt is untrusted turn text, so it comes last, after "--"
+// (CW-20261001-0069): a turn equal to --dangerously-bypass-approvals-and-sandbox
+// is text, not a flag. Every option, the extras included, goes before "--";
+// --json ends any variadic list among the extras (exec's --image is one). --skip-git-repo-check is
 // required because the boot dir codex runs in is a fresh tempdir, never a git
 // repo, and codex refuses to run non-interactively outside a trusted or git
 // directory ("Not inside a trusted directory and --skip-git-repo-check was not
@@ -255,9 +262,10 @@ func codexConvention(a *CodexAdapter, shape layout.Shape, p pathArgs) LaunchConv
 		args := append([]ArgTemplate{lit("app-server")}, model...)
 		return newConvention(runtimes.Codex, shape, append(args, argExtra))
 	}
-	args := append([]ArgTemplate{lit("exec"), argPrompt}, model...)
+	args := append([]ArgTemplate{lit("exec")}, model...)
 	args = append(args, argExtra, lit("--json"), lit("--skip-git-repo-check"))
 	args = append(args, p.projectDirs...)
+	args = append(args, argPrompt)
 	return newConvention(runtimes.Codex, shape, args)
 }
 
@@ -273,11 +281,12 @@ func opencodeShape(a *OpencodeAdapter) layout.Shape {
 // opencodeConvention is OpenCode's argv:
 //
 //	run   run --format json --agent <agent> [--model m] [--dir project]
-//	      [--session id] [extra] <prompt>
+//	      [--session id] [extra] -- <prompt>
 //	serve serve --port 0 --hostname 127.0.0.1 [extra]
 //
-// run's message is a trailing variadic positional, so extra arguments go
-// before it or they would join the prompt. --agent stays in argv even when the
+// run's message is a trailing variadic positional, after "--" because turn
+// text is untrusted (CW-20261001-0069: a turn equal to --auto is text, not
+// the flag), so extra arguments go before it or they would join the prompt. --agent stays in argv even when the
 // agent is empty, so the shape is uniform; opencode resolves an empty name to
 // its default agent. OpenCode has no system-prompt flag; the system prompt
 // leads the prompt text. serve takes turns over HTTP.

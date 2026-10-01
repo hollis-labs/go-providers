@@ -166,7 +166,13 @@ type ArgKind string
 const (
 	// ArgLiteral is Value as one argument.
 	ArgLiteral ArgKind = "literal"
-	// ArgPrompt is the turn's prompt as one argument.
+	// ArgPrompt is the turn's prompt as a positional argument, after an
+	// end-of-options "--": it resolves to "--" and the prompt, so a prompt
+	// that starts with '-' (or equals a real flag, such as
+	// --dangerously-bypass-approvals-and-sandbox) is never parsed as a
+	// flag. Turn text is untrusted. ResolveTurn requires it to be the
+	// convention's last argument, since everything after "--" is a
+	// positional.
 	ArgPrompt ArgKind = "prompt"
 	// ArgRoot is a launch root, after Value when Value names a flag.
 	ArgRoot ArgKind = "root"
@@ -176,8 +182,10 @@ const (
 	// ArgPromptInline is the turn's prompt joined to Value in one argument,
 	// for a flag whose value must not stand apart (agy's -p=<prompt>).
 	ArgPromptInline ArgKind = "prompt-inline"
-	// ArgSystemPrompt is Value followed by the turn's system prompt. It is
-	// omitted when the turn has none.
+	// ArgSystemPrompt is Value followed by the turn's system prompt, or
+	// joined to it in one argument when Value ends in "=" (the inline
+	// --flag=value form, so a system prompt starting with '-' stays the
+	// flag's value). It is omitted when the turn has none.
 	ArgSystemPrompt ArgKind = "system-prompt"
 	// ArgResume is Value followed by the id of the session the turn
 	// resumes. It is omitted when the turn resumes nothing.
@@ -529,9 +537,20 @@ func (c LaunchConvention) ResolveTurn(roots ProjectionRoots, in TurnInput, extra
 	if err != nil {
 		return LaunchBinding{}, err
 	}
-	argv := make([]string, 0, len(c.Argv)+len(extra))
+	for i, tmpl := range c.Argv {
+		if tmpl.Kind == ArgPrompt && i != len(c.Argv)-1 {
+			return LaunchBinding{}, fmt.Errorf("provider: %s convention puts arguments after the prompt; the prompt follows \"--\" and must be last", c.Executable)
+		}
+	}
+	argv := make([]string, 0, len(c.Argv)+len(extra)+1)
 	placedExtra := false
 	for _, tmpl := range c.Argv {
+		if tmpl.Kind == ArgPrompt && !placedExtra {
+			// No extra slot: extras still go before the prompt, never
+			// after "--" where they would be read as prompt text.
+			argv = append(argv, extra...)
+			placedExtra = true
+		}
 		if tmpl.Kind == ArgExtra {
 			argv = append(argv, extra...)
 			placedExtra = true
@@ -577,7 +596,7 @@ func resolveArgTemplate(roots ProjectionRoots, tmpl ArgTemplate, in TurnInput) (
 		if prompt == "" && tmpl.OmitEmpty {
 			return nil, nil
 		}
-		return []string{prompt}, nil
+		return []string{"--", prompt}, nil
 	case ArgPromptInline:
 		prompt := in.Prompt
 		if tmpl.WithSystem {
@@ -626,6 +645,8 @@ func flagValue(flag, value string) []string {
 		return nil
 	case flag == "":
 		return []string{value}
+	case strings.HasSuffix(flag, "="):
+		return []string{flag + value}
 	default:
 		return []string{flag, value}
 	}

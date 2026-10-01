@@ -144,19 +144,14 @@ func TestResolveTurnPlacesExtraArgs(t *testing.T) {
 				t.Fatalf("extra args not placed once, contiguously: %q", argv)
 			}
 			prompt := slices.IndexFunc(argv, func(s string) bool { return strings.HasSuffix(s, "PROMPT") })
-			switch proj.Provider {
-			case runtimes.Claude, runtimes.Codex:
-				// The prompt follows -p (claude) or exec (codex) directly;
-				// extras come after it.
-				if prompt >= 0 && prompt > at {
-					t.Errorf("prompt after extra args: %q", argv)
-				}
-			case runtimes.OpenCode, runtimes.Antigravity:
-				// The prompt is last: a trailing variadic positional
-				// (opencode) or an inline -p= (agy).
-				if prompt >= 0 && prompt != len(argv)-1 {
-					t.Errorf("prompt is not last: %q", argv)
-				}
+			// The prompt is last and the extras come before it: after
+			// "--" for a positional prompt (claude, codex, opencode), or
+			// inline as -p= (agy).
+			if prompt >= 0 && (prompt != len(argv)-1 || prompt < at) {
+				t.Errorf("prompt is not last, after the extras: %q", argv)
+			}
+			if prompt >= 0 && proj.Provider != runtimes.Antigravity && argv[prompt-1] != "--" {
+				t.Errorf("positional prompt not preceded by --: %q", argv)
 			}
 			if add := slices.Index(argv, "--add-dir"); add >= 0 && add < at {
 				t.Errorf("extra args after --add-dir would be read as directories: %q", argv)
@@ -191,19 +186,19 @@ func TestResolveTurnTemplateKinds(t *testing.T) {
 		{Kind: ArgResume, Value: "--resume"},
 		{Kind: ArgResume},
 		{Kind: ArgSystemPrompt, Value: "--system-prompt", FirstTurnOnly: true},
+		{Kind: ArgSystemPrompt, Value: "--system-prompt=", FirstTurnOnly: true},
 		{Kind: ArgLiteral, Value: "--first-only", FirstTurnOnly: true},
-		{Kind: ArgPrompt},
-		{Kind: ArgPrompt, WithSystem: true},
 		{Kind: ArgPromptInline, Value: "-p="},
 		{Kind: ArgPromptInline, Value: "-p=", WithSystem: true},
+		{Kind: ArgPrompt, WithSystem: true},
 	}}
 	for _, tc := range []struct {
 		in   TurnInput
 		want []string
 	}{
-		{TurnInput{Prompt: "hi", SystemPrompt: "sys"}, []string{"--system-prompt", "sys", "--first-only", "hi", "System: sys\n\nhi", "-p=hi", "-p=System: sys\n\nhi"}},
-		{TurnInput{Prompt: "hi"}, []string{"--first-only", "hi", "hi", "-p=hi", "-p=hi"}},
-		{TurnInput{Prompt: "hi", SystemPrompt: "sys", ResumeID: "s1"}, []string{"--resume", "s1", "s1", "hi", "System: sys\n\nhi", "-p=hi", "-p=System: sys\n\nhi"}},
+		{TurnInput{Prompt: "hi", SystemPrompt: "sys"}, []string{"--system-prompt", "sys", "--system-prompt=sys", "--first-only", "-p=hi", "-p=System: sys\n\nhi", "--", "System: sys\n\nhi"}},
+		{TurnInput{Prompt: "hi"}, []string{"--first-only", "-p=hi", "-p=hi", "--", "hi"}},
+		{TurnInput{Prompt: "hi", SystemPrompt: "sys", ResumeID: "s1"}, []string{"--resume", "s1", "s1", "-p=hi", "-p=System: sys\n\nhi", "--", "System: sys\n\nhi"}},
 	} {
 		b, err := conv.ResolveTurn(ProjectionRoots{}, tc.in, nil)
 		if err != nil {

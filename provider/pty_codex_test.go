@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseCodexStreamLine_Empty(t *testing.T) {
 	events, err := parseCodexStreamLine([]byte{})
@@ -123,17 +126,10 @@ func TestCodexAdapter_BuildArgs(t *testing.T) {
 	a := NewCodexAdapter()
 	args := a.BuildArgs("fix bug", "system prompt", "")
 	// Codex doesn't use system prompt flag or resume
-	if args[0] != "exec" {
-		t.Errorf("expected first arg=exec, got %s", args[0])
-	}
-	if args[1] != "fix bug" {
-		t.Errorf("expected second arg=prompt, got %s", args[1])
-	}
-	if args[2] != "--json" {
-		t.Errorf("expected --json flag, got %s", args[2])
-	}
-	if args[3] != "--skip-git-repo-check" {
-		t.Errorf("expected --skip-git-repo-check flag, got %s", args[3])
+	// The prompt is last, after "--" (CW-20261001-0069).
+	want := []string{"exec", "--json", "--skip-git-repo-check", "--", "fix bug"}
+	if !reflect.DeepEqual(args, want) {
+		t.Errorf("args = %q, want %q", args, want)
 	}
 }
 
