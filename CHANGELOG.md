@@ -1,8 +1,7 @@
 # Changelog
 
-## v0.38.0 — 2026-10-01
+## v0.39.0 — 2026-10-01
 
-<<<<<<< HEAD
 A cooperative turn interrupt for Claude's streaming stdin (CW-20261001-0103).
 
 ### Added
@@ -29,7 +28,9 @@ A cooperative turn interrupt for Claude's streaming stdin (CW-20261001-0103).
 - **`hack/capturefixtures -only <stems>`** re-records named fixtures and
   merges them into `captured.json`. It refuses when the CLI version differs
   from the manifest's.
-=======
+
+## v0.38.0 — 2026-10-01
+
 ### Added
 
 - **`ClaudeAdapter` implements `SessionLostClassifier`** (CW-20261001-0047).
@@ -56,7 +57,6 @@ A cooperative turn interrupt for Claude's streaming stdin (CW-20261001-0103).
     thread from the JSON-RPC error.
   - The unknown-id capture stays in
     `providertest/fixtures/codex/exec_resume_unknown_id`.
->>>>>>> origin/main
 
 ## v0.37.0 — 2026-10-01
 
