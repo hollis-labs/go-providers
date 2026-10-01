@@ -10,7 +10,7 @@ binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
-legacy-file .mcp.json mode=0000
+legacy-file .mcp.json mode=0600
 legacy-env [] cwd=0 project-arg="--add-dir {{.ProjectDir}}"
 == claude-print-skip-permissions
 provider=claude mode=subprocess-per-turn
@@ -24,7 +24,7 @@ binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
-legacy-file .mcp.json mode=0000
+legacy-file .mcp.json mode=0600
 legacy-env [] cwd=0 project-arg="--add-dir {{.ProjectDir}}"
 == claude-bare
 provider=claude mode=subprocess-per-turn+bare
@@ -38,7 +38,7 @@ binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--output-format","
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
-legacy-file .mcp.json mode=0000
+legacy-file .mcp.json mode=0600
 legacy-env [] cwd=0 project-arg="--add-dir {{.ProjectDir}}"
 == claude-pty
 provider=claude mode=pty
@@ -52,7 +52,7 @@ binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["--mcp-config","/p/boot/
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
-legacy-file .mcp.json mode=0000
+legacy-file .mcp.json mode=0600
 legacy-env [] cwd=0 project-arg="--add-dir {{.ProjectDir}}"
 == claude-streaming-stdio
 provider=claude mode=streaming-stdio
@@ -66,7 +66,7 @@ binding {"cwd":"/p/boot","config_dir":"/p/boot","argv":["-p","--input-format","s
 legacy-file CLAUDE.md mode=0000
 legacy-file boot.md mode=0000
 legacy-file .claude/settings.json mode=0000
-legacy-file .mcp.json mode=0000
+legacy-file .mcp.json mode=0600
 legacy-env [] cwd=0 project-arg="--add-dir {{.ProjectDir}}"
 == codex-exec
 provider=codex mode=subprocess-per-turn
@@ -105,12 +105,12 @@ provider=opencode mode=subprocess-per-turn
 file .mcp.json mode=0600 role=mcp-mirror sha=47d93eee06b4
 file agents/fixture-agent.md mode=0000 role=instructions sha=65c7740f5078
 file boot.md mode=0000 role=boot sha=da91b953f821
-file opencode.json mode=0000 role=native-config sha=5d8770d5cb53
+file opencode.json mode=0600 role=native-config sha=5d8770d5cb53
 launch {"executable":"opencode","mode":"subprocess-per-turn","cwd":"project","config_root":"boot","argv":[{"kind":"literal","value":"run"},{"kind":"literal","value":"--format"},{"kind":"literal","value":"json"},{"kind":"literal","value":"--agent"},{"kind":"literal","value":"fixture-agent"},{"kind":"literal","value":"--model"},{"kind":"literal","value":"fixture/model"},{"kind":"root","value":"--dir","root":"project","omit_empty":true},{"kind":"resume","value":"--session"},{"kind":"extra"},{"kind":"prompt","with_system":true}],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"opencode-provider-auth","reason":"provider credentials are resolved by OpenCode or explicit runtime preparation"}]
 binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--model","fixture/model","--dir","/p/project","--","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file agents/fixture-agent.md mode=0000
-legacy-file opencode.json mode=0000
+legacy-file opencode.json mode=0600
 legacy-file boot.md mode=0000
 legacy-file .mcp.json mode=0600
 legacy-env ["OPENCODE_CONFIG_DIR={{.BootDir}}"] cwd=1 project-arg="--dir {{.ProjectDir}}"
@@ -119,12 +119,12 @@ provider=opencode mode=subprocess-per-turn
 file .mcp.json mode=0600 role=mcp-mirror sha=47d93eee06b4
 file agents/fixture-agent.md mode=0000 role=instructions sha=65c7740f5078
 file boot.md mode=0000 role=boot sha=da91b953f821
-file opencode.json mode=0000 role=native-config sha=5d8770d5cb53
+file opencode.json mode=0600 role=native-config sha=5d8770d5cb53
 launch {"executable":"opencode","mode":"subprocess-per-turn","cwd":"project","config_root":"boot","argv":[{"kind":"literal","value":"run"},{"kind":"literal","value":"--format"},{"kind":"literal","value":"json"},{"kind":"literal","value":"--agent"},{"kind":"literal","value":"fixture-agent"},{"kind":"root","value":"--dir","root":"project","omit_empty":true},{"kind":"resume","value":"--session"},{"kind":"extra"},{"kind":"prompt","with_system":true}],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"opencode-provider-auth","reason":"provider credentials are resolved by OpenCode or explicit runtime preparation"}]
 binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["run","--format","json","--agent","fixture-agent","--dir","/p/project","--","PROMPT"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file agents/default.md mode=0000
-legacy-file opencode.json mode=0000
+legacy-file opencode.json mode=0600
 legacy-file boot.md mode=0000
 legacy-file .mcp.json mode=0600
 legacy-env ["OPENCODE_CONFIG_DIR={{.BootDir}}"] cwd=1 project-arg="--dir {{.ProjectDir}}"
@@ -133,12 +133,12 @@ provider=opencode mode=http-sse
 file .mcp.json mode=0600 role=mcp-mirror sha=47d93eee06b4
 file agents/fixture-agent.md mode=0000 role=instructions sha=65c7740f5078
 file boot.md mode=0000 role=boot sha=da91b953f821
-file opencode.json mode=0000 role=native-config sha=5d8770d5cb53
+file opencode.json mode=0600 role=native-config sha=5d8770d5cb53
 launch {"executable":"opencode","mode":"http-sse","cwd":"project","config_root":"boot","argv":[{"kind":"literal","value":"serve"},{"kind":"literal","value":"--port"},{"kind":"literal","value":"0"},{"kind":"literal","value":"--hostname"},{"kind":"literal","value":"127.0.0.1"},{"kind":"extra"}],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"boot","operation":"set","precedence":"provider-wins"}]}
 effects [{"kind":"opencode-provider-auth","reason":"provider credentials are resolved by OpenCode or explicit runtime preparation"}]
 binding {"cwd":"/p/project","config_dir":"/p/boot","argv":["serve","--port","0","--hostname","127.0.0.1"],"env":[{"name":"OPENCODE_CONFIG_DIR","value":"/p/boot","operation":"set","precedence":"provider-wins"}]}
 legacy-file agents/fixture-agent.md mode=0000
-legacy-file opencode.json mode=0000
+legacy-file opencode.json mode=0600
 legacy-file boot.md mode=0000
 legacy-file .mcp.json mode=0600
 legacy-env ["OPENCODE_CONFIG_DIR={{.BootDir}}"] cwd=1 project-arg="--dir {{.ProjectDir}}"

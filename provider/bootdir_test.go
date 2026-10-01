@@ -699,7 +699,8 @@ func TestOpencodeBootDirSpec_PlantedFileModes(t *testing.T) {
 	spec := a.BootDirSpec()
 
 	want := map[string]os.FileMode{
-		".mcp.json": 0o600, // loopback URL — secret-ish
+		".mcp.json":     0o600, // loopback URL — secret-ish
+		"opencode.json": 0o600, // MCP servers and their environment (CW-20260930-0136)
 	}
 	for _, pf := range spec.PlantedFiles {
 		w, pinned := want[pf.RelPath]
