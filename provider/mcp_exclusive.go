@@ -37,8 +37,56 @@ var layoutExclusiveEnv = map[runtimes.ID]string{runtimes.Codex: "CODEX_HOME"}
 // from an adapter it did not get from here, a custom ProjectionProvider that
 // may ignore the option, calls it on the projection it got back: a failure
 // wraps ErrMCPExclusiveUnsupported and names the provider and mode.
+//
+// What it verifies, exactly. A flag mode: the flag literal is in the argv
+// ahead of the prompt template and of any literal "--", because after either
+// the CLI reads it as prompt text. A projected-layout mode: the convention's
+// last delta for the config-root variable (CODEX_HOME) is an EnvSet, with
+// EnvProviderWins, of the boot root, so no earlier or later delta in the
+// convention changes it, and a caller's own value cannot take its place. It
+// checks the convention, not the CLI's parser, and not what a host merges into
+// the environment afterward: a host must keep the variable (agentkit checks
+// the merged environment).
 func CheckMCPExclusive(proj ProviderProjection) error {
 	return requireMCPExclusive(proj, ProjectionOptions{MCPExclusive: true})
+}
+
+// checkMCPExclusive is requireMCPExclusive behind a variable, so a test can
+// hold that every adapter's ProviderProjection runs it. Nothing else assigns it.
+var checkMCPExclusive = requireMCPExclusive
+
+// carriesStrictFlag reports whether argv has the strict flag ahead of anything
+// that ends the options: the prompt template (it resolves to "--" and the
+// prompt) or a literal "--". Behind either, the flag is positional text and
+// does nothing.
+func carriesStrictFlag(argv []ArgTemplate) bool {
+	for _, a := range argv {
+		switch {
+		case a.Kind == ArgPrompt, a.Kind == ArgPromptInline, a.Kind == ArgLiteral && a.Value == "--":
+			return false
+		case a.Kind == ArgLiteral && a.Value == claudeStrictMCPConfigFlag:
+			return true
+		}
+	}
+	return false
+}
+
+// setsBootRoot reports whether the last delta for name sets it, with provider
+// precedence, to the boot root. Only the last counts, since each delta applies
+// over the ones before it; RootKind(value) == RootBoot also rules out an empty
+// value and a path that is not the launch's own.
+func setsBootRoot(deltas []EnvDelta, name string) bool {
+	last := -1
+	for i, d := range deltas {
+		if d.Name == name {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	d := deltas[last]
+	return d.Operation == EnvSet && d.Precedence == EnvProviderWins && RootKind(d.Value) == RootBoot
 }
 
 // requireMCPExclusive refuses a projection that was asked to be exclusive and
@@ -55,16 +103,14 @@ func requireMCPExclusive(proj ProviderProjection, opts ProjectionOptions) error 
 	}
 	switch how {
 	case registry.MCPExclusivityFlag:
-		if !slices.ContainsFunc(proj.Launch.Argv, func(a ArgTemplate) bool {
-			return a.Kind == ArgLiteral && a.Value == claudeStrictMCPConfigFlag
-		}) {
-			return fmt.Errorf("%w: %s/%s: the registry declares a flag, but the launch convention does not carry it", ErrMCPExclusiveUnsupported, proj.Provider, shape)
+		if !carriesStrictFlag(proj.Launch.Argv) {
+			return fmt.Errorf("%w: %s/%s: the registry declares a flag, but the launch convention does not carry %s ahead of the prompt", ErrMCPExclusiveUnsupported, proj.Provider, shape, claudeStrictMCPConfigFlag)
 		}
 		return nil
 	case registry.MCPExclusivityProjectedLayout:
 		env := layoutExclusiveEnv[proj.Provider]
-		if env == "" || !slices.ContainsFunc(proj.Launch.Env, func(e EnvDelta) bool { return e.Name == env && e.Operation == EnvSet }) {
-			return fmt.Errorf("%w: %s/%s: the registry declares the projected layout, but the launch convention does not set its config root", ErrMCPExclusiveUnsupported, proj.Provider, shape)
+		if env == "" || !setsBootRoot(proj.Launch.Env, env) {
+			return fmt.Errorf("%w: %s/%s: the registry declares the projected layout, but the launch convention's last %s is not a provider-wins set of the boot root", ErrMCPExclusiveUnsupported, proj.Provider, shape, env)
 		}
 		return nil
 	case registry.MCPExclusivityAbsent:
@@ -92,7 +138,7 @@ func unmeasuredReason(proj ProviderProjection) string {
 // requireProjected is what every ProviderProjection ends with: the caller's
 // requirements, MCP exclusivity first, then the required features.
 func requireProjected(proj ProviderProjection, opts ProjectionOptions) (ProviderProjection, error) {
-	if err := requireMCPExclusive(proj, opts); err != nil {
+	if err := checkMCPExclusive(proj, opts); err != nil {
 		return ProviderProjection{}, err
 	}
 	return requireProjectedFeatures(proj, opts.RequiredFeatures)

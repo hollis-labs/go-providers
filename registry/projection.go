@@ -76,7 +76,10 @@ const (
 	// MCPExclusivityAbsent: measured, and the runtime has no switch that
 	// limits only its MCP servers. Whole-config isolation exists but also drops
 	// every other setting, so it is not offered. A launch in the mode cannot be
-	// made exclusive.
+	// made exclusive. Absent is a non-empty string that means a measured
+	// negative, unlike MCPExclusivityNone: a consumer must ask Exclusive and
+	// never compare a value against "" or MCPExclusivityNone, or it reads an
+	// absent mode as one that declares something.
 	MCPExclusivityAbsent MCPExclusivity = "absent"
 	// MCPExclusivityFlag: the adapter's MCPExclusive field (or
 	// ProjectionOptions.MCPExclusive) adds a CLI flag that keeps the runtime to
@@ -93,9 +96,12 @@ const (
 	// MCPExclusivityProjectedLayout: the runtime reads its MCP servers only
 	// from the config root the layout sets, so a launch that sets that root
 	// loads none of the user's. It holds only where ProviderProjection's launch
-	// convention sets the root (Codex: CODEX_HOME=<boot>; CheckMCPExclusive
-	// verifies it) and nothing later overrides it. BuildArgs from adapter
-	// fields, run in a host's own environment, is not that and is not covered.
+	// convention sets the root (Codex: CODEX_HOME=<boot>). CheckMCPExclusive
+	// verifies that the convention's last CODEX_HOME delta is a provider-wins
+	// set of the boot root, so nothing later in the convention overrides it; a
+	// host that merges more environment afterward must keep it. BuildArgs from
+	// adapter fields, run in a host's own environment, is not that and is not
+	// covered.
 	// Measured on codex-cli 0.159.3 for exec, app-server and `mcp list`.
 	// Project-level servers stayed out because Codex did not trust the
 	// project: the planted config.toml has no trust entry for it. A trusted

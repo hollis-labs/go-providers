@@ -45,7 +45,14 @@ extras API's limits are documented and tested (CW-20261001-0219).
 - **`provider.CheckMCPExclusive(proj)`**: the same check as a function on a
   projection. A host whose adapter is not one of these, so may ignore
   `ProjectionOptions.MCPExclusive`, runs it on the projection it got back and
-  never launches on the strength of a request alone.
+  never launches on the strength of a request alone. It verifies the
+  convention, strictly: for a flag mode the flag is ahead of the prompt template
+  and of any literal `--` (behind either the CLI reads it as prompt text); for a
+  projected-layout mode the convention's last `CODEX_HOME` delta is an `EnvSet`,
+  with provider precedence, of the boot root, so a user-owned path, an empty
+  value, a caller-wins value, or a later set, unset or prepend is refused. It
+  does not check the CLI's parser, and it cannot see what a host merges into the
+  environment afterward (agentkit checks that).
 - **`registry.MCPExclusivity`**, so a host can ask what was measured about
   making a runtime and mode exclusive: `Descriptor.MCPExclusivity(mode)` and
   `ProjectionFacts.MCPExclusive`, which holds a value only for a measured mode.
@@ -61,6 +68,9 @@ extras API's limits are documented and tested (CW-20261001-0219).
     project (the planted `config.toml` has no trust entry); a trusted project
     was not measured, and neither were Codex account connectors or plugins.
   - `absent`: measured, no MCP-only switch. OpenCode (below). Not a mechanism.
+    It is a non-empty string that means a measured negative, so a consumer must
+    use `.Exclusive()` and never compare a value against `""` or
+    `MCPExclusivityNone`.
   - No value: not measured. Antigravity, and every ACP mode. A host that
     requires exclusivity refuses these modes.
   - Registration refuses a value for a mode the runtime lacks, and any value
@@ -105,7 +115,11 @@ extras API's limits are documented and tested (CW-20261001-0219).
   field never doubling the flag, and the caller's adapter left alone. The
   registry's guards (the clone, a value for a mode the runtime lacks, an empty
   or unknown value) are each tested, and every refusal is held to name the
-  provider and mode and to say which kind of "no" it is.
+  provider and mode and to say which kind of "no" it is. Loose conventions are
+  refused case by case (a user-owned path, a caller-wins value, a later set, an
+  empty value, the flag behind the prompt), with positive controls so the rules
+  are no stricter than the mechanism, and a test holds that all four adapters'
+  `ProviderProjection` run the check.
 
 ### Documented
 

@@ -458,6 +458,99 @@ func TestCheckMCPExclusiveJudgesAProjectionNotTheRequest(t *testing.T) {
 	}
 }
 
+// A projection from an adapter that is not go-providers' is judged on what it
+// is, so each way a custom convention can look exclusive and not be is refused
+// (found by hand-built projections in the review of #55): a config root that is
+// not the launch's own, one a caller's environment could replace, one a later
+// delta changes, an empty one, and the flag where the CLI reads it as prompt
+// text.
+func TestCheckMCPExclusiveRefusesLooseConventions(t *testing.T) {
+	codex := func(d ...EnvDelta) ProviderProjection {
+		return ProviderProjection{Provider: runtimes.Codex, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Env: d}}
+	}
+	claude := func(argv ...ArgTemplate) ProviderProjection {
+		return ProviderProjection{Provider: runtimes.Claude, Mode: runtimes.ModeSubprocessPerTurn, Launch: LaunchConvention{Argv: argv}}
+	}
+	home := func(op EnvOperation, prec EnvPrecedence, value string) EnvDelta {
+		return EnvDelta{Name: "CODEX_HOME", Operation: op, Precedence: prec, Value: value}
+	}
+	boot := string(RootBoot)
+	prompt := ArgTemplate{Kind: ArgPrompt}
+	flag := lit(strictMCPFlag)
+	cat := func(parts ...[]ArgTemplate) []ArgTemplate {
+		var out []ArgTemplate
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	other := func(name string) EnvDelta {
+		return EnvDelta{Name: name, Operation: EnvSet, Precedence: EnvProviderWins, Value: "x"}
+	}
+
+	for _, c := range []struct {
+		name string
+		proj ProviderProjection
+	}{
+		{"codex: a user-owned path", codex(home(EnvSet, EnvProviderWins, "/path/to/a/user-owned/codex-home"))},
+		{"codex: the boot root, but the caller's value wins", codex(home(EnvSet, EnvCallerWins, boot))},
+		{"codex: the boot root, then a second set of another path", codex(home(EnvSet, EnvProviderWins, boot), home(EnvSet, EnvProviderWins, "/elsewhere"))},
+		{"codex: an empty value", codex(home(EnvSet, EnvProviderWins, ""))},
+		{"codex: the boot root, then unset", codex(home(EnvSet, EnvProviderWins, boot), home(EnvUnset, EnvProviderWins, ""))},
+		{"codex: the boot root, then a prepend", codex(home(EnvSet, EnvProviderWins, boot), home(EnvPrepend, EnvProviderWins, "/x"))},
+		{"codex: the project root, not the boot root", codex(home(EnvSet, EnvProviderWins, string(RootProject)))},
+		{"codex: a variable that is not the config root", codex(other("CODEX_HOME_X"))},
+		{"claude: the flag behind the prompt template", claude(cat(lits("-p"), []ArgTemplate{prompt, flag})...)},
+		{"claude: the flag behind a literal --", claude(lits("-p", "--", strictMCPFlag)...)},
+		{"claude: the flag behind the inline prompt", claude(cat(lits("-p"), []ArgTemplate{{Kind: ArgPromptInline, Value: "-p="}, flag})...)},
+		{"claude: no flag", claude(lits("-p")...)},
+	} {
+		err := CheckMCPExclusive(c.proj)
+		if !errors.Is(err, ErrMCPExclusiveUnsupported) {
+			t.Errorf("%s: err = %v, want ErrMCPExclusiveUnsupported", c.name, err)
+			continue
+		}
+		wantNamed(t, err, string(c.proj.Provider), string(c.proj.Mode))
+	}
+
+	// The rules are not stricter than the mechanism: only the last delta counts,
+	// and the flag may follow any argument that is not the end of the options.
+	for _, c := range []struct {
+		name string
+		proj ProviderProjection
+	}{
+		{"codex: the boot root", codex(home(EnvSet, EnvProviderWins, boot))},
+		{"codex: another path, then the boot root last", codex(home(EnvSet, EnvProviderWins, "/elsewhere"), home(EnvSet, EnvProviderWins, boot))},
+		{"codex: a caller-wins path, then a provider-wins boot root", codex(home(EnvSet, EnvCallerWins, "/elsewhere"), home(EnvSet, EnvProviderWins, boot))},
+		{"codex: the boot root among other variables", codex(other("A"), home(EnvSet, EnvProviderWins, boot), other("B"))},
+		{"claude: the flag before the prompt template", claude(cat(lits("-p", strictMCPFlag), []ArgTemplate{prompt})...)},
+		{"claude: the flag before a literal --", claude(lits("-p", strictMCPFlag, "--", "x")...)},
+		{"claude: the flag last, with no prompt", claude(lits("-p", strictMCPFlag)...)},
+	} {
+		if err := CheckMCPExclusive(c.proj); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
+
+// Every adapter's ProviderProjection runs the check when asked, not only the
+// ones whose projection fails it today: a built-in that skipped it would pass
+// every other test until its convention drifted.
+func TestEveryProjectionRunsTheMCPExclusiveCheck(t *testing.T) {
+	sentinel := errors.New("the check ran")
+	saved := checkMCPExclusive
+	checkMCPExclusive = func(ProviderProjection, ProjectionOptions) error { return sentinel }
+	t.Cleanup(func() { checkMCPExclusive = saved })
+	for _, c := range builtinModes {
+		t.Run(string(c.provider)+"/"+c.mode.String(), func(t *testing.T) {
+			_, err := c.adapter().ProviderProjection(PlantContext{AgentName: "agent"}, ProjectionOptions{MCPExclusive: true})
+			if !errors.Is(err, sentinel) {
+				t.Errorf("ProviderProjection did not run the MCP exclusivity check: err = %v", err)
+			}
+		})
+	}
+}
+
 // wantNamed fails unless err names the provider and the mode it refused.
 func wantNamed(t *testing.T, err error, provider, mode string) {
 	t.Helper()
