@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
@@ -176,6 +177,23 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 
 		var seenDelta, seenToolUse, terminalSent bool
 
+		// heldTerminal keeps typed Done/Error events back until stderr
+		// is drained: stderr arrives on its own pipe and goroutine, and
+		// no typed event may follow a turn-terminal one.
+		var heldTerminal []pevents.Event
+		emitParsed := func(typed []pevents.Event) {
+			now := typed[:0:0]
+			for _, ev := range typed {
+				switch ev.(type) {
+				case pevents.Done, pevents.Error:
+					heldTerminal = append(heldTerminal, ev)
+				default:
+					now = append(now, ev)
+				}
+			}
+			emitTyped(ctx, typedCb, bridgeState, now)
+		}
+
 		// emitGuardIfNeeded emits the no-silent-drop error event exactly once,
 		// when the CLI produced only tool_use blocks and no text deltas.
 		// Returns true if the guard was emitted on this call.
@@ -184,7 +202,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 				const msg = "CLI bridge cannot forward tool calls"
 				ch <- llmtypes.StreamEvent{Type: llmtypes.EventError, Error: msg}
 				if hasTyped {
-					emitTyped(ctx, typedCb, bridgeState, []pevents.Event{pevents.Error{Message: msg}})
+					heldTerminal = append(heldTerminal, pevents.Error{Message: msg})
 				}
 				terminalSent = true
 				return true
@@ -218,7 +236,7 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 				if typed == nil {
 					typed = translateStreamEvents(events)
 				}
-				emitTyped(ctx, typedCb, bridgeState, typed)
+				emitParsed(typed)
 			}
 
 			for _, ev := range events {
@@ -253,6 +271,16 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// the error so callers don't hang on an empty result.
 		emitGuardIfNeeded()
 
+		// Drain stderr before Wait: Wait closes the pipe's read end once
+		// the process exits, dropping lines the stderr goroutine has not
+		// read yet (a CLI that writes its error and exits at once). A
+		// descendant holding stderr open is bounded by the same grace
+		// period as cancellation, after which Wait closes the pipe.
+		select {
+		case <-stderrDone:
+		case <-time.After(cmd.WaitDelay):
+		}
+
 		// Wait for process to finish. cmd.Cancel + cmd.WaitDelay handle
 		// SIGTERM-then-SIGKILL on context cancellation.
 		waitErr := cmd.Wait()
@@ -265,6 +293,9 @@ func (s *SubprocessBridge) streamCLI(ctx context.Context, systemPrompt string, m
 		// Done/Error. (No-op when stderr capture isn't active —
 		// stderrDone is closed at start in that path.)
 		<-stderrDone
+		if hasTyped {
+			emitTyped(ctx, typedCb, bridgeState, heldTerminal)
+		}
 
 		// Always emit a terminal event so consumers see an explicit boundary
 		// before the channel closes. See PTYBridge.streamCLI for the same

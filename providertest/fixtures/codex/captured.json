@@ -1,0 +1,82 @@
+{
+  "argv": {
+    "app_server_resume": [
+      "codex",
+      "app-server"
+    ],
+    "app_server_resume_unknown_id": [
+      "codex",
+      "app-server"
+    ],
+    "app_server_tool_approval": [
+      "codex",
+      "app-server"
+    ],
+    "app_server_turn": [
+      "codex",
+      "app-server"
+    ],
+    "exec_error_unknown_model": [
+      "codex",
+      "exec",
+      "say hi",
+      "--json",
+      "--skip-git-repo-check",
+      "-m",
+      "gpt-nonexistent-0"
+    ],
+    "exec_resume_unknown_id": [
+      "codex",
+      "exec",
+      "resume",
+      "00000000-0000-4000-8000-0000000000ff",
+      "say hi",
+      "--json",
+      "--skip-git-repo-check",
+      "-m",
+      "gpt-6-luna",
+      "-c",
+      "model_reasoning_effort=\"low\""
+    ],
+    "exec_tool_use": [
+      "codex",
+      "exec",
+      "Run the shell command `echo providertest` and reply with its output only.",
+      "--json",
+      "--skip-git-repo-check",
+      "-s",
+      "read-only",
+      "-m",
+      "gpt-6-luna",
+      "-c",
+      "model_reasoning_effort=\"low\""
+    ],
+    "exec_turn1": [
+      "codex",
+      "exec",
+      "say hi",
+      "--json",
+      "--skip-git-repo-check",
+      "-m",
+      "gpt-6-luna",
+      "-c",
+      "model_reasoning_effort=\"low\""
+    ],
+    "exec_turn2_resume": [
+      "codex",
+      "exec",
+      "resume",
+      "00000000-0000-4000-8000-000000000001",
+      "say bye",
+      "--json",
+      "--skip-git-repo-check",
+      "-m",
+      "gpt-6-luna",
+      "-c",
+      "model_reasoning_effort=\"low\""
+    ]
+  },
+  "captured": "2026-10-01",
+  "runtime": "codex",
+  "version": "codex-cli 0.159.2"
+}

@@ -1,0 +1,14 @@
+{"recv":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}}}}
+{"send":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":false},"mcpCapabilities":{"http":false,"sse":false}},"authMethods":[]}}}
+{"recv":{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work/project","mcpServers":[]}}}
+{"send":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"00000000-0000-4000-8000-000000000001"}}}
+{"recv":{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"00000000-0000-4000-8000-000000000001","prompt":[{"type":"text","text":"Run echo providertest"}]}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":true}}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"tool_call","toolCallId":"call_fixture0001","title":"bash","kind":"execute","status":"pending","rawInput":{"command":"echo providertest"},"_meta":{"terminal_info":{"terminal_id":"call_fixture0001","cwd":"/work/project"}}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_fixture0001","status":"in_progress","_meta":{"terminal_output":{"terminal_id":"call_fixture0001","data":"providertest\n"}}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_fixture0001","status":"completed","content":[{"type":"content","content":{"type":"text","text":"providertest\n"}}],"_meta":{"terminal_exit":{"terminal_id":"call_fixture0001","exit_code":0,"signal":null}}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"providertest"}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"session_info_update","_meta":{"piAcp":{"queueDepth":0,"running":false}}}}}}
+{"send":{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}}
+{"eof":true}
+{"exit":0}

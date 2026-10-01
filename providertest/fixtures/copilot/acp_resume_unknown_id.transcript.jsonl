@@ -1,0 +1,6 @@
+{"recv":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}}}}
+{"send":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false}},"agentInfo":{"name":"Copilot","version":"1.0.12"},"authMethods":[]}}}
+{"recv":{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"00000000-0000-4000-8000-0000000000ff","cwd":"/work/project","mcpServers":[]}}}
+{"send":{"jsonrpc":"2.0","id":2,"error":{"code":-32002,"message":"Session not found: 00000000-0000-4000-8000-0000000000ff"}}}
+{"eof":true}
+{"exit":0}

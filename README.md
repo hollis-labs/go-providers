@@ -413,7 +413,25 @@ CLI bridges use a two-level abstraction: a `CLIAdapter` (one per CLI tool) defin
 go test ./...
 ```
 
-Tests are pure-Go unit tests. PTY/subprocess tests do not spawn real CLI binaries by default — they exercise the adapter arg-building and line-parsing logic directly. Real-spawn smoke tests (`TestClaudeAdapter_BareSpawn_Smoke`, `TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke`, `TestClaudeAdapter_PTYSmoke`, `TestClaudeAdapter_BootDirSmoke`) are env-gated (`CLAUDE_BARE_SMOKE=1`, `CLAUDE_PTY_SMOKE=1`, etc.); skipped when the relevant CLI binary or auth env var is absent.
+Tests are pure-Go unit tests. PTY/subprocess tests do not spawn real CLI binaries by default: they run a fake CLI from `providertest` that replays captured output. Real-spawn smoke tests (`TestClaudeAdapter_BareSpawn_Smoke`, `TestClaudeAdapter_BareSpawn_PopulatedMCP_Smoke`, `TestClaudeAdapter_PTYSmoke`, `TestClaudeAdapter_BootDirSmoke`) are env-gated (`CLAUDE_BARE_SMOKE=1`, `CLAUDE_PTY_SMOKE=1`, etc.); skipped when the relevant CLI binary or auth env var is absent.
+
+### Fake CLIs for consumers (`providertest`)
+
+`providertest` gives any test a fake agent CLI that replays what the real one writes, so libraries and apps test against one shared, captured wire format instead of hand-written scripts:
+
+```go
+import "github.com/hollis-labs/go-providers/providertest"
+
+fake := providertest.New(t, "claude",
+    providertest.Replay("claude/print_turn1"),
+    providertest.Replay("claude/print_turn2_resume").When("--resume"),
+)
+bridge := provider.NewSubprocessBridge(provider.NewClaudeAdapter(), fake.Path)
+// … run two turns …
+id, _ := fake.Call(1).ArgAfter("--resume")
+```
+
+`Replay` covers turns, resume, unknown resume ids, tool use and errors for claude, codex, opencode and antigravity (captured) and copilot and pi (synthetic ACP); `Script` and `Lines` build a run by hand. `providertest/fixtures/README.md` lists every fixture and how it was captured and scrubbed.
 
 ## License
 

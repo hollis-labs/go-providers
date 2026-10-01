@@ -4,11 +4,11 @@ package provider
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 func TestNewPTYBridge_NilWhenMissing(t *testing.T) {
@@ -92,14 +92,10 @@ func TestPTYBridge_StreamChat_WithMockCLI(t *testing.T) {
 // tool calls" llmtypes.EventError so consumers see the failure as the SOLE terminal
 // event (mutually exclusive with llmtypes.EventDone per the llmtypes.IsTurnComplete contract).
 func TestPTYBridge_NoSilentDrop_ToolUseOnly(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "tool-only-cli.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}'
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"do_thing","input":{}}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}`,
+	)).Path
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{

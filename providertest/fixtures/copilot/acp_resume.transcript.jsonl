@@ -1,0 +1,11 @@
+{"recv":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}}}}
+{"send":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false}},"agentInfo":{"name":"Copilot","version":"1.0.12"},"authMethods":[]}}}
+{"recv":{"jsonrpc":"2.0","id":2,"method":"session/load","params":{"sessionId":"00000000-0000-4000-8000-000000000001","cwd":"/work/project","mcpServers":[]}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"say hi"}}}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi!"}}}}}
+{"send":{"jsonrpc":"2.0","id":2,"result":{}}}
+{"recv":{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"00000000-0000-4000-8000-000000000001","prompt":[{"type":"text","text":"say bye"}]}}}
+{"send":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"00000000-0000-4000-8000-000000000001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Bye!"}}}}}
+{"send":{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}}
+{"eof":true}
+{"exit":0}

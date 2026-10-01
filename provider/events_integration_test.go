@@ -4,8 +4,7 @@ package provider
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
 	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 // TestPTYBridge_TypedEvents_EndToEnd spawns a fake claude-shaped CLI
@@ -20,8 +20,6 @@ import (
 // arrive via the WithEvents callback in the expected order, alongside
 // the legacy llmtypes.StreamEvent channel which must continue to work.
 func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-claude.sh")
 	stream := `{"type":"system","subtype":"init","session_id":"s_42"}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello!"}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"path":"/x"}}]}}
@@ -29,9 +27,7 @@ func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done!"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"Done!","stop_reason":"end_turn","usage":{"input_tokens":42,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}
 `
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat <<'EOF'\n"+stream+"EOF\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(strings.Split(strings.TrimSpace(stream), "\n")...)).Path
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 
@@ -119,15 +115,11 @@ func TestPTYBridge_TypedEvents_EndToEnd(t *testing.T) {
 }
 
 func TestPTYBridge_TypedEvents_FingerprintMode(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-claude.sh")
 	stream := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"path":"/secrets/token"}}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"hi","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
 `
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat <<'EOF'\n"+stream+"EOF\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(strings.Split(strings.TrimSpace(stream), "\n")...)).Path
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 
@@ -177,14 +169,10 @@ func TestPTYBridge_TypedEvents_FingerprintMode(t *testing.T) {
 func TestPTYBridge_TypedEvents_BackwardCompat(t *testing.T) {
 	// When WithEvents is NOT in context, behavior matches v0.7.0 exactly:
 	// llmtypes.StreamEvent channel only, no callback, no stderr capture.
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-claude.sh")
 	stream := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"hi","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
 `
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat <<'EOF'\n"+stream+"EOF\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(strings.Split(strings.TrimSpace(stream), "\n")...)).Path
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 	ch, err := bridge.StreamChat(context.Background(), llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{
@@ -225,11 +213,9 @@ func requireKindsInOrder(t *testing.T, want, got []string) {
 
 // Sanity check that the integration test does not hang.
 func TestPTYBridge_TypedEvents_DoesNotHang(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-claude.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	script := providertest.New(t, "claude", providertest.Lines(
+		`{"type":"result","subtype":"success","is_error":false,"result":"","stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":0}}`,
+	)).Path
 
 	bridge := NewPTYBridgeWithAdapter(NewClaudeAdapter(), script)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

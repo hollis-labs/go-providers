@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.32.0 — 2026-10-01
+
+### Added
+
+- `providertest`: a fake agent CLI for tests. `providertest.New(t, "claude",
+  providertest.Replay("claude/print_turn1"))` returns a binary named after the
+  runtime that replays captured wire output: per-turn stdout/stderr/exit, and
+  duplex transcripts (claude streaming stdio, codex app-server JSON-RPC, ACP)
+  that wait for each client frame and answer JSON-RPC requests under the live
+  request's id. Each invocation is recorded (argv, cwd, env, stdin, signals,
+  exit code). The fake is the test binary itself, re-entered through a symlink
+  and found by argv[0], so it needs no setup beyond the import, works when the
+  caller replaces the child environment, avoids ETXTBSY and runs under
+  `go test -race` with no real CLI installed. The fake takes its binary name
+  and CLI-path variable from the `registry` descriptor; a test stands in a
+  fake runtime with `registry.RegisterForTest`.
+- Fixtures under `providertest/fixtures`, embedded as `providertest.Fixtures`:
+  new captures from Claude Code 2.1.286 (print turn, resume, unknown resume
+  id, tool use, tool denied, unknown model; streaming stdio two turns, resume,
+  unknown resume id) and codex-cli 0.159.2 (`exec` turn, resume, unknown
+  thread, tool use, unknown model; `app-server` turns, resume, unknown thread,
+  command approval), scrubbed for publication; synthetic ACP transcripts for
+  copilot and pi, marked as such in `fixtures/README.md`.
+  `hack/capturefixtures` re-records the claude and codex captures.
+
+### Fixed
+
+- `SubprocessBridge` with `WithEvents` could drop stderr lines from a CLI that
+  writes its error and exits at once (claude on an unknown `--resume` id): it
+  called `cmd.Wait`, which closes the stderr pipe, before its stderr reader had
+  finished. It now drains stderr first, bounded by the wait delay.
+- `SubprocessBridge` could deliver a `SubprocessStderr` typed event after the
+  turn's terminal `Done`/`Error` when the adapter parsed the terminal from
+  stdout, since stderr is read on its own goroutine. Terminal typed events are
+  now held until stderr is drained, as the typed-events contract requires.
+
+### Changed
+
+- The opencode and antigravity captures moved from `provider/testdata` to
+  `providertest/fixtures`. go-providers' own fake-CLI tests now use
+  `providertest` instead of shell scripts, and new replay tests drive each
+  adapter's captures through the subprocess bridge.
+
 ## v0.31.0 — 2026-10-01
 
 ### Added

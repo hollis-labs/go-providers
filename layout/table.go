@@ -91,8 +91,8 @@ var table = []Entry{
 	// walking from cwd (no .git needed). Global MCP servers and skills under
 	// ~/.gemini/config still load alongside; a workspace skill shadows a
 	// global one of the same name. Rows were verified live against agy 1.2.7
-	// (go-providers testdata/antigravity; Tether CW-20260930-0107), not by the
-	// Step 0 harness probe.
+	// (go-providers providertest/fixtures/antigravity; Tether
+	// CW-20260930-0107), not by the Step 0 harness probe.
 	{Provider: runtimes.Antigravity, Concern: Instructions, Root: RootBoot, Rel: "AGENTS.md", CWD: RootBoot,
 		Unprobed: "verified live against agy 1.2.7: <cwd>/AGENTS.md and the --add-dir project's own AGENTS.md both apply; not in the Step 0 golden"},
 	{Provider: runtimes.Antigravity, Concern: Boot, Root: RootBoot, Rel: "boot.md",
