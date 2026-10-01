@@ -4,5 +4,5 @@ github.com/hollis-labs/agent-contracts-leaf v0.3.0 h1:tOAbq1y2Qtkk/S81hpSTlE3ZIs
 github.com/hollis-labs/agent-contracts-leaf v0.3.0/go.mod h1:Yp3iEG7I1qHxGL+Ad085RDVP5xUM/dbL0nFxzCAQ9/w=
 github.com/hollis-labs/go-llm-contracts v0.1.0 h1:AzN35sz1vwXzClgHpx3SWede+U5TiRTGdwIuS7XHYEw=
 github.com/hollis-labs/go-llm-contracts v0.1.0/go.mod h1:msDaHCBEemyTbXhk0Q8lm5doK79aWK5VR/hdzjWgqbU=
-github.com/hollis-labs/go-llm-types v0.5.0 h1:+sJfUD+/Mj4YBU8J4neYLkwUuYv4zHdq2LmnwjLKM38=
-github.com/hollis-labs/go-llm-types v0.5.0/go.mod h1:n4XoMPvSTR7Dfjxj/D37cL8nQPKmtci2EzZQFjAvSr8=
+github.com/hollis-labs/go-llm-types v0.5.1 h1:4h473ppF+N+DxPJ9V+/Dt/kc3bkWcOaJOp6kRH9YxsQ=
+github.com/hollis-labs/go-llm-types v0.5.1/go.mod h1:n4XoMPvSTR7Dfjxj/D37cL8nQPKmtci2EzZQFjAvSr8=

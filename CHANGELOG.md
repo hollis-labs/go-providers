@@ -41,7 +41,7 @@ the stop-reason values.
   - Claude's values were already canonical and are normalised the same way.
   - A consumer that compared opencode's raw `stop` / `tool-calls` must
     compare the normalised values instead.
-- Requires `go-llm-types` v0.5.0 (was v0.1.0).
+- Requires `go-llm-types` v0.5.1 (was v0.1.0); v0.5.1 spells the thinking phase `thought`.
 ## v0.34.1 — 2026-10-01
 
 ### Security
