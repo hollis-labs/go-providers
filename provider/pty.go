@@ -152,7 +152,7 @@ func (p *PTYBridge) streamCLI(ctx context.Context, systemPrompt string, messages
 
 	go func() {
 		defer close(ch)
-		defer ptmx.Close()
+		defer func() { _ = ptmx.Close() }()
 		defer stopHeartbeat()
 
 		scanner := bufio.NewScanner(ptmx)

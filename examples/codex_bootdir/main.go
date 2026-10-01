@@ -48,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("mkdir bootdir: %v", err)
 	}
-	defer os.RemoveAll(bootDir)
+	defer func() { _ = os.RemoveAll(bootDir) }()
 
 	plantCtx := provider.PlantContext{
 		SystemPrompt:   "You are a terse assistant. One sentence only.",

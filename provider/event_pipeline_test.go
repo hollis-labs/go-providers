@@ -253,7 +253,9 @@ func TestUsageSummary(t *testing.T) {
 			OutputTokens: 50,
 		},
 	}
-	monitor.CheckEvent(usageEvent)
+	if v := monitor.CheckEvent(usageEvent); v != nil {
+		t.Fatalf("usage within budget reported a violation: %v", v)
+	}
 
 	summary := monitor.GetUsageSummary()
 	if summary.TotalInputTokens != 100 {
@@ -274,7 +276,6 @@ func TestUsageSummary(t *testing.T) {
 
 type mockStreamingProvider struct {
 	capabilities llmtypes.ProviderCapabilities
-	events       []llmtypes.StreamEvent
 }
 
 func (m *mockStreamingProvider) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
