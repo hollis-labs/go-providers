@@ -31,8 +31,10 @@ Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
     The run fixtures stay hand-captured.
   - The codex recipes honour `-only`.
   - `-only` starts a manifest when the runtime has none.
-  - The scrubber also replaces paths reported without their leading slash.
-    opencode reports the project that way.
+  - The scrubber also replaces paths reported without their leading slash
+    (opencode reports the project that way), and replaces OpenCode's `ses_`,
+    `prt_` and `evt_` ids with `…_fixtureNNNN` placeholders. This is the
+    policy v0.39.1's run fixtures follow.
 
 ## v0.39.3 — 2026-10-01
 

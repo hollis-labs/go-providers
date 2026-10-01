@@ -724,7 +724,7 @@ type scrubber struct {
 
 var (
 	uuidRE   = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	apiIDRE  = regexp.MustCompile(`\b(msg|req|resp|rs|call|toolu|srvtoolu|fc|ws)_[0-9A-Za-z]{8,}\b`)
+	apiIDRE  = regexp.MustCompile(`\b(msg|req|resp|rs|call|toolu|srvtoolu|fc|ws|ses|prt|evt)_[0-9A-Za-z]{8,}\b`)
 	emailRE  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`)
 	blobRE   = regexp.MustCompile(`"(signature|encrypted_content)":"[^"]*"`)
 	utilRE   = regexp.MustCompile(`"utilization":[0-9.eE+-]+`)
