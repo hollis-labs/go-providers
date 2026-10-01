@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	llmtypes "github.com/hollis-labs/go-llm-types"
+
 	"github.com/hollis-labs/go-providers/provider/events"
 )
 
@@ -53,7 +55,7 @@ func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 		if item.Item.Type != "agent_message" || item.Item.Text == "" {
 			return nil, nil
 		}
-		return []events.Event{events.Delta{Text: item.Item.Text, Phase: "final"}}, nil
+		return []events.Event{events.Delta{Text: item.Item.Text, Phase: "final", BlockID: item.Item.ID}}, nil
 
 	case "turn.completed":
 		var done codexTurnCompleted
@@ -67,9 +69,10 @@ func (a *CodexAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 				OutputTokens:        done.Usage.OutputTokens,
 				CacheCreationTokens: 0,
 				CacheReadTokens:     done.Usage.CachedInputTokens,
+				StopReason:          llmtypes.StopReasonEndTurn,
 			})
 		}
-		out = append(out, events.Done{})
+		out = append(out, events.Done{StopReason: llmtypes.StopReasonEndTurn})
 		return out, nil
 
 	case "turn.failed", "error":

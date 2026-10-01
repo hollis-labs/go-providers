@@ -287,10 +287,12 @@ type claudeEvent struct {
 // claudeAssistantEvent is an "assistant" event wrapping a message object.
 type claudeAssistantEvent struct {
 	Type    string             `json:"type"`
+	UUID    string             `json:"uuid"`
 	Message claudeAssistantMsg `json:"message"`
 }
 
 type claudeAssistantMsg struct {
+	ID      string               `json:"id"`
 	Role    string               `json:"role"`
 	Content []claudeContentBlock `json:"content"`
 	Usage   *claudeUsage         `json:"usage,omitempty"`
@@ -319,7 +321,40 @@ type claudeResultEvent struct {
 	Result     string       `json:"result"`
 	StopReason string       `json:"stop_reason"`
 	Usage      *claudeUsage `json:"usage,omitempty"`
-	// ModelUsage contains per-model breakdowns; we extract aggregate usage instead.
+	SessionID  string       `json:"session_id"`
+	UUID       string       `json:"uuid"`
+	// TotalCostUSD and ModelUsage are running totals for the session; see
+	// claude_cost.go for how they become a per-turn cost.
+	TotalCostUSD *float64                    `json:"total_cost_usd,omitempty"`
+	ModelUsage   map[string]claudeModelUsage `json:"modelUsage,omitempty"`
+}
+
+// claudeBlockID identifies one content block of an assistant event. Claude
+// Code writes one assistant event per block, each with the block at index 0
+// and the message id shared by every block of the message, so the event's
+// own uuid is what tells blocks apart; the index is appended for an event
+// that carries more than one. An event without a uuid falls back to the
+// message id and index.
+func claudeBlockID(ev claudeAssistantEvent, index int) string {
+	switch {
+	case ev.UUID != "" && index == 0:
+		return ev.UUID
+	case ev.UUID != "":
+		return fmt.Sprintf("%s:%d", ev.UUID, index)
+	case ev.Message.ID != "":
+		return fmt.Sprintf("%s:%d", ev.Message.ID, index)
+	default:
+		return ""
+	}
+}
+
+// claudeStopReason normalises a result's stop_reason, defaulting to
+// end_turn for a successful result that names none.
+func claudeStopReason(raw string) string {
+	if raw == "" {
+		return llmtypes.StopReasonEndTurn
+	}
+	return llmtypes.NormalizeStopReason(raw)
 }
 
 // claudeSystemEvent is a "system" event emitted at CLI startup.
@@ -376,13 +411,14 @@ func parseClaudeAssistant(line []byte) ([]llmtypes.StreamEvent, error) {
 	}
 
 	var events []llmtypes.StreamEvent
-	for _, block := range ev.Message.Content {
+	for i, block := range ev.Message.Content {
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
 				events = append(events, llmtypes.StreamEvent{
-					Type:    "delta",
+					Type:    llmtypes.EventDelta,
 					Content: block.Text,
+					BlockID: claudeBlockID(ev, i),
 				})
 			}
 		case "tool_use":
@@ -421,10 +457,6 @@ func parseClaudeResult(line []byte) ([]llmtypes.StreamEvent, error) {
 
 	// Emit usage if available.
 	if ev.Usage != nil {
-		stopReason := ev.StopReason
-		if stopReason == "" {
-			stopReason = "end_turn"
-		}
 		events = append(events, llmtypes.StreamEvent{
 			Type: llmtypes.EventUsage,
 			Usage: &llmtypes.Usage{
@@ -432,7 +464,8 @@ func parseClaudeResult(line []byte) ([]llmtypes.StreamEvent, error) {
 				OutputTokens:        ev.Usage.OutputTokens,
 				CacheCreationTokens: ev.Usage.CacheCreationInputTokens,
 				CacheReadTokens:     ev.Usage.CacheReadInputTokens,
-				StopReason:          stopReason,
+				StopReason:          claudeStopReason(ev.StopReason),
+				CostUSD:             claudeResultCost(ev),
 			},
 		})
 	}

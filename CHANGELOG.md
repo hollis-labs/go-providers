@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.35.0 — 2026-10-01
+
+Event vocabulary (CW-20260930-0137; closes the provider half of CW-20260930-0228
+§1 and §2 and CW-20260930-0222 L1). Additive fields; one behaviour change in
+the stop-reason values.
+
+### Added
+
+- **Block boundaries.** `llmtypes.StreamEvent.BlockID` and the typed
+  `events.Delta.BlockID` / `events.Thinking.BlockID` are set wherever the CLI
+  says which block a fragment belongs to, so consumers separate consecutive
+  blocks without per-provider guessing:
+  - Claude: the assistant event's `uuid`. Claude writes one event per block,
+    every block at content index 0 under a shared message id, so the uuid is
+    what tells them apart; the message id and index stand in without one.
+  - codex exec: `item.id`.
+  - opencode: the text or reasoning part's `id`.
+- **Phase on the legacy surface.** codex exec deltas carry `Phase` (`final`
+  for `item.completed`, `narration` for streamed `item.message` deltas), as
+  the typed surface already did. opencode reasoning carries `thinking`.
+- **Cost.** `Usage.CostUSD` and the new typed `events.Usage.CostUSD` are
+  populated as per-event deltas:
+  - opencode: each `step_finish`'s own `cost` (per step, so the steps sum to
+    the turn).
+  - Claude: the per-turn difference of `total_cost_usd`, which is a running
+    total for the CLI session, across turns and across `--resume`.
+    Baselines live in a process-wide ledger keyed by session id (bounded to
+    1024 sessions). A resumed session this process never saw reports zero
+    for its first turn rather than charging its history to it.
+- `events.AuthFailed{Message}`: the typed event the session layer emits when
+  an `AuthFailureClassifier` recognises a sign-in failure.
+
+### Changed
+
+- **Stop reasons are normalised** with `llmtypes.NormalizeStopReason`:
+  - opencode `step_finish` reasons: `tool-calls` → `tool_use`, `stop` →
+    `end_turn`, `length` → `max_tokens`.
+  - codex exec now reports `end_turn` for a completed turn; it reported none.
+  - Claude's values were already canonical and are normalised the same way.
+  - A consumer that compared opencode's raw `stop` / `tool-calls` must
+    compare the normalised values instead.
+- Requires `go-llm-types` v0.5.1 (was v0.1.0); v0.5.1 spells the thinking phase `thought`.
 ## v0.34.1 — 2026-10-01
 
 ### Security

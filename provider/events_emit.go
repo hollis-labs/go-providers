@@ -96,7 +96,7 @@ func translateStreamEvents(in []llmtypes.StreamEvent) []events.Event {
 	for _, ev := range in {
 		switch ev.Type {
 		case llmtypes.EventDelta:
-			out = append(out, events.Delta{Text: ev.Content})
+			out = append(out, events.Delta{Text: ev.Content, Phase: ev.Phase, BlockID: ev.BlockID})
 		case llmtypes.EventToolUse:
 			if ev.ToolUse != nil {
 				out = append(out, events.ToolUse{
@@ -113,6 +113,7 @@ func translateStreamEvents(in []llmtypes.StreamEvent) []events.Event {
 					CacheCreationTokens: ev.Usage.CacheCreationTokens,
 					CacheReadTokens:     ev.Usage.CacheReadTokens,
 					StopReason:          ev.Usage.StopReason,
+					CostUSD:             ev.Usage.CostUSD,
 				})
 			}
 		case llmtypes.EventDone:
@@ -126,6 +127,7 @@ func translateStreamEvents(in []llmtypes.StreamEvent) []events.Event {
 				out = append(out, events.Thinking{
 					Text:      ev.ThinkingBlock.Thinking,
 					Signature: ev.ThinkingBlock.Signature,
+					BlockID:   ev.BlockID,
 				})
 			}
 		}

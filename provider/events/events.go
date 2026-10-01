@@ -30,11 +30,16 @@ type Event interface {
 //
 // Phase distinguishes streaming narration ("narration") from the
 // terminal-result text ("final") and from text emitted inside thinking
-// blocks ("thinking"). Empty Phase means the adapter did not classify
-// the fragment.
+// blocks ("thought", llmtypes.PhaseThinking). Empty Phase means the
+// adapter did not classify the fragment.
 type Delta struct {
 	Text  string
 	Phase string
+	// BlockID identifies the content block the fragment belongs to: the
+	// same for every fragment of one block, different for the next, so a
+	// consumer can separate consecutive blocks without provider rules.
+	// Opaque; empty when the adapter cannot tell blocks apart.
+	BlockID string
 }
 
 func (Delta) eventTag() {}
@@ -73,6 +78,8 @@ func (ToolResult) eventTag() {}
 type Thinking struct {
 	Text      string
 	Signature string
+	// BlockID identifies the thinking block, as Delta.BlockID does.
+	BlockID string
 }
 
 func (Thinking) eventTag() {}
@@ -84,7 +91,11 @@ type Usage struct {
 	OutputTokens        int
 	CacheCreationTokens int
 	CacheReadTokens     int
-	StopReason          string
+	// StopReason is normalised with llmtypes.NormalizeStopReason.
+	StopReason string
+	// CostUSD is the cost of the work this event covers, as a per-event
+	// delta (see llmtypes.Usage.CostUSD). Zero means no cost was reported.
+	CostUSD float64
 }
 
 func (Usage) eventTag() {}
@@ -157,6 +168,15 @@ type SessionLost struct {
 }
 
 func (SessionLost) eventTag() {}
+
+// AuthFailed reports that the CLI is not signed in or its credentials were
+// refused, as an AuthFailureClassifier recognised from its output. Emitted by
+// the session layer, which runs the classifier. The turn usually fails too.
+type AuthFailed struct {
+	Message string
+}
+
+func (AuthFailed) eventTag() {}
 
 // PermissionDenied reports a tool action the CLI refused because it needed
 // an approval that headless mode cannot ask for. The turn still completes,

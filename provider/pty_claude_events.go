@@ -71,11 +71,11 @@ func parseClaudeAssistantTyped(line []byte) ([]events.Event, error) {
 	}
 
 	var out []events.Event
-	for _, block := range ev.Message.Content {
+	for i, block := range ev.Message.Content {
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				out = append(out, events.Delta{Text: block.Text, Phase: "narration"})
+				out = append(out, events.Delta{Text: block.Text, Phase: "narration", BlockID: claudeBlockID(ev, i)})
 			}
 		case "tool_use":
 			input := make(map[string]any)
@@ -177,10 +177,7 @@ func parseClaudeResultTyped(line []byte) ([]events.Event, error) {
 	}
 
 	var out []events.Event
-	stopReason := ev.StopReason
-	if stopReason == "" {
-		stopReason = "end_turn"
-	}
+	stopReason := claudeStopReason(ev.StopReason)
 	if ev.Usage != nil {
 		out = append(out, events.Usage{
 			InputTokens:         ev.Usage.InputTokens,
@@ -188,6 +185,7 @@ func parseClaudeResultTyped(line []byte) ([]events.Event, error) {
 			CacheCreationTokens: ev.Usage.CacheCreationInputTokens,
 			CacheReadTokens:     ev.Usage.CacheReadInputTokens,
 			StopReason:          stopReason,
+			CostUSD:             claudeResultCost(ev),
 		})
 	}
 	out = append(out, events.Done{StopReason: stopReason})
