@@ -92,6 +92,7 @@ Verbatim `opencode run --format json` stdout, local paths rewritten to
 | `run_turn1` | first turn, one step, text reply |
 | `run_turn2_resume` | `--session <turn 1 id>`, which recalled turn 1's content |
 | `run_tool_use` | one turn of three steps: glob, read, reply |
+| `run_error_unknown_model` | opencode **1.18.33**, `-m anthropic/claude-nonexistent-0`. A single `error` line, `UnknownError` "Unexpected server error. Check server logs for details." with `data.ref` and no model name, then exit 1. No stderr. |
 
 ## antigravity — captured, agy 1.2.7
 

@@ -203,6 +203,7 @@ func TestReplay_OpencodeRun(t *testing.T) {
 		providertest.Replay("opencode/run_turn1"),
 		providertest.Replay("opencode/run_turn2_resume").When("--session"),
 		providertest.Replay("opencode/run_tool_use"),
+		providertest.Replay("opencode/run_error_unknown_model"),
 	)
 	adapter := NewOpencodeAdapter()
 
@@ -221,6 +222,14 @@ func TestReplay_OpencodeRun(t *testing.T) {
 	tool := runTurn(t, adapter, fake.Path, "")
 	if _, ok := tool.first(llmtypes.EventToolUse); !ok || tool.terminal(t).Type != llmtypes.EventDone {
 		t.Errorf("tool turn: %+v", tool.events)
+	}
+
+	// opencode 1.18.33 reports a model it cannot resolve as a generic
+	// UnknownError; the error's name and ref are what tell it from a server
+	// fault, so they must reach the surfaced error (CW-20261001-0122).
+	badModel := runTurn(t, adapter, fake.Path, "")
+	if got := badModel.terminal(t); got.Type != llmtypes.EventError || got.Error != "Unexpected server error. Check server logs for details. (UnknownError, ref err_7707db6c)" {
+		t.Errorf("unknown model: terminal = %+v", got)
 	}
 }
 

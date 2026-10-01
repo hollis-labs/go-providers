@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"bytes"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
+
+	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 func TestOpencodeAdapter_Name(t *testing.T) {
@@ -122,7 +126,7 @@ func TestOpencodeAdapter_ParseLine(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(events) != 1 || events[0].Type != llmtypes.EventError || events[0].Error != "rate limited" {
+		if len(events) != 1 || events[0].Type != llmtypes.EventError || events[0].Error != "rate limited (APIError)" {
 			t.Errorf("events = %+v", events)
 		}
 	})
@@ -178,5 +182,49 @@ func assertArgsEqual(t *testing.T, got, want []string) {
 		if got[i] != exp {
 			t.Errorf("arg[%d]: expected %q, got %q", i, exp, got[i])
 		}
+	}
+}
+
+// The surfaced error keeps data.message and adds what identifies the cause:
+// the error's name, the model it names, and opencode's ref (CW-20261001-0122).
+func TestOpencodeErrorMessageCarriesNameModelAndRef(t *testing.T) {
+	a := NewOpencodeAdapter()
+	cases := []struct {
+		name, line, want string
+	}{
+		{
+			"captured unknown model (opencode 1.18.33)",
+			string(bytes.TrimSpace(providertest.ReadFixture(t, "opencode/run_error_unknown_model.jsonl"))),
+			"Unexpected server error. Check server logs for details. (UnknownError, ref err_7707db6c)",
+		},
+		{
+			"model named in the error (synthetic: ProviderModelNotFoundError's data)",
+			`{"type":"error","error":{"name":"ProviderModelNotFoundError","data":{"providerID":"anthropic","modelID":"claude-nonexistent-0"}}}`,
+			"ProviderModelNotFoundError, model anthropic/claude-nonexistent-0",
+		},
+		{
+			"message and model",
+			`{"type":"error","error":{"name":"ProviderModelNotFoundError","data":{"message":"Model not found","providerID":"anthropic","modelID":"x"}}}`,
+			"Model not found (ProviderModelNotFoundError, model anthropic/x)",
+		},
+		{"name only", `{"type":"error","error":{"name":"UnknownError","data":{}}}`, "UnknownError"},
+		{"message equal to name", `{"type":"error","error":{"name":"Boom","data":{"message":"Boom"}}}`, "Boom"},
+		{"nothing", `{"type":"error","error":{}}`, "opencode error"},
+		{"no error object", `{"type":"error"}`, "opencode error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy, err := a.ParseLine([]byte(tc.line))
+			if err != nil || len(legacy) != 1 || legacy[0].Type != llmtypes.EventError || legacy[0].Error != tc.want {
+				t.Errorf("ParseLine = %+v, %v; want error %q", legacy, err, tc.want)
+			}
+			typed, err := a.ParseLineEvents([]byte(tc.line))
+			if err != nil || len(typed) != 1 {
+				t.Fatalf("ParseLineEvents = %+v, %v", typed, err)
+			}
+			if ev, ok := typed[0].(events.Error); !ok || ev.Message != tc.want {
+				t.Errorf("ParseLineEvents = %+v; want events.Error %q", typed[0], tc.want)
+			}
+		})
 	}
 }
