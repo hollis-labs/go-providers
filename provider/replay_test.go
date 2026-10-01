@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +128,14 @@ func TestReplay_ClaudePrint(t *testing.T) {
 	if !strings.Contains(strings.Join(lost.stderr, "\n"), "No conversation found with session ID") {
 		t.Errorf("unknown resume id: stderr = %q", lost.stderr)
 	}
+	if !adapter.IsSessionLost([]byte(strings.Join(lost.stderr, "\n"))) {
+		t.Errorf("IsSessionLost(%q) = false, want the lost resume id classified", lost.stderr)
+	}
+	for name, ok := range map[string]turnResult{"turn 1": turn1, "resume turn": turn2} {
+		if adapter.IsSessionLost([]byte(strings.Join(ok.stderr, "\n"))) {
+			t.Errorf("IsSessionLost(%s stderr %q) = true", name, ok.stderr)
+		}
+	}
 
 	tool := runTurn(t, adapter, fake.Path, "")
 	if tu, ok := tool.first(llmtypes.EventToolUse); !ok || tu.ToolUse == nil || tu.ToolUse.Name != "Bash" {
@@ -167,6 +177,8 @@ func TestReplay_CodexExec(t *testing.T) {
 
 	// The fixture is `codex exec resume <unknown id>`; with no resume argv
 	// in the adapter, this checks only how the bridge surfaces the failure.
+	// CodexAdapter has no IsSessionLost on purpose: exec does not resume
+	// (see the codex descriptor in package registry).
 	lost := runTurn(t, adapter, fake.Path, "")
 	if lost.terminal(t).Type != llmtypes.EventError {
 		t.Errorf("unknown thread: terminal = %+v, want an error", lost.terminal(t))
@@ -249,5 +261,21 @@ func TestReplay_AntigravityPrint(t *testing.T) {
 	}
 	if again, _ := lost.first(llmtypes.EventSessionID); again.SessionID == unknownSessionID {
 		t.Errorf("agy kept the unknown id %q; the fixture says it starts a new conversation", again.SessionID)
+	}
+}
+
+// Over streaming stdio, an unknown --resume id ends the session with the
+// same stderr line as print mode (claude/stream_resume_unknown_id).
+func TestReplay_ClaudeStreamingLostSessionIsClassified(t *testing.T) {
+	fake := providertest.New(t, "claude", providertest.Replay("claude/stream_resume_unknown_id"))
+	cmd := exec.Command(fake.Path, "--resume", unknownSessionID)
+	cmd.Stdin = strings.NewReader(`{"type":"user","message":{"role":"user","content":"say hi"}}` + "\n")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("lost session exited 0; claude exits 1")
+	}
+	if !NewClaudeAdapter().IsSessionLost(stderr.Bytes()) {
+		t.Fatalf("IsSessionLost(%q) = false", stderr.String())
 	}
 }

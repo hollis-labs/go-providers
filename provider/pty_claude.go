@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -273,6 +274,17 @@ func (a *ClaudeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 
 func (a *ClaudeAdapter) Detect() (string, bool) {
 	return detect(runtimes.Claude, a.Binary)
+}
+
+// IsSessionLost implements SessionLostClassifier. `claude --resume <id>`
+// with an id claude no longer has writes "No conversation found with session
+// ID: <id>" to stderr, a result with subtype error_during_execution, and
+// exits 1, in print mode and over streaming stdio alike
+// (providertest/fixtures/claude/print_resume_unknown_id and
+// stream_resume_unknown_id, claude 2.1.x). The result line on stdout carries
+// no reason, so stderr is where the loss shows.
+func (a *ClaudeAdapter) IsSessionLost(stderrTail []byte) bool {
+	return bytes.Contains(stderrTail, []byte("No conversation found with session ID"))
 }
 
 // Claude Code stream-json event types.

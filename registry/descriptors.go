@@ -32,10 +32,15 @@ func init() {
 		Binary:      "claude",
 		EnvOverride: "CLAUDE_CLI_PATH",
 		Modes: []ModeSupport{
-			{runtimes.ModeStreamingStdio, caps(resume, typedEvents)},
-			{runtimes.ModeSubprocessPerTurn, caps(resume, typedEvents)},
+			// An unknown --resume id is classified from stderr ("No
+			// conversation found with session ID") in both modes, measured
+			// in providertest/fixtures/claude/print_resume_unknown_id and
+			// stream_resume_unknown_id (CW-20261001-0047).
+			{runtimes.ModeStreamingStdio, caps(resume, typedEvents, lostClass)},
+			{runtimes.ModeSubprocessPerTurn, caps(resume, typedEvents, lostClass)},
 			// The TUI: resumable with --resume, but its output is a
-			// terminal stream, not typed events.
+			// terminal stream, not typed events, and a lost id there is
+			// not measured.
 			{runtimes.ModePTY, caps(resume)},
 			// Through the claude-agent-acp bridge (go-agent-wrapper
 			// claudeacp), which brings its own binary. No approvals: live
@@ -83,7 +88,16 @@ func init() {
 			// declaring it here would be a claim the adapter does not
 			// back.
 			{runtimes.ModeJSONRPCStdio, caps(resume, typedEvents, approvals)},
-			// codex exec --json: one turn, no resume.
+			// codex exec --json: one turn, no resume, so no
+			// session-lost-classifier either: CodexAdapter builds no
+			// `exec resume` argv, and a classifier for an id it never
+			// passes would be a claim nothing exercises. exec stays
+			// single-turn on purpose (CW-20261001-0047): `codex exec
+			// resume` (0.159.2) takes neither --cd nor -s, which exec turns
+			// may carry, so the resume turn would need its own convention.
+			// Resumable Codex is app-server (D-74). The unknown-id stderr
+			// ("no rollout found for thread id") is captured in
+			// providertest/fixtures/codex/exec_resume_unknown_id.
 			{runtimes.ModeSubprocessPerTurn, caps(typedEvents)},
 			// Through the codex-acp bridge (go-agent-wrapper codexacp);
 			// session/request_permission has not been observed from it.
