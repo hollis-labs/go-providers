@@ -35,6 +35,18 @@
 // the EnvOverride variable, then PATH, then common install directories and
 // the descriptor's LookupDirs.
 //
+// # MCP exclusivity
+//
+// A CLI normally loads the user's own MCP servers next to the ones a launch
+// plants. [Descriptor.MCPExclusivity] says, per native mode, how a launch is
+// kept to its own: [MCPExclusivityFlag] (the adapter's MCPExclusive field adds
+// a CLI flag: Claude), [MCPExclusivityLayout] (the planted layout already
+// excludes the user's servers: Codex, whose config root is CODEX_HOME), or
+// [MCPExclusivityNone], where no mechanism was measured and a host that needs
+// exclusivity must refuse the mode. Like a capability it is declared only
+// where hack/probe-mcp-exclusive.sh measured it; OpenCode has no MCP-only
+// switch, and Antigravity could not be measured.
+//
 // # Permission posture
 //
 // A permission posture is go-permission's Mode (D-72): default, accept-edits,

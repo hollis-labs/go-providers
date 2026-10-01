@@ -59,6 +59,48 @@ where they live (`<h>-<root>-<location>-<form>`).
 Flat `<name>.md` skills were read by none of the three harnesses in any
 location. The layout table therefore emits only the directory form.
 
+## MCP exclusivity (`hack/probe-mcp-exclusive.sh`)
+
+A separate script and golden
+(`provider/testdata/mcp-exclusive/2026-10-01-claude-2.1.286-codex-0.159.3-opencode-1.18.33.tsv`),
+so the layout golden above is not re-baselined. The question: which MCP servers
+does each CLI load next to the ones a launch plants? A scratch `HOME` holds a
+user-level server (`user-probe`); the planted set is passed the way the launch
+conventions pass it (`planted-probe`); every probe runs under `env -i`. No
+model call: Claude's API base is a closed port and its `system/init` lists the
+MCP servers; Codex lists its config and, for `exec`, runs against a closed port
+with a dummy key; OpenCode prints its resolved config. Stdio marker servers
+record that they were spawned, so a result is also a spawn, not only a listing.
+
+| Runtime | Probe | Launch | Loaded |
+|---|---|---|---|
+| Claude | MCP1 / MCP2 | per-turn, `--mcp-config`, without / with `--strict-mcp-config` | user + planted / planted |
+| Claude | MCP3 | `--strict-mcp-config`, nothing passed | none (a cwd `.mcp.json` is ignored) |
+| Claude | MCP5 / MCP6 | `--bare`, without / with the flag | planted / planted |
+| Claude | MCP7 / MCP8 | streaming-stdio, without / with the flag | user + planted / planted |
+| Claude | MCP9 / MCP10 | PTY, without / with the flag (spawned servers) | user + planted / planted |
+| Codex | MCP1 / MCP2 | `codex mcp list`, `CODEX_HOME` unset / the boot dir | user / planted |
+| Codex | MCP3 / MCP4 | the same with a project `.codex/config.toml` | planted / user (the project's is not applied) |
+| Codex | MCP5 / MCP6 | `codex exec` (spawned servers), `CODEX_HOME` unset / the boot dir | user / planted |
+| OpenCode | MCP1 | `OPENCODE_CONFIG_DIR` = the boot dir | planted + project + user |
+| OpenCode | MCP2 / MCP3 / MCP4 | `XDG_CONFIG_HOME` empty / `OPENCODE_DISABLE_PROJECT_CONFIG=1` / both | planted + project / planted + user / planted |
+
+Claude's PTY starts MCP servers only after its first-run dialogs, so MCP9 and
+MCP10 pre-approve onboarding, the dummy API key and the project's MCP servers
+in the scratch config and drive the TUI through a pty (the script needs
+`python3` for those two). Claude `--bare` never loads the user's server, with
+or without the flag. Codex's app-server reads the same `config.toml` as exec; a
+by-hand run of `thread/start` spawned only the planted server, but it is not
+in the script. OpenCode's config view was also confirmed by spawning, with
+`opencode run`, which uses OpenCode's built-in free model: that is why the
+script does not.
+
+OpenCode has no MCP-only switch: the two isolations that remove the user's and
+the project's servers remove all of their other config as well, and
+`XDG_CONFIG_HOME` is read by other tools too. Not measured: Antigravity (it
+will not start without a login), Claude's account connectors (a login), and
+managed or plugin servers.
+
 ## Supplementary measurement (not in the golden)
 
 The probe has no row for claude `--bare` with the boot directory itself as an

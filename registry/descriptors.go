@@ -66,6 +66,22 @@ func init() {
 			Notes: map[runtimes.Mode]string{
 				"": "Claude project files are rooted at the boot directory; auth and trust preparation are explicit runtime effects.",
 			},
+			// Without --strict-mcp-config claude also loads the user's own
+			// servers (the top-level mcpServers of ~/.claude.json) next to the
+			// ones --mcp-config passes; with it, only the passed ones load, and
+			// with nothing passed none do. Measured by
+			// hack/probe-mcp-exclusive.sh on claude 2.1.286, by the servers
+			// system/init reports and the stdio markers that were spawned:
+			// per-turn MCP1/MCP2 (and MCP3, MCP4), bare MCP5/MCP6 (--bare
+			// already skips the user's servers; the flag changes nothing there),
+			// streaming MCP7/MCP8, PTY MCP9/MCP10. Not measured: the claude.ai
+			// account connectors, which need a login, and managed or plugin
+			// servers. TestMCPExclusivityMatchesTheAdapters checks the flag.
+			MCPExclusive: map[runtimes.Mode]MCPExclusivity{
+				runtimes.ModeStreamingStdio:    MCPExclusivityFlag,
+				runtimes.ModeSubprocessPerTurn: MCPExclusivityFlag,
+				runtimes.ModePTY:               MCPExclusivityFlag,
+			},
 		},
 	})
 
@@ -121,6 +137,21 @@ func init() {
 				runtimes.ModeSubprocessPerTurn: "Codex reads config from CODEX_HOME/config.toml; auth.json is a preparation effect, not a pure render input.",
 				runtimes.ModeJSONRPCStdio:      "Project root is supplied to the JSON-RPC thread layer rather than via --cd.",
 			},
+			// Codex reads MCP servers from $CODEX_HOME/config.toml only. With the
+			// layout's CODEX_HOME=<boot> the user's ~/.codex servers are not
+			// loaded, and a project .codex/config.toml is not applied
+			// (untrusted); with CODEX_HOME unset they are. So the planted layout
+			// is exclusive by itself and there is nothing to pass. Measured by
+			// hack/probe-mcp-exclusive.sh on codex-cli 0.159.3: `codex mcp list`
+			// MCP1-MCP4, and servers spawned by `codex exec` MCP5/MCP6. The
+			// app-server reads the same config; it was confirmed by hand
+			// (thread/start spawned only the planted server) but is not in the
+			// script. TestMCPExclusivityMatchesTheAdapters checks that the
+			// projection sets CODEX_HOME.
+			MCPExclusive: map[runtimes.Mode]MCPExclusivity{
+				runtimes.ModeJSONRPCStdio:      MCPExclusivityLayout,
+				runtimes.ModeSubprocessPerTurn: MCPExclusivityLayout,
+			},
 		},
 	})
 
@@ -160,6 +191,17 @@ func init() {
 				runtimes.ModeSubprocessPerTurn: "OpenCode uses OPENCODE_CONFIG_DIR for projected config and project cwd for work.",
 				runtimes.ModeHTTPSSE:           "OpenCode serve-http uses the same projected config and moves turn delivery to the HTTP runtime.",
 			},
+			// No MCPExclusive entry, on purpose. OPENCODE_CONFIG_DIR is merged
+			// with the user's ~/.config/opencode and the project's
+			// opencode.json, so both sets of servers load next to the planted
+			// ones (hack/probe-mcp-exclusive.sh opencode MCP1, confirmed by
+			// spawning with `opencode run`). The only things that removed them
+			// were whole-config isolations: XDG_CONFIG_HOME pointed at an empty
+			// directory (MCP2) and OPENCODE_DISABLE_PROJECT_CONFIG=1 (MCP3),
+			// together MCP4. Neither is MCP-specific: they also drop every other
+			// user and project setting (providers, models, permissions), and
+			// XDG_CONFIG_HOME is a variable other tools the agent runs read too. No
+			// MCP-only switch was found in opencode 1.18.33, so none is claimed.
 		},
 	})
 
@@ -222,6 +264,9 @@ func init() {
 			Notes: map[runtimes.Mode]string{
 				"": "agy projects into the workspace customization root <boot>/.agents (cwd = boot, project via --add-dir); its global ~/.gemini/config is shared with the desktop app and not written. Credentials stay in ~/.gemini.",
 			},
+			// No MCPExclusive entry: not measured. agy will not start without a
+			// login, and a scratch HOME has none, so whether its user-level MCP
+			// servers load next to the planted plugin's could not be observed.
 		},
 	})
 }

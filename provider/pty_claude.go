@@ -34,6 +34,17 @@ type ClaudeAdapter struct {
 	// Only set when developer_mode is enabled; never set for production.
 	SkipPermissions bool
 
+	// MCPExclusive adds --strict-mcp-config, which keeps claude to the MCP
+	// servers this launch passes with --mcp-config and ignores every other
+	// MCP configuration: the user's own servers in ~/.claude.json, and a
+	// .mcp.json in the working directory. Without it claude loads those
+	// next to the planted ones, so an MCP allow-list the host applies to
+	// the planted servers does not cover them. With no MCP config passed
+	// it loads no MCP servers at all. Off by default, which leaves the argv
+	// as it was. Measured in every shape (registry.MCPExclusivityFlag);
+	// --bare already skips the user's servers, and the flag is harmless there.
+	MCPExclusive bool
+
 	// PermissionMode sets `permissions.defaultMode` in the planted
 	// `.claude/settings.json` (see BootDirSpec). It is a first-class knob
 	// for the full Claude Code permission-mode vocabulary:

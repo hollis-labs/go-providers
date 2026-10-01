@@ -354,6 +354,19 @@ The codex `config.toml` always carries an `approval_policy` / `sandbox_mode` hea
 
 Beyond the per-task loopback (`PlantContext.MCPLoopbackURL`) and the mux aggregator (`PlantContext.Mux*`), a consumer adds its own MCP servers via `PlantContext.MCPServers` (`[]MCPServerSpec` — name + an HTTP-URL or stdio command). Every runtime with a boot dir renders them, in its CLI's own form, into the file its layout names (`provider/mcp_servers.go`): claude `.mcp.json`, codex `config.toml [mcp_servers.<name>]` (codex reads no `.mcp.json`), opencode `opencode.json` `"mcp"`, agy `.agents/plugins/tether/mcp_config.json`, plus the `.mcp.json` mirrors codex and opencode plant for operators. So each config file stays single-owner and no consumer post-processes it. The names `loopback` and `mux` are reserved; an invalid, reserved or duplicate name, or a spec without exactly one transport, fails the render and the projection.
 
+### Keeping a launch to its own MCP servers
+
+A CLI normally loads the user's own MCP servers next to the ones a launch plants, so an allow-list a host applies to the planted servers does not cover them. `registry.Descriptor.MCPExclusivity(mode)` says, per native mode, whether and how a launch can be made exclusive:
+
+| Runtime / mode | Value | What makes it exclusive |
+|---|---|---|
+| Claude, per-turn, streaming-stdio and PTY | `flag` | Set `ClaudeAdapter.MCPExclusive`. The convention adds `--strict-mcp-config` right after `--mcp-config`. With nothing planted, Claude loads no MCP server. `--bare` already skips the user's servers, and the flag is harmless there. |
+| Codex, exec and app-server | `layout` | Nothing to pass. The planted layout sets `CODEX_HOME` to the boot dir, and Codex reads MCP servers only from there. It holds only for a launch that sets it. |
+| OpenCode | none | `OPENCODE_CONFIG_DIR` is merged with the user's and the project's config. Only whole-config isolation (`XDG_CONFIG_HOME` at an empty directory, `OPENCODE_DISABLE_PROJECT_CONFIG=1`) removed them, and that drops every other setting too, so none is offered. |
+| Antigravity | none | Not measured: `agy` will not start without a login. |
+
+Copilot and Pi are ACP-only and have no native mode. Off by default, and then the argv is unchanged. A mode with no value cannot be made exclusive, so a host that requires exclusivity should refuse it rather than launch it. The values are declared only where `hack/probe-mcp-exclusive.sh` measured them (a scratch `HOME` under `env -i`, no model call; claude 2.1.286, codex-cli 0.159.3, opencode 1.18.33), and `provider/testdata/mcp-exclusive` records the results ([docs/HARNESS-DISCOVERY.md](docs/HARNESS-DISCOVERY.md)). Not covered: Claude's account connectors, which need a login, and managed or plugin servers. Exclusivity decides which servers load; which of their tools may run is still the host's allow-list.
+
 ### Long-lived headless modes
 
 Three adapter shapes target vendor-documented long-lived headless lifecycles. They emit argv only; the runtime that owns the I/O loop, session-id handling, and attach fan-out lives upstream in `go-agent-sessions`.

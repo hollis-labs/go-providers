@@ -68,6 +68,16 @@ func (d Descriptor) Capabilities(m runtimes.Mode) []runtimes.Capability {
 	return slices.Clone(ms.Capabilities)
 }
 
+// MCPExclusivity returns how a launch of d in mode m is kept to the MCP
+// servers it provides: MCPExclusivityNone when no mechanism was measured for
+// m, or when d has no projection facts (ACP-only runtimes).
+func (d Descriptor) MCPExclusivity(m runtimes.Mode) MCPExclusivity {
+	if d.Projection == nil {
+		return MCPExclusivityNone
+	}
+	return d.Projection.MCPExclusivity(m)
+}
+
 // Has reports whether d declares capability c in mode m.
 func (d Descriptor) Has(m runtimes.Mode, c runtimes.Capability) bool {
 	ms, _ := d.mode(m)
@@ -307,6 +317,14 @@ func validate(d Descriptor, builtin bool) error {
 		}
 		if len(p.Features) != len(Features()) {
 			return fmt.Errorf("%s: projection names a feature outside registry.Features", d.ID)
+		}
+		for m, x := range p.MCPExclusive {
+			if !slices.Contains(native, m) {
+				return fmt.Errorf("%s: MCP exclusivity names mode %s, which is not a native mode of the runtime", d.ID, m)
+			}
+			if x != MCPExclusivityFlag && x != MCPExclusivityLayout {
+				return fmt.Errorf("%s/%s: MCP exclusivity %q is not flag or layout; omit the mode when none was measured", d.ID, m, x)
+			}
 		}
 	}
 	for _, e := range rows {

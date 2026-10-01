@@ -1,9 +1,67 @@
 # Changelog
 
-## Unreleased
+## v0.43.0 — 2026-10-01
 
-Hardening the extras API after the adversarial review of #53
-(CW-20261001-0219). Tests and docs only; no behavior change.
+A launch can be kept to the MCP servers it plants (CW-20261001-0225), and the
+extras API's limits are documented and tested (CW-20261001-0219).
+
+### Added
+
+- **`ClaudeAdapter.MCPExclusive`**: a typed option that keeps Claude to the MCP
+  servers the launch passes with `--mcp-config`. Without it Claude also loads
+  the user's own servers (the top-level `mcpServers` of `~/.claude.json`) next
+  to the planted ones, so a host's allow-list for the planted servers does not
+  cover them.
+  - It adds `--strict-mcp-config` in every shape (per-turn, bare,
+    streaming-stdio, PTY), right after the `--mcp-config` pair, in the one
+    convention in `argv.go`. A host must not spell the flag itself.
+  - With nothing planted it still adds the flag, and Claude then loads no MCP
+    server at all.
+  - It ends the variadic `--mcp-config` list, so an extra that starts with a
+    non-flag token can no longer join it as another config file.
+  - Off by default, and then the argv is byte-for-byte what it was.
+- **`registry.MCPExclusivity`**, so a host can ask whether a runtime and mode
+  can be made exclusive: `Descriptor.MCPExclusivity(mode)` and
+  `ProjectionFacts.MCPExclusive`, which holds a value only for a measured mode.
+  - `flag`: the adapter's `MCPExclusive` adds a CLI flag. Claude, in all three
+    of its native modes.
+  - `layout`: the planted layout already excludes the user's servers, because
+    the runtime reads MCP config only from the root the layout sets. Codex exec
+    and app-server (`CODEX_HOME` = the boot dir). There is nothing to pass,
+    and it holds only for a launch that sets that root.
+  - No value: no mechanism was measured. A host that requires exclusivity
+    refuses these modes. That is OpenCode (below) and Antigravity.
+  - Registration refuses a value for a mode the runtime lacks.
+- **`hack/probe-mcp-exclusive.sh`** and its golden
+  `provider/testdata/mcp-exclusive/2026-10-01-claude-2.1.286-codex-0.159.3-opencode-1.18.33.tsv`.
+  Each CLI runs under `env -i` with a scratch `HOME` holding a user-level
+  server, next to a planted one; the script reports what each loaded, and for
+  stdio marker servers what it spawned. No model call, and no real config or
+  credential is touched. The golden is separate from the layout golden, so
+  nothing there is re-baselined.
+  - **Claude:** per-turn, streaming and PTY load the user's server next to the
+    planted one without the flag, and only the planted one with it. Bare never
+    loads the user's server, so the flag changes nothing there. Strict with
+    nothing passed loads nothing, a working-directory `.mcp.json` included.
+  - **Codex:** the user's server loads with `CODEX_HOME` unset and not with it
+    set to the boot dir, which also leaves a project `.codex/config.toml`
+    unapplied. Measured by `codex mcp list` and by what `codex exec` spawned.
+    The app-server reads the same config and was confirmed by hand, not in the
+    script.
+  - **OpenCode has no MCP-only switch.** With `OPENCODE_CONFIG_DIR` the
+    user's and the project's servers load next to the planted ones. Only
+    whole-config isolation removed them (`XDG_CONFIG_HOME` at an empty
+    directory, and `OPENCODE_DISABLE_PROJECT_CONFIG=1`), which also drops every
+    other user and project setting. So none is offered.
+  - **Antigravity was not measured:** `agy` will not start without a login.
+  - **Not covered anywhere:** Claude's account connectors (they need a login)
+    and managed or plugin servers.
+- **Tests:** literal argv per shape, off and on, with and without a planted
+  config; the flag's position; every Claude shape added to the argv parity
+  cases, so the adapter path equals `ResolveTurn` for each; the registry's
+  claims against the adapters (a flag mode's adapter adds the flag when asked,
+  a layout mode's launch sets `CODEX_HOME`, and nothing else claims anything);
+  and each claim against the recorded golden.
 
 ### Documented
 

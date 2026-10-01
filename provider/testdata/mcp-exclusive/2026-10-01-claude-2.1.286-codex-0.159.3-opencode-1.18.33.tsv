@@ -1,0 +1,21 @@
+V	claude=2.1.286 (Claude Code)	codex=codex-cli 0.159.3	opencode=1.18.33
+R	claude	MCP1-print+mcp-config	mcp=planted-probe,user-probe spawned=planted-probe,user-probe
+R	claude	MCP2-print+mcp-config+strict	mcp=planted-probe spawned=planted-probe
+R	claude	MCP3-print+strict,nothing-passed	mcp= spawned=
+R	claude	MCP4-print,neither-flag	mcp=planted-probe,user-probe spawned=planted-probe,user-probe
+R	claude	MCP5-bare+mcp-config	mcp=planted-probe spawned=planted-probe
+R	claude	MCP6-bare+mcp-config+strict	mcp=planted-probe spawned=planted-probe
+R	claude	MCP7-streaming+mcp-config	mcp=planted-probe,user-probe spawned=planted-probe,user-probe
+R	claude	MCP8-streaming+mcp-config+strict	mcp=planted-probe spawned=planted-probe
+R	claude	MCP9-pty+mcp-config	spawned=planted-probe,user-probe
+R	claude	MCP10-pty+mcp-config+strict	spawned=planted-probe
+R	codex	MCP1-CODEX_HOME=default,cwd=boot	mcp=user-probe
+R	codex	MCP2-CODEX_HOME=boot	mcp=planted-probe
+R	codex	MCP3-CODEX_HOME=boot,cwd=project	mcp=planted-probe
+R	codex	MCP4-CODEX_HOME=default,cwd=project	mcp=user-probe
+R	codex	MCP5-exec,CODEX_HOME=default	spawned=user-probe
+R	codex	MCP6-exec,CODEX_HOME=boot	spawned=planted-probe
+R	opencode	MCP1-OPENCODE_CONFIG_DIR=boot	mcp=planted-probe,project-probe,user-probe
+R	opencode	MCP2-XDG_CONFIG_HOME=empty	mcp=planted-probe,project-probe
+R	opencode	MCP3-DISABLE_PROJECT_CONFIG	mcp=planted-probe,user-probe
+R	opencode	MCP4-XDG_CONFIG_HOME=empty+DISABLE_PROJECT_CONFIG	mcp=planted-probe

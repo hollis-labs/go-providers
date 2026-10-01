@@ -69,6 +69,11 @@ func argvCases(t *testing.T) []argvCase {
 		{"claude/print model", ClaudeAdapter{Model: "sonnet"}},
 		{"claude/streaming model", ClaudeAdapter{InputMode: "stream-json", Model: "sonnet"}},
 		{"claude/pty model", ClaudeAdapter{PTY: true, Model: "sonnet"}},
+		// MCPExclusive adds --strict-mcp-config in every shape (CW-20261001-0225).
+		{"claude/print exclusive", ClaudeAdapter{MCPExclusive: true}},
+		{"claude/print dev exclusive", ClaudeAdapter{SkipPermissions: true, MCPExclusive: true}},
+		{"claude/streaming exclusive", ClaudeAdapter{InputMode: "stream-json", MCPExclusive: true}},
+		{"claude/pty exclusive", ClaudeAdapter{PTY: true, MCPExclusive: true}},
 	} {
 		a := c.a
 		cases = append(cases, argvCase{c.name, project(&a, PlantContext{}, ProjectionOptions{}), claudeFields(a)})
@@ -76,6 +81,7 @@ func argvCases(t *testing.T) []argvCase {
 	cases = append(cases,
 		argvCase{"claude/bare", project(&ClaudeAdapter{Bare: true}, PlantContext{}, ProjectionOptions{}), bareFields(ClaudeAdapter{Bare: true}, false)},
 		argvCase{"claude/bare model", project(&ClaudeAdapter{Bare: true, Model: "sonnet"}, PlantContext{}, ProjectionOptions{}), bareFields(ClaudeAdapter{Bare: true, Model: "sonnet"}, false)},
+		argvCase{"claude/bare exclusive", project(&ClaudeAdapter{Bare: true, MCPExclusive: true}, PlantContext{}, ProjectionOptions{}), bareFields(ClaudeAdapter{Bare: true, MCPExclusive: true}, false)},
 		argvCase{"claude/bare dev with skills", project(&ClaudeAdapter{Bare: true, SkipPermissions: true}, PlantContext{}, skills), bareFields(ClaudeAdapter{Bare: true, SkipPermissions: true}, true)},
 		argvCase{"codex/exec", project(NewCodexAdapter(), PlantContext{}, ProjectionOptions{}), &CodexAdapter{ProjectDir: proj}},
 		argvCase{"codex/app-server", project(NewCodexAdapterAppServer(), PlantContext{}, ProjectionOptions{}), NewCodexAdapterAppServer()},
