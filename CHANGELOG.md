@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.33.0 — 2026-10-01
 
 One argv owner (CW-20260930-0135, go-providers half). Each runtime's argv is
 built in one place, `provider/argv.go`; a `ProviderProjection` resolves it
@@ -43,8 +43,16 @@ produce the same argv for the same launch, turn by turn.
   (`-p=<prompt>`, was `-p <prompt>`) and it carries the permission, model,
   effort and agent flags. The projected opencode prompt carries the system
   prompt as `BuildArgs` does.
-- `ProviderFeature` and `CapabilitySupport` are aliases of `registry.Feature`
-  and `registry.Support`; the constants keep their names and values.
+
+### Removed
+
+- **Breaking:** `provider.ProviderFeature`, `provider.CapabilitySupport` and
+  their constants (`provider.FeatureInstructions` … `provider.FeatureTrust`,
+  `provider.SupportProjected`/`SupportExplicit`/`SupportUnsupported`). The
+  vocabulary now lives with the per-runtime facts in package `registry`: use
+  `registry.Feature`, `registry.Support` and their constants (same names and
+  string values). `ProjectionOptions.RequiredFeatures` is
+  `[]registry.Feature` and `ProjectionDiagnostic.Feature` a `registry.Feature`.
 
 ## v0.32.0 — 2026-10-01
 

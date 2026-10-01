@@ -27,33 +27,6 @@ var (
 	shapeHTTPSSE   = layout.Shape{Mode: runtimes.ModeHTTPSSE}
 )
 
-// ProviderFeature is a named provider capability that callers may require
-// before accepting a projection. The vocabulary lives with the per-runtime
-// facts in package registry.
-type ProviderFeature = registry.Feature
-
-const (
-	FeatureInstructions = registry.FeatureInstructions
-	FeatureNativeConfig = registry.FeatureNativeConfig
-	FeatureMCP          = registry.FeatureMCP
-	FeatureSkillTrees   = registry.FeatureSkillTrees
-	FeatureHooks        = registry.FeatureHooks
-	FeatureCommands     = registry.FeatureCommands
-	FeatureSubagents    = registry.FeatureSubagents
-	FeatureCredential   = registry.FeatureCredential
-	FeatureTrust        = registry.FeatureTrust
-)
-
-// CapabilitySupport records whether a feature is projected by this package,
-// known to the provider but left to another phase, or unsupported.
-type CapabilitySupport = registry.Support
-
-const (
-	SupportProjected   = registry.SupportProjected
-	SupportExplicit    = registry.SupportExplicit
-	SupportUnsupported = registry.SupportUnsupported
-)
-
 // ProviderCapabilityRow is the exported capability matrix for provider
 // projection. TestedVersion is the executable version used for the M06
 // contract fixtures in this worktree.
@@ -115,7 +88,7 @@ func projectionShapes(d registry.Descriptor) []layout.Shape {
 	return out
 }
 
-func featureMap(in map[ProviderFeature]CapabilitySupport) map[string]string {
+func featureMap(in map[registry.Feature]registry.Support) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[string(k)] = string(v)
@@ -128,7 +101,7 @@ func featureMap(in map[ProviderFeature]CapabilitySupport) map[string]string {
 type ProjectionOptions struct {
 	Version          string
 	Skills           []SkillPackage
-	RequiredFeatures []ProviderFeature
+	RequiredFeatures []registry.Feature
 }
 
 // ProjectionProvider is implemented by adapters that can render provider-owned
@@ -344,9 +317,9 @@ type ProviderEffect struct {
 
 // ProjectionDiagnostic reports unsupported or deferred features.
 type ProjectionDiagnostic struct {
-	Feature ProviderFeature `json:"feature,omitempty"`
-	Code    string          `json:"code"`
-	Message string          `json:"message"`
+	Feature registry.Feature `json:"feature,omitempty"`
+	Code    string           `json:"code"`
+	Message string           `json:"message"`
 }
 
 // ProviderProjection is the pure output of provider layout projection.
@@ -743,7 +716,7 @@ func ApplyEnvDeltas(base []string, deltas []EnvDelta) []string {
 	return out
 }
 
-func requireProjectedFeatures(proj ProviderProjection, required []ProviderFeature) (ProviderProjection, error) {
+func requireProjectedFeatures(proj ProviderProjection, required []registry.Feature) (ProviderProjection, error) {
 	if len(required) == 0 {
 		return proj, nil
 	}
@@ -754,12 +727,12 @@ func requireProjectedFeatures(proj ProviderProjection, required []ProviderFeatur
 	}
 	var diagnostics []ProjectionDiagnostic
 	for _, f := range required {
-		status := CapabilitySupport(row.Features[string(f)])
-		if status == SupportProjected {
+		status := registry.Support(row.Features[string(f)])
+		if status == registry.SupportProjected {
 			continue
 		}
 		msg := fmt.Sprintf("%s/%s does not project required feature %q", proj.Provider, shape, f)
-		if status == SupportExplicit {
+		if status == registry.SupportExplicit {
 			msg += "; it requires explicit runtime preparation"
 		}
 		diagnostics = append(diagnostics, ProjectionDiagnostic{Feature: f, Code: "unsupported_feature", Message: msg})

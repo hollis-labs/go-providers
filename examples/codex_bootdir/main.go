@@ -26,6 +26,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 func main() {
@@ -58,10 +59,10 @@ func main() {
 	}
 
 	proj, err := adapter.ProviderProjection(plantCtx, provider.ProjectionOptions{
-		RequiredFeatures: []provider.ProviderFeature{
-			provider.FeatureInstructions,
-			provider.FeatureNativeConfig,
-			provider.FeatureMCP,
+		RequiredFeatures: []registry.Feature{
+			registry.FeatureInstructions,
+			registry.FeatureNativeConfig,
+			registry.FeatureMCP,
 		},
 	})
 	if err != nil {

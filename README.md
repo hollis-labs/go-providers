@@ -251,11 +251,11 @@ proj, err := provider.NewCodexAdapter().ProviderProjection(ctx, provider.Project
             {RelPath: "scripts/run.sh", Content: []byte("#!/bin/sh\ngo test ./...\n"), Mode: 0o755},
         },
     }},
-    RequiredFeatures: []provider.ProviderFeature{
-        provider.FeatureInstructions,
-        provider.FeatureNativeConfig,
-        provider.FeatureMCP,
-        provider.FeatureSkillTrees,
+    RequiredFeatures: []registry.Feature{
+        registry.FeatureInstructions,
+        registry.FeatureNativeConfig,
+        registry.FeatureMCP,
+        registry.FeatureSkillTrees,
     },
 })
 if err != nil {
