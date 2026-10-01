@@ -275,6 +275,8 @@ func (c *capturer) codex() {
 			initialize(r)
 			r.call("thread/resume", map[string]any{"threadId": lostID})
 		})
+		// thread/start's per-thread approvalPolicy still took "untrusted" on
+		// codex-cli 0.159.2; the config key does not (CW-20261001-0127).
 		c.duplex("app_server_tool_approval", "codex", []string{"app-server"}, func(d *duplexSession) {
 			r := rpc(d)
 			initialize(r)
