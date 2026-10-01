@@ -30,8 +30,8 @@ type Event interface {
 //
 // Phase distinguishes streaming narration ("narration") from the
 // terminal-result text ("final") and from text emitted inside thinking
-// blocks ("thinking"). Empty Phase means the adapter did not classify
-// the fragment.
+// blocks ("thought", llmtypes.PhaseThinking). Empty Phase means the
+// adapter did not classify the fragment.
 type Delta struct {
 	Text  string
 	Phase string
