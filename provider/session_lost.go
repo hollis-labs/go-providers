@@ -27,7 +27,7 @@ type SessionLostClassifier interface {
 // requested session. Antigravity needs this because it answers an unknown
 // conversation id by silently starting a new conversation (a stderr warning,
 // exit 0), where claude and opencode fail the turn instead and are covered
-// by SessionLostClassifier. The session layer compares the id it passed to
+// by SessionLostClassifier (claude in print and streaming stdio modes). The session layer compares the id it passed to
 // BuildArgs with the first session id the turn reports.
 type SessionResumeVerifier interface {
 	ResumeKeepsSessionID() bool
