@@ -198,3 +198,210 @@ func TestTranslateStreamEventsKeepsTheDoneText(t *testing.T) {
 		t.Fatalf("got %+v, want a done carrying the text", got[0])
 	}
 }
+
+// ocLine builds one `opencode run --format json` line.
+func ocLine(t *testing.T, typ, session string, part map[string]any) []byte {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"type": typ, "sessionID": session, "part": part})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func ocText(t *testing.T, session, id, text string) []byte {
+	return ocLine(t, "text", session, map[string]any{"id": id, "type": "text", "text": text})
+}
+
+func ocStep(t *testing.T, typ, session, id, reason string) []byte {
+	part := map[string]any{"id": id, "type": strings.ReplaceAll(typ, "_", "-")}
+	if reason != "" {
+		part["reason"] = reason
+	}
+	return ocLine(t, typ, session, part)
+}
+
+// feedOpencode runs lines through the adapter on both parse surfaces, twice each,
+// as a session that taps the adapter can, and returns the text of every done,
+// requiring the four calls to agree.
+func feedOpencode(t *testing.T, a *OpencodeAdapter, lines ...[]byte) []string {
+	t.Helper()
+	var dones []string
+	for _, line := range lines {
+		var texts []string
+		for range 2 {
+			stream, _ := a.ParseLine(line)
+			for _, ev := range stream {
+				if ev.Type == llmtypes.EventDone {
+					texts = append(texts, ev.Content)
+				}
+			}
+			typed, _ := a.ParseLineEvents(line)
+			for _, ev := range typed {
+				if d, ok := ev.(events.Done); ok {
+					texts = append(texts, d.Text)
+				}
+			}
+		}
+		if len(texts) == 0 {
+			continue
+		}
+		if len(texts) != 4 {
+			t.Fatalf("%d done(s) from four parses of %s, want 4 or none", len(texts), line)
+		}
+		for _, x := range texts[1:] {
+			if x != texts[0] {
+				t.Fatalf("the parses of %s disagree: %q", line, texts)
+			}
+		}
+		dones = append(dones, texts[0])
+	}
+	return dones
+}
+
+func TestOpenCodeDoneCarriesTheFinalStepText(t *testing.T) {
+	const s = "ses_1"
+
+	t.Run("captured turns", func(t *testing.T) {
+		for _, tc := range []struct{ fixture, want string }{
+			{"opencode/run_turn1.jsonl", "OK."},
+			{"opencode/run_tool_use.jsonl", "hello fixture"},
+		} {
+			dones := feedOpencode(t, NewOpencodeAdapter(), providertest.FixtureLines(t, tc.fixture)...)
+			if len(dones) != 1 || dones[0] != tc.want {
+				t.Errorf("%s: done text %q, want %q", tc.fixture, dones, tc.want)
+			}
+		}
+	})
+
+	t.Run("only the step that ends the turn", func(t *testing.T) {
+		dones := feedOpencode(t, NewOpencodeAdapter(),
+			ocStep(t, "step_start", s, "p1", ""),
+			ocText(t, s, "p2", "I'll check the tests."),
+			ocLine(t, "tool_use", s, map[string]any{"id": "p3", "type": "tool", "tool": "bash", "callID": "c1"}),
+			ocStep(t, "step_finish", s, "p4", "tool-calls"),
+			ocStep(t, "step_start", s, "p5", ""),
+			ocText(t, s, "p6", "All green."),
+			ocStep(t, "step_finish", s, "p7", "stop"),
+		)
+		if len(dones) != 1 || dones[0] != "All green." {
+			t.Fatalf("done text %q, want only the last step's", dones)
+		}
+	})
+
+	t.Run("several text parts in the last step", func(t *testing.T) {
+		dones := feedOpencode(t, NewOpencodeAdapter(),
+			ocStep(t, "step_start", s, "p1", ""),
+			ocText(t, s, "p2", "First."),
+			ocLine(t, "reasoning", s, map[string]any{"id": "p3", "type": "reasoning", "text": "private thoughts"}),
+			ocText(t, s, "p4", "Second."),
+			ocStep(t, "step_finish", s, "p5", "stop"),
+		)
+		if len(dones) != 1 || dones[0] != "First.\n\nSecond." {
+			t.Fatalf("done text %q, want the text parts without the reasoning", dones)
+		}
+	})
+
+	t.Run("a last step with no text has no final text", func(t *testing.T) {
+		dones := feedOpencode(t, NewOpencodeAdapter(),
+			ocStep(t, "step_start", s, "p1", ""),
+			ocText(t, s, "p2", "Working on it."),
+			ocStep(t, "step_finish", s, "p3", "tool-calls"),
+			ocStep(t, "step_start", s, "p4", ""),
+			ocStep(t, "step_finish", s, "p5", "stop"),
+		)
+		if len(dones) != 1 || dones[0] != "" {
+			t.Fatalf("done text %q, want none: the earlier step's text is not the answer", dones)
+		}
+	})
+
+	t.Run("a failed step reports no done", func(t *testing.T) {
+		dones := feedOpencode(t, NewOpencodeAdapter(),
+			ocStep(t, "step_start", s, "p1", ""),
+			ocText(t, s, "p2", "partial"),
+			ocStep(t, "step_finish", s, "p3", "error"),
+		)
+		if len(dones) != 0 {
+			t.Fatalf("got done text %q for a failed step", dones)
+		}
+	})
+
+	t.Run("sessions do not mix", func(t *testing.T) {
+		dones := feedOpencode(t, NewOpencodeAdapter(),
+			ocStep(t, "step_start", "ses_a", "a1", ""),
+			ocStep(t, "step_start", "ses_b", "b1", ""),
+			ocText(t, "ses_a", "a2", "answer of a"),
+			ocText(t, "ses_b", "b2", "answer of b"),
+			ocStep(t, "step_finish", "ses_b", "b3", "stop"),
+			ocStep(t, "step_finish", "ses_a", "a3", "stop"),
+		)
+		if len(dones) != 2 || dones[0] != "answer of b" || dones[1] != "answer of a" {
+			t.Fatalf("done text %q, want each session's own", dones)
+		}
+	})
+
+	t.Run("a second turn does not inherit the first", func(t *testing.T) {
+		a := NewOpencodeAdapter()
+		first := feedOpencode(t, a,
+			ocStep(t, "step_start", s, "p1", ""), ocText(t, s, "p2", "one"), ocStep(t, "step_finish", s, "p3", "stop"))
+		second := feedOpencode(t, a,
+			ocStep(t, "step_start", s, "p4", ""), ocText(t, s, "p5", "two"), ocStep(t, "step_finish", s, "p6", "stop"))
+		if len(first) != 1 || first[0] != "one" || len(second) != 1 || second[0] != "two" {
+			t.Fatalf("first %q, second %q", first, second)
+		}
+	})
+
+	t.Run("a literal adapter works and a stateless parse reports no text", func(t *testing.T) {
+		dones := feedOpencode(t, &OpencodeAdapter{},
+			ocStep(t, "step_start", s, "p1", ""), ocText(t, s, "p2", "hi"), ocStep(t, "step_finish", s, "p3", "stop"))
+		if len(dones) != 1 || dones[0] != "hi" {
+			t.Fatalf("done text %q", dones)
+		}
+		for _, ev := range parseOpencodeStreamLine(ocStep(t, "step_finish", s, "p4", "stop")) {
+			if ev.Type == llmtypes.EventDone && ev.Content != "" {
+				t.Fatalf("a stateless parse reported %q", ev.Content)
+			}
+		}
+	})
+
+	t.Run("serve-http reports nothing", func(t *testing.T) {
+		a := NewOpencodeAdapterServeHTTP()
+		if stream, _ := a.ParseLine(ocText(t, s, "p1", "hi")); len(stream) != 0 {
+			t.Fatalf("serve-http parse reported %+v", stream)
+		}
+	})
+}
+
+// agy writes a message as several updates of one step; the step's index tells
+// one message from the next.
+func TestAntigravityDeltasCarryTheirStepAsBlockID(t *testing.T) {
+	a := NewAntigravityAdapter()
+	blocks := map[string]string{}
+	var order []string
+	for _, line := range providertest.FixtureLines(t, "antigravity/print_mcp_tool.jsonl") {
+		stream, _ := a.ParseLine(line)
+		typed, _ := a.ParseLineEvents(line)
+		var fromStream, fromTyped []string
+		for _, ev := range stream {
+			if ev.Type == llmtypes.EventDelta {
+				fromStream = append(fromStream, ev.BlockID)
+				if _, seen := blocks[ev.BlockID]; !seen {
+					order = append(order, ev.BlockID)
+				}
+				blocks[ev.BlockID] += ev.Content
+			}
+		}
+		for _, ev := range typed {
+			if d, ok := ev.(events.Delta); ok {
+				fromTyped = append(fromTyped, d.BlockID)
+			}
+		}
+		if strings.Join(fromStream, ",") != strings.Join(fromTyped, ",") {
+			t.Fatalf("surfaces disagree on block ids: %v vs %v", fromStream, fromTyped)
+		}
+	}
+	if len(order) != 1 || order[0] != "step-5" ||
+		strings.TrimSpace(blocks["step-5"]) != "MCP=SECRET-WORD-MAGNOLIA; ADR=WORKSPACE-OVERRIDE-MARKER skill for probing precedence" {
+		t.Fatalf("blocks %v %v, want the one message under step-5", order, blocks)
+	}
+}

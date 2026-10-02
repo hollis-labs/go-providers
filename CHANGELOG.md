@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.45.0 — 2026-10-02
+
+OpenCode's final message and agy's message blocks (CW-20261002-0061, ADR 0049).
+Builds on v0.44.0's `events.Done.Text`.
+
+### Added
+
+- **`opencode run`: the done carries the turn's final message.** opencode marks
+  no text part as the answer, but a turn is a run of steps and the last says so:
+  a step that ends in tool calls has reason `tool-calls` and the turn goes on, any
+  other reason ends it. The adapter now keeps the text parts of the step in
+  progress, and the done that `step_finish` emits carries them, in order a blank
+  line apart, as `events.Done.Text` and `EventDone.Content`. Reasoning parts and
+  the text of earlier steps are not in it. A last step that wrote no text reports
+  none, rather than an earlier step's narration.
+  - The memory is per opencode session, reset at each `step_start`, and
+    idempotent, because a session calls both `ParseLine` and `ParseLineEvents`
+    for every line. A parse with no memory (the package-level function) reports
+    no text, as before.
+  - `OpencodeAdapter` gains an unexported pointer field, allocated on first use,
+    so the adapter stays copyable and a literal `OpencodeAdapter{}` works.
+  - `serve-http` is unchanged: its events come from the SSE stream in
+    agentkit's session, not from the adapter.
+- **agy: each delta carries its `agent_response` step as its block id**
+  (`step-<index>`, on both surfaces), so a consumer can tell one message from
+  the next. The step index is unique within the conversation.
+
+### Tests
+
+- The captured `run_turn1` and `run_tool_use` fixtures, and synthetic turns for
+  a final step after a tool-calling one, several text parts, a last step with no
+  text, a failed step, two sessions interleaved on one adapter and two turns in a
+  row, each parsed twice on both surfaces. Breaking the per-session key, the
+  reset at `step_start` or the done's text fails them; so does dropping agy's
+  block id.
+
+### Not covered
+
+- OpenCode `serve` (agentkit's HTTP session) reports no final message.
+- agy's `Done.Text` (v0.44.0) is the runtime's own `result.response`; this
+  release only adds its block ids.
+
 ## v0.44.0 — 2026-10-02
 
 The turn's own final message reaches the consumer for Claude and Antigravity

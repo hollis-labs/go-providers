@@ -30,7 +30,10 @@ import (
 //     size, not a count to sum, and is not read.
 //
 // Each text and reasoning line is one whole part, so its part id is the
-// block id.
+// block id. opencode marks no part as the answer, but a step that ends the
+// turn says so itself, so the adapter keeps the current step's text parts and
+// the done that step_finish emits carries them as the turn's final message
+// (see opencodeStepText).
 //   - error       → error. opencode exits non-zero after writing it.
 //
 // Unknown types and lines that are not JSON (opencode prints warnings such
@@ -153,13 +156,23 @@ func (t *opencodeStepTokens) usage(reason string, cost float64) llmtypes.Usage {
 	}
 }
 
+// parseOpencodeStreamLine is parseOpencodeStreamLineWith with no step memory,
+// so a done it reports carries no final text.
 func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
+	return parseOpencodeStreamLineWith(nil, line)
+}
+
+// parseOpencodeStreamLineWith maps one line. steps remembers the text of the
+// step in progress; the step that ends the turn reports it as the done's final
+// message.
+func parseOpencodeStreamLineWith(steps *opencodeStepText, line []byte) []llmtypes.StreamEvent {
 	ev, ok := decodeOpencodeLine(line)
 	if !ok {
 		return nil
 	}
 	switch ev.Type {
 	case "step_start":
+		steps.start(ev.SessionID)
 		if ev.SessionID == "" {
 			return nil
 		}
@@ -168,6 +181,7 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 		if ev.Part.Text == "" {
 			return nil
 		}
+		steps.add(ev.SessionID, ev.Part.ID, ev.Part.Text)
 		return []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: ev.Part.Text, BlockID: ev.Part.ID}}
 	case "reasoning":
 		if ev.Part.Text == "" {
@@ -192,7 +206,7 @@ func parseOpencodeStreamLine(line []byte) []llmtypes.StreamEvent {
 			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &u})
 		}
 		if opencodeStepEndsTurn(ev.Part.Reason) {
-			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+			out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDone, Content: steps.final(ev.SessionID)})
 		}
 		return out
 	case "error":
@@ -217,6 +231,7 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 	}
 	switch ev.Type {
 	case "step_start":
+		a.stepText().start(ev.SessionID)
 		if ev.SessionID == "" {
 			return nil, nil
 		}
@@ -225,6 +240,7 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 		if ev.Part.Text == "" {
 			return nil, nil
 		}
+		a.stepText().add(ev.SessionID, ev.Part.ID, ev.Part.Text)
 		return []events.Event{events.Delta{Text: ev.Part.Text, BlockID: ev.Part.ID}}, nil
 	case "reasoning":
 		if ev.Part.Text == "" {
@@ -255,7 +271,7 @@ func (a *OpencodeAdapter) ParseLineEvents(line []byte) ([]events.Event, error) {
 			})
 		}
 		if opencodeStepEndsTurn(ev.Part.Reason) {
-			out = append(out, events.Done{StopReason: llmtypes.NormalizeStopReason(ev.Part.Reason)})
+			out = append(out, events.Done{StopReason: llmtypes.NormalizeStopReason(ev.Part.Reason), Text: a.stepText().final(ev.SessionID)})
 		}
 		return out, nil
 	case "error":

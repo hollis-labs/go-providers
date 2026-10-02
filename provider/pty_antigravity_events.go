@@ -15,7 +15,8 @@ import (
 //
 //   - init → session id (init.conversation_id), once per process
 //   - step_update, keyed by step_type and state (ACTIVE, DONE, ERROR):
-//     agent_response carries text_delta → delta, and on DONE its usage →
+//     agent_response carries text_delta → delta (the step's index is its block
+//     id), and on DONE its usage →
 //     usage for that step. A turn with tool calls has several agent_response
 //     steps; usage is per step and consumers sum it. output_tokens already
 //     include thinking_tokens (total = input + output), and thinking text
@@ -95,6 +96,12 @@ func decodeAgyLine(line []byte) (agyLine, bool) {
 
 func agyToolID(s *agyStepUpdate) string { return "step-" + strconv.Itoa(s.StepIndex) }
 
+// agyBlockID identifies the content block a text_delta belongs to: an
+// agent_response step writes one message as several updates, all with the step's
+// index, and the next step has the next index. The index is unique within the
+// conversation, so it tells consecutive messages apart.
+func agyBlockID(s *agyStepUpdate) string { return "step-" + strconv.Itoa(s.StepIndex) }
+
 func (u *agyUsage) usage() llmtypes.Usage {
 	return llmtypes.Usage{
 		InputTokens:     u.InputTokens,
@@ -130,7 +137,7 @@ func parseAntigravityStreamLine(line []byte) []llmtypes.StreamEvent {
 		case "agent_response":
 			var out []llmtypes.StreamEvent
 			if s.TextDelta != "" {
-				out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: s.TextDelta})
+				out = append(out, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: s.TextDelta, BlockID: agyBlockID(s)})
 			}
 			if s.State == "DONE" && s.Usage != nil {
 				u := s.Usage.usage()
@@ -191,7 +198,7 @@ func (a *AntigravityAdapter) ParseLineEvents(line []byte) ([]events.Event, error
 		case "agent_response":
 			var out []events.Event
 			if s.TextDelta != "" {
-				out = append(out, events.Delta{Text: s.TextDelta})
+				out = append(out, events.Delta{Text: s.TextDelta, BlockID: agyBlockID(s)})
 			}
 			if s.State == "DONE" && s.Usage != nil {
 				out = append(out, events.Usage{
