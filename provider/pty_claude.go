@@ -367,6 +367,28 @@ type claudeResultEvent struct {
 	// claude_cost.go for how they become a per-turn cost.
 	TotalCostUSD *float64                    `json:"total_cost_usd,omitempty"`
 	ModelUsage   map[string]claudeModelUsage `json:"modelUsage,omitempty"`
+	// PermissionDenials is the CLI's own record of the tool calls it refused
+	// this turn because they needed an approval it could not ask for (empty
+	// when none): the tool, the call's id and its input.
+	PermissionDenials []claudePermissionDenial `json:"permission_denials,omitempty"`
+}
+
+// claudePermissionDenial is one entry of a result's permission_denials.
+type claudePermissionDenial struct {
+	ToolName  string         `json:"tool_name"`
+	ToolUseID string         `json:"tool_use_id"`
+	ToolInput map[string]any `json:"tool_input"`
+}
+
+// claudeDenialLabel is what to show for a refused tool call: the command or
+// path it was about to act on, else its description, else the tool's name.
+func claudeDenialLabel(d claudePermissionDenial) string {
+	for _, key := range []string{"command", "file_path", "path", "url", "description"} {
+		if v, ok := d.ToolInput[key].(string); ok && v != "" {
+			return truncate(v, 256)
+		}
+	}
+	return d.ToolName
 }
 
 // claudeBlockID identifies one content block of an assistant event. Claude

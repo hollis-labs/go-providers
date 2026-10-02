@@ -191,9 +191,19 @@ func (AuthFailed) eventTag() {}
 // PermissionDenied reports a tool action the CLI refused because it needed
 // an approval that headless mode cannot ask for. The turn still completes,
 // so without this event the refusal is a silent no-op. Non-terminal.
+//
+// A CLI that records its refusals when the turn ends (Claude's
+// result.permission_denials, agy's result.denied_actions) reports them just
+// before the done, so the event's position says nothing about when the
+// action was refused: ToolUseID names the tool call that was, where the CLI
+// says, so a consumer can tell a refusal the turn ended on from one the agent
+// worked around by calling other tools afterwards.
 type PermissionDenied struct {
 	Action      string
 	DisplayName string
+	// ToolUseID is the ID of the refused ToolUse, when the CLI names it.
+	// Empty when it does not (agy).
+	ToolUseID string
 }
 
 func (PermissionDenied) eventTag() {}

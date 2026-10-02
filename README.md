@@ -196,7 +196,10 @@ ctx := provider.WithEvents(ctx, func(ev events.Event) {
     case events.SessionID:
         // the CLI's session id (all four adapters); informational
     case events.PermissionDenied:
-        // a tool action refused because headless mode cannot ask (agy); non-terminal
+        // a tool action refused because headless mode cannot ask (agy, claude);
+        // non-terminal. e.ToolUseID names the refused ToolUse when the CLI says
+        // (claude), so a refusal the turn ended on can be told from one the agent
+        // worked around
     case events.SessionLost, events.AuthFailed:
         // emitted by the session layer that owns the stored id and runs the
         // classifiers, not by the adapters
