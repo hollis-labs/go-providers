@@ -177,6 +177,11 @@ func parseClaudeResultTyped(line []byte) ([]events.Event, error) {
 	}
 
 	var out []events.Event
+	// The refusals the CLI recorded this turn come first, as agy's do, so a
+	// consumer has them before the turn ends.
+	for _, d := range ev.PermissionDenials {
+		out = append(out, events.PermissionDenied{Action: d.ToolName, DisplayName: claudeDenialLabel(d), ToolUseID: d.ToolUseID})
+	}
 	stopReason := claudeStopReason(ev.StopReason)
 	if ev.Usage != nil {
 		out = append(out, events.Usage{

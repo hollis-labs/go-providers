@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.46.0 — 2026-10-02
+
+Claude's refusals are reported (CW-20261002-0073, ADR 0049).
+
+### Added
+
+- **Claude: `result.permission_denials` is reported as a typed
+  `events.PermissionDenied` per refused tool call, before the done.** When Claude
+  cannot ask for an approval (headless), it refuses the tool call and says so in
+  the result event's `permission_denials` (tool, call id, input). The adapters
+  dropped it, so a refusal was a silent no-op on every surface: the turn
+  completed and nothing said an action had not happened. agy's
+  `denied_actions` were already reported this way. `Action` is the tool's name;
+  `DisplayName` is what it was about to act on (its command, else file path, path,
+  URL or description, cut at 256 bytes), else the tool's name. The legacy stream is
+  unchanged: a denial has no `StreamEvent` form. A consumer attached to a
+  session's byte output now sees a `[permission_denied:…]` line for it, as for
+  agy.
+- **`events.PermissionDenied.ToolUseID`** names the refused `ToolUse` when the CLI
+  says (Claude's `tool_use_id`; empty for agy, whose `denied_actions` carry none).
+  A CLI that records its refusals when the turn ends reports them just before the
+  done, so the event's position says nothing about when the action was refused;
+  the id lets a consumer find the call and tell a refusal the turn ended on from
+  one the agent worked around by calling other tools afterwards. Additive: the
+  zero value is the old event, and a consumer that ignores it behaves as before.
+
+### Tests
+
+- The captured `claude/print_tool_denied` turn: exactly one denial, naming the
+  `Bash` call, its command and its call id, after the `ToolUse` it refers to and
+  before the done. Every other Claude capture (print, resume, tool use, the three
+  streaming transcripts) refused nothing and reports nothing. A table for the
+  label choice, two refusals in order and a long command. Dropping the event, its
+  id, its position or the label order fails them.
+
+### Not covered
+
+- Claude's `AskUserQuestion` appears in no capture. In headless mode it is
+  expected to be refused like any other tool that needs a person (and so to show
+  up in `permission_denials`), but that is not verified here.
+
 ## v0.45.0 — 2026-10-02
 
 OpenCode's final message and agy's message blocks (CW-20261002-0061, ADR 0049).
