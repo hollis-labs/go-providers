@@ -106,11 +106,12 @@ func (Usage) eventTag() {}
 type Done struct {
 	StopReason string
 	// Text is the turn's final message when the provider reports it on its
-	// terminal event: Claude's result.result, agy's result.response. It is
-	// the one string a consumer wants as "what the agent said", with nothing to
-	// reconstruct from deltas, so a consumer can mark it exact. Empty when the
-	// provider reports none (Codex, OpenCode), which is not the same as the
-	// agent having said nothing.
+	// terminal event: Claude's result.result, agy's result.response, and for
+	// opencode run the text of the step that ends the turn. It is the one string
+	// a consumer wants as "what the agent said", with nothing to reconstruct from
+	// deltas, so a consumer can mark it exact. Empty when the provider reports
+	// none (Codex exec marks its final delta with phase final instead), which is
+	// not the same as the agent having said nothing.
 	Text string
 }
 

@@ -203,7 +203,8 @@ ctx := provider.WithEvents(ctx, func(ev events.Event) {
     case events.Done:
         // turn-terminal success; e.Text is the turn's own final message when the
         // provider reports one on its terminal event (claude result.result, agy
-        // result.response), empty for codex and opencode
+        // result.response, the last step of an opencode run), empty for codex,
+        // whose final delta is marked with phase "final" instead
     case events.Error:
         // turn-terminal failure with e.Err (Go error) and/or e.Message
     }

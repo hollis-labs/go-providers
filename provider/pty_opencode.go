@@ -62,6 +62,12 @@ type OpencodeAdapter struct {
 
 	// Dir optionally sets the agent's working directory via --dir.
 	Dir string
+
+	// steps is the text of the step in progress, per opencode session, kept so
+	// the step that ends a turn can report it as the final message. It is a
+	// pointer, allocated on first use (see stepText), so the adapter stays
+	// copyable; copies share it, which is safe because it is keyed by session.
+	steps *opencodeStepText
 }
 
 func NewOpencodeAdapter() *OpencodeAdapter { return &OpencodeAdapter{} }
@@ -96,7 +102,7 @@ func (a *OpencodeAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error)
 		// for server diagnostics and listen-URL discovery.
 		return nil, nil
 	}
-	return parseOpencodeStreamLine(line), nil
+	return parseOpencodeStreamLineWith(a.stepText(), line), nil
 }
 
 func (a *OpencodeAdapter) Detect() (string, bool) {
