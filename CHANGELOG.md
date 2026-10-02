@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.44.0 — 2026-10-02
+
+The turn's own final message reaches the consumer for Claude and Antigravity
+(CW-20261002-0061, ADR 0049).
+
+### Added
+
+- **`events.Done.Text`**: the turn's final message when the provider reports it
+  on its terminal event. A consumer that wants "what the agent said" no longer
+  guesses the last text block, so it can treat the text as exact. Empty when the
+  provider reports none, which is not the same as the agent having said nothing.
+- **On the legacy stream, `EventDone.Content` carries the same text.** Content
+  on an `EventDone` is the turn's own final text, never a fragment to append to
+  a delta; nothing in agentkit or go-agent-wrapper reads it there, so existing
+  consumers are unaffected. `translateStreamEvents` carries it into the typed
+  `Done` for adapters with no typed parser.
+- **Claude** (`print`, streaming-stdio, PTY): the `result` event's `result`,
+  which the adapters dropped until now. It is the same words as the last
+  assistant text block of the turn. A failed result is still an error carrying
+  its message, with no done.
+- **Antigravity**: the `result` event's `response`, the text of the turn's last
+  `agent_response` step.
+
+### Tests
+
+- Every captured Claude fixture (`print_turn1`, `print_turn2_resume`,
+  `print_tool_use`, `print_tool_denied`, and the `stream_resume` and
+  `stream_two_turns` transcripts) and every successful Antigravity one: the
+  done's text equals the last message the agent wrote in the same capture, on
+  both the legacy and typed surfaces. Dropping the text at any of the five
+  places it is set fails these tests.
+
+### Not covered
+
+- Codex `exec` and OpenCode report no final text on their terminal events, so
+  they stay with the consumer's last-block guess. Codex `exec` already marks its
+  final message with phase `final`; OpenCode's text parts carry no marker, which
+  needs a per-turn view across lines and is separate work.
+
 ## v0.43.0 — 2026-10-01
 
 A launch can be kept to the MCP servers it plants (CW-20261001-0225), and the

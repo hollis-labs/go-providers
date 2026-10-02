@@ -510,7 +510,10 @@ func parseClaudeResult(line []byte) ([]llmtypes.StreamEvent, error) {
 		})
 	}
 
-	events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+	// result.result is the turn's final message, the same words as the last
+	// assistant text block, so it rides on the done event: Content on an
+	// EventDone is the turn's own final text, never a fragment to append.
+	events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventDone, Content: ev.Result})
 	return events, nil
 }
 

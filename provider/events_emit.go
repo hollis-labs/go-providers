@@ -117,7 +117,7 @@ func translateStreamEvents(in []llmtypes.StreamEvent) []events.Event {
 				})
 			}
 		case llmtypes.EventDone:
-			out = append(out, events.Done{})
+			out = append(out, events.Done{Text: ev.Content})
 		case llmtypes.EventError:
 			out = append(out, events.Error{Message: ev.Error})
 		case llmtypes.EventSessionID:

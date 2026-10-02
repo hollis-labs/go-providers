@@ -24,7 +24,8 @@ import (
 //     → a tool result on the typed surface (tool_info.output or
 //     tool_info.error.message). MCP calls are tool_name "call_mcp_tool".
 //     user_input and system_message steps carry nothing a consumer needs.
-//   - result → done (status SUCCESS) or error (status ERROR, result.error).
+//   - result → done (status SUCCESS) or error (status ERROR, result.error). The
+//     done carries result.response, the turn's final message, as its text.
 //     result.usage is the sum of the turn's step usage and is not emitted
 //     again. result.denied_actions lists auto-denied approvals, surfaced
 //     as events.PermissionDenied before done.
@@ -69,8 +70,11 @@ type agyUsage struct {
 }
 
 type agyResult struct {
-	Status        string `json:"status"`
-	Error         string `json:"error"`
+	Status string `json:"status"`
+	Error  string `json:"error"`
+	// Response is the turn's final message: the text of its last
+	// agent_response step.
+	Response      string `json:"response"`
 	DeniedActions []struct {
 		Action      string `json:"action"`
 		DisplayName string `json:"display_name"`
@@ -149,7 +153,7 @@ func parseAntigravityStreamLine(line []byte) []llmtypes.StreamEvent {
 			return nil
 		}
 		if ev.Result.Status == "SUCCESS" {
-			return []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}
+			return []llmtypes.StreamEvent{{Type: llmtypes.EventDone, Content: ev.Result.Response}}
 		}
 		return []llmtypes.StreamEvent{{Type: llmtypes.EventError, Error: agyResultError(ev.Result)}}
 	default:
@@ -224,7 +228,7 @@ func (a *AntigravityAdapter) ParseLineEvents(line []byte) ([]events.Event, error
 			out = append(out, events.PermissionDenied{Action: d.Action, DisplayName: d.DisplayName})
 		}
 		if r.Status == "SUCCESS" {
-			return append(out, events.Done{}), nil
+			return append(out, events.Done{Text: r.Response}), nil
 		}
 		return append(out, events.Error{Message: agyResultError(r)}), nil
 	default:
