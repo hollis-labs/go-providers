@@ -188,7 +188,7 @@ func parseClaudeResultTyped(line []byte) ([]events.Event, error) {
 			CostUSD:             claudeResultCost(ev),
 		})
 	}
-	out = append(out, events.Done{StopReason: stopReason})
+	out = append(out, events.Done{StopReason: stopReason, Text: ev.Result})
 	return out, nil
 }
 

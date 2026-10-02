@@ -105,6 +105,13 @@ func (Usage) eventTag() {}
 // Done is a terminal success event marking the end of a turn.
 type Done struct {
 	StopReason string
+	// Text is the turn's final message when the provider reports it on its
+	// terminal event: Claude's result.result, agy's result.response. It is
+	// the one string a consumer wants as "what the agent said", with nothing to
+	// reconstruct from deltas, so a consumer can mark it exact. Empty when the
+	// provider reports none (Codex, OpenCode), which is not the same as the
+	// agent having said nothing.
+	Text string
 }
 
 func (Done) eventTag() {}
