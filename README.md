@@ -1,5 +1,21 @@
 # go-providers
 
+## Moved to substrate
+
+This standalone repository is deprecated. New development lives in the
+[`github.com/hollis-labs/substrate/harness`](https://github.com/hollis-labs/substrate/tree/harness/v0.3.0/harness)
+module, released as **`harness/v0.3.0`**.
+
+```sh
+go get github.com/hollis-labs/substrate/harness@v0.3.0
+```
+
+Follow the [package and API migration guide](https://github.com/hollis-labs/substrate/blob/harness/v0.3.0/harness/docs/units/go-providers/MIGRATION.md) when updating imports;
+the consolidation can include API changes. Existing standalone tags and history
+are preserved. The documentation below describes the standalone releases and
+is retained for historical reference. Applications migrate separately; this
+redirect does not deploy or update any consumer.
+
 `go-providers` is a Go library that drives agent CLIs (Claude Code, Codex, OpenCode, Antigravity) through CLI-bridge adapters wrapped via PTY or plain subprocess, each bridge implementing go-llm-contracts' `Provider` interface. It also ships the runtime registry and cross-cutting primitives for the adapter layer — cost monitoring, scope guarding, progress-loop detection, per-line typed events, boot-dir spec metadata, and a decorator pipeline that layers monitors on top of any underlying provider.
 
 This library is **CLI/PTY-only**: it has no direct HTTP chat or embedding adapter and does not own the shared LLM contracts or rate-budget primitives. The shared transport-agnostic model types live in `github.com/hollis-labs/go-llm-types`, and the shared provider contracts (the `Provider` interface) and rate-budget primitives in `github.com/hollis-labs/go-llm-contracts`.

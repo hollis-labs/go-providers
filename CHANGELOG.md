@@ -1,5 +1,12 @@
 # Changelog
 
+## Repository retirement — 2026-10-09
+
+- Deprecated this standalone repository in favor of `github.com/hollis-labs/substrate/harness@v0.3.0`
+  ([migration guide](https://github.com/hollis-labs/substrate/blob/harness/v0.3.0/harness/docs/units/go-providers/MIGRATION.md)).
+- Preserved existing release tags and history. This documentation change does
+  not create a new standalone release or migrate applications.
+
 ## v0.46.0 — 2026-10-02
 
 Claude's refusals are reported (CW-20261002-0073, ADR 0049).
